@@ -10,8 +10,17 @@ import { Camera, CameraOff, Images, Loader2 } from 'lucide-react';
 import { decodeImageFile, decodeVideoFrame, nativeDetector } from '@/lib/qr-decode';
 
 export default function QrScanner({
-  onCode, paused = false, hint, className = '',
-}: { onCode: (code: string) => Promise<void> | void; paused?: boolean; hint?: string; className?: string }) {
+  onCode, paused = false, hint, className = '', idPrefix = 'pos', autoStart = false,
+}: {
+  onCode: (code: string) => Promise<void> | void;
+  paused?: boolean;
+  hint?: string;
+  className?: string;
+  /** Prefix for the button element ids (avoid duplicates when reused on a page) */
+  idPrefix?: string;
+  /** Open the camera as soon as the component mounts */
+  autoStart?: boolean;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -34,7 +43,7 @@ export default function QrScanner({
   }, []);
   useEffect(() => stop, [stop]);
 
-  const start = async () => {
+  const start = useCallback(async () => {
     setError('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -80,7 +89,13 @@ export default function QrScanner({
     } catch {
       setError('تعذر فتح الكاميرا — تأكد من منح الإذن أو استخدم البحث');
     }
-  };
+  }, []);
+
+  // Optional auto-start (e.g. when opened inside a modal)
+  const autoStartRef = useRef(autoStart);
+  useEffect(() => {
+    if (autoStartRef.current) start();
+  }, [start]);
 
   const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -111,12 +126,12 @@ export default function QrScanner({
         )}
       </div>
       <div className="mt-2 flex gap-2">
-        <button id="pos-camera-toggle" type="button" onClick={on ? stop : start}
+        <button id={`${idPrefix}-camera-toggle`} type="button" onClick={on ? stop : start}
           className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-extrabold transition active:scale-95 ${on ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'btn-primary !from-orange-600 !to-orange-500 !py-2.5'}`}>
           {on ? <CameraOff className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
           {on ? 'إيقاف الكاميرا' : 'مسح الكود'}
         </button>
-        <button id="pos-gallery" type="button" onClick={() => fileRef.current?.click()} disabled={busy} aria-label="صورة من المعرض"
+        <button id={`${idPrefix}-gallery`} type="button" onClick={() => fileRef.current?.click()} disabled={busy} aria-label="صورة من المعرض"
           className="btn-secondary flex items-center gap-1.5 !py-2.5 !px-3 text-sm">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Images className="h-4 w-4" />}
         </button>
