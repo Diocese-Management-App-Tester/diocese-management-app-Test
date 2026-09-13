@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bell } from 'lucide-react';
+import { Bell, type LucideIcon } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
@@ -17,7 +17,12 @@ import { useModuleVisible } from '@/lib/modules-context';
 import { fetchUnreadCount } from '@/lib/notifications';
 import { syncPushRegistration, kickDispatcher } from '@/lib/push';
 
-export default function NotificationsBell() {
+/**
+ * `hidden` — the owner removed the bell from the header (تخصيص التطبيق).
+ * We still MOUNT the component so the push-subscription sync and the
+ * dispatcher kicks keep running; only the icon is not rendered.
+ */
+export default function NotificationsBell({ icon: Icon = Bell, hidden = false }: { icon?: LucideIcon; hidden?: boolean } = {}) {
   const { profile } = useAuth();
   const router = useRouter();
   const visible = useModuleVisible('notifications');
@@ -56,7 +61,7 @@ export default function NotificationsBell() {
     return () => navigator.serviceWorker.removeEventListener('message', h);
   }, [enabled, load, router]);
 
-  if (!visible) return null;
+  if (!visible || hidden) return null;
   return (
     <Link
       id="notifications-bell"
@@ -64,7 +69,7 @@ export default function NotificationsBell() {
       aria-label={n > 0 ? `${n} إشعارات غير مقروءة` : 'الإشعارات'}
       className="relative rounded-full p-2 transition hover:bg-white/15"
     >
-      <Bell className="h-6 w-6" />
+      <Icon className="h-6 w-6" />
       {n > 0 && (
         <span className="absolute -top-0.5 -right-0.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-extrabold text-white ring-2 ring-primary-700 tabular-nums">
           {n > 99 ? '99+' : n}

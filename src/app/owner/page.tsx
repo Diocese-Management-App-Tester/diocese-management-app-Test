@@ -5,14 +5,16 @@
 // added here step by step; the first one is module access control.
 
 import Link from 'next/link';
-import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles } from 'lucide-react';
+import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
 import { useModules } from '@/lib/modules-context';
 import { MODULES } from '@/lib/modules';
+import { useCustomization } from '@/lib/customization-context';
 
 export default function OwnerHubPage() {
   const { grants } = useModules();
+  const { customized } = useCustomization();
 
   return (
     <AppShell>
@@ -51,6 +53,26 @@ export default function OwnerHubPage() {
               </span>
               <span className="badge bg-primary-100 text-primary-700 tabular-nums">
                 {MODULES.length} وحدة · {grants.length} صلاحية
+              </span>
+              <ChevronLeft className="h-4 w-4 text-slate-300" />
+            </Link>
+
+            <Link
+              id="owner-customize-link"
+              href="/owner/customize"
+              className="flex items-center gap-3 px-4 py-3.5 hover:bg-indigo-50/50 transition"
+            >
+              <span className="rounded-xl bg-slate-50 p-2">
+                <Paintbrush className="h-5 w-5 text-accent-600" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-bold text-sm">تخصيص التطبيق</span>
+                <span className="block text-xs text-slate-400 truncate">
+                  شريط المهام (الخمس أيقونات) وأيقونات الهيدر
+                </span>
+              </span>
+              <span className={`badge ${customized ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                {customized ? 'مخصص' : 'افتراضي'}
               </span>
               <ChevronLeft className="h-4 w-4 text-slate-300" />
             </Link>
