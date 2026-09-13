@@ -13,10 +13,13 @@ import QRCode from 'qrcode';
 import {
   X, User, Phone, MapPin, StickyNote, IdCard, CalendarDays, Star,
   CalendarCheck, School, Loader2, Save, Trash2, AlertTriangle, Upload,
-  Church as ChurchIcon, Layers,
+  Church as ChurchIcon, Layers, Pencil, Wand2, ScanLine, Check, ShieldAlert,
+  UserCheck,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
+import { generatePersonCode } from '@/lib/codes';
+import QrScanner from '@/components/store/QrScanner';
 import {
   GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH,
   type Gender, type EnrollmentWithPerson, type Enrollment,
@@ -222,10 +225,33 @@ export function EditPersonModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  // ---- Code (national id / QR) — shown disabled, edited only through
+  //      a confirmed flow: confirm → modal (generate / scan) → confirm ----
+  const [code, setCode] = useState(person.national_id);
+  const [codeModal, setCodeModal] = useState(false);
+  const codeChanged = code !== person.national_id;
+
+  const startCodeEdit = () => {
+    const ok = confirm(
+      `⚠️ تعديل الكود (الرقم القومي)\n\nالكود هو هوية «${person.name}» في كل التسجيلات، وهو ما يُطبع على بطاقة الـ QR ويُستخدم للحضور والنقاط ودخول بوابة المخدوم.\n\nتغييره يجعل البطاقة القديمة غير صالحة.\n\nهل تريد المتابعة إلى تعديل الكود؟`
+    );
+    if (ok) setCodeModal(true);
+  };
+
   const save = async () => {
     if (!name.trim()) return setError('الاسم مطلوب');
     const normPhone = normalizePhone(phone);
     if (normPhone === undefined) return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا (01xxxxxxxxx)`);
+    const newCode = code.trim();
+    if (!newCode) return setError('الكود (الرقم القومي) مطلوب');
+
+    // Final confirmation before persisting a changed code
+    if (codeChanged) {
+      const ok = confirm(
+        `تأكيد تغيير الكود\n\nمن: ${person.national_id}\nإلى: ${newCode}\n\nسيسري التغيير على «${person.name}» في كل تسجيلاته، وستحتاج البطاقة القديمة إلى إعادة طباعة.\n\nهل أنت متأكد؟`
+      );
+      if (!ok) return;
+    }
 
     setBusy(true);
     setError('');
@@ -250,11 +276,17 @@ export function EditPersonModal({
         address: address.trim() || null,
         notes: notes.trim() || null,
         image_url,
+        ...(codeChanged ? { national_id: newCode } : {}),
       })
       .eq('id', person.id);
 
     setBusy(false);
-    if (err) return setError('تعذر حفظ التعديلات، حاول مجددًا');
+    if (err) {
+      if (codeChanged && (err.code === '23505' || /duplicate|unique/i.test(err.message ?? ''))) {
+        return setError('هذا الكود مستخدم بالفعل لشخص آخر — اختر كودًا مختلفًا');
+      }
+      return setError('تعذر حفظ التعديلات، حاول مجددًا');
+    }
     onSaved();
     onClose();
   };
@@ -323,9 +355,56 @@ export function EditPersonModal({
             onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
         </label>
 
+        {/* Code (national id / QR) — disabled field + confirmed edit button */}
+        <div>
+          <label className="mb-1 flex items-center gap-1 text-xs font-bold text-slate-500">
+            <IdCard className="h-3.5 w-3.5 text-primary-500" />
+            الكود (الرقم القومي / QR)
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="edit-person-code"
+              className={`input-field flex-1 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${codeChanged ? '!border-amber-300 !bg-amber-50 !text-amber-800' : ''}`}
+              dir="ltr"
+              value={code}
+              disabled
+              readOnly
+            />
+            <button
+              id="edit-person-code-edit"
+              type="button"
+              onClick={startCodeEdit}
+              disabled={busy}
+              aria-label="تعديل الكود"
+              title="تعديل الكود"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow transition hover:bg-amber-600 active:scale-95 disabled:opacity-60"
+            >
+              <Pencil className="h-5 w-5" />
+            </button>
+          </div>
+          {codeChanged ? (
+            <p className="mt-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+              <span>
+                سيتغير الكود من <span dir="ltr">{person.national_id}</span> إلى <span dir="ltr">{code}</span> عند الحفظ
+              </span>
+              <button
+                id="edit-person-code-revert"
+                type="button"
+                onClick={() => setCode(person.national_id)}
+                className="shrink-0 rounded-lg bg-white px-2 py-1 text-amber-700 hover:bg-amber-100"
+              >
+                تراجع
+              </button>
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-slate-400">
+              الكود معطّل للحماية — اضغط زر التعديل لتغييره (توليد أو مسح كود)
+            </p>
+          )}
+        </div>
+
         <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-          الرقم القومي: <span className="font-bold" dir="ltr">{person.national_id}</span> — التعديل يسري على
-          بيانات الشخص في كل تسجيلاته (كل الكنائس والخدمات والفصول)
+          التعديل يسري على بيانات الشخص في كل تسجيلاته (كل الكنائس والخدمات والفصول)
         </p>
 
         {error && (
@@ -342,7 +421,201 @@ export function EditPersonModal({
           {busy ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
         </button>
       </div>
+
+      {codeModal && (
+        <EditCodeModal
+          personId={person.id}
+          currentCode={person.national_id}
+          initialCode={code}
+          onConfirm={(c) => { setCode(c); setCodeModal(false); }}
+          onClose={() => setCodeModal(false)}
+        />
+      )}
     </ModalFrame>
+  );
+}
+
+// =====================================================================
+// 2b. EDIT CODE — تعديل الكود (generate / scan → confirm)
+// The chosen code is only staged into the parent form here; it is
+// persisted when the user saves the edit form (after a final confirm).
+// =====================================================================
+function EditCodeModal({
+  personId, currentCode, initialCode, onConfirm, onClose,
+}: {
+  personId: string;
+  currentCode: string;
+  initialCode: string;
+  onConfirm: (code: string) => void;
+  onClose: () => void;
+}) {
+  const supabase = createClient();
+  const [value, setValue] = useState(initialCode);
+  const [scanning, setScanning] = useState(false);
+  const [qrUrl, setQrUrl] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [takenBy, setTakenBy] = useState<string | null>(null);
+
+  const trimmed = value.trim();
+  const changed = trimmed !== currentCode;
+
+  // QR preview of the candidate code
+  useEffect(() => {
+    if (!trimmed) { setQrUrl(''); return; }
+    QRCode.toDataURL(trimmed, { width: 240, margin: 1 })
+      .then(setQrUrl)
+      .catch(() => setQrUrl(''));
+  }, [trimmed]);
+
+  // Is this code already used by ANOTHER person? (debounced lookup)
+  useEffect(() => {
+    setTakenBy(null);
+    if (!trimmed || trimmed === currentCode) return;
+    setChecking(true);
+    const t = setTimeout(async () => {
+      const { data } = await supabase.rpc('find_person_by_national_id', { p_national_id: trimmed });
+      const found = (Array.isArray(data) ? data[0] : data) as { id: string; name: string } | null | undefined;
+      setTakenBy(found && found.id !== personId ? found.name : null);
+      setChecking(false);
+    }, 400);
+    return () => { clearTimeout(t); setChecking(false); };
+  }, [trimmed, currentCode, personId, supabase]);
+
+  const onScanned = (v: string) => {
+    const s = v.trim();
+    if (!s) return;
+    setValue(s);
+    setScanning(false);
+  };
+
+  const confirmCode = () => {
+    if (!trimmed || takenBy || checking) return;
+    if (!changed) return onClose();
+    const ok = confirm(
+      `اعتماد الكود الجديد؟\n\nمن: ${currentCode}\nإلى: ${trimmed}\n\nسيتم وضعه في نموذج التعديل، ولن يُحفظ إلا بعد ضغط «حفظ التعديلات».`
+    );
+    if (ok) onConfirm(trimmed);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm max-h-[90vh] overflow-y-auto no-scrollbar rounded-3xl bg-white p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-base font-extrabold">
+            <IdCard className="h-5 w-5 text-amber-600" />
+            تعديل الكود
+          </h3>
+          <button type="button" onClick={onClose} aria-label="إغلاق" className="rounded-full p-1.5 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <p className="mb-3 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          الكود الحالي: <span dir="ltr" className="font-extrabold">{currentCode}</span>
+        </p>
+
+        {scanning ? (
+          <>
+            <QrScanner
+              onCode={onScanned}
+              idPrefix="edit-person-code-scan"
+              autoStart
+              hint="شغّل الكاميرا لمسح الكود الجديد"
+            />
+            <button
+              type="button"
+              onClick={() => setScanning(false)}
+              className="btn-secondary mt-3 w-full"
+            >
+              رجوع
+            </button>
+          </>
+        ) : (
+          <div className="space-y-3">
+            {/* Candidate code */}
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">الكود الجديد</label>
+              <div className="flex gap-2">
+                <input
+                  id="edit-code-value"
+                  className="input-field flex-1"
+                  dir="ltr"
+                  placeholder="اكتب الرقم القومي أو ولّد / امسح كودًا"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                />
+                <button
+                  id="edit-code-generate"
+                  type="button"
+                  onClick={() => setValue(generatePersonCode())}
+                  aria-label="توليد كود تلقائي"
+                  title="توليد كود تلقائي"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow transition hover:bg-primary-700 active:scale-95"
+                >
+                  <Wand2 className="h-5 w-5" />
+                </button>
+                <button
+                  id="edit-code-scan"
+                  type="button"
+                  onClick={() => setScanning(true)}
+                  aria-label="مسح الكود بالكاميرا"
+                  title="مسح الكود بالكاميرا"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow transition hover:bg-orange-600 active:scale-95"
+                >
+                  <ScanLine className="h-5 w-5" />
+                </button>
+              </div>
+              {checking && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-slate-400">
+                  <Loader2 className="h-3 w-3 animate-spin" /> جارٍ التحقق من الكود...
+                </p>
+              )}
+              {takenBy && (
+                <p className="mt-1 flex items-center gap-1 rounded-xl bg-red-50 px-3 py-2 text-[11px] font-bold text-red-600">
+                  <UserCheck className="h-4 w-4" />
+                  هذا الكود مستخدم بالفعل لـ «{takenBy}» — اختر كودًا مختلفًا
+                </p>
+              )}
+              {!checking && !takenBy && changed && trimmed && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-emerald-600">
+                  <Check className="h-3.5 w-3.5" /> الكود متاح
+                </p>
+              )}
+            </div>
+
+            {/* QR preview */}
+            {qrUrl && (
+              <div className="flex flex-col items-center rounded-2xl border border-indigo-50 bg-slate-50 py-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrUrl} alt="QR" className="h-32 w-32" />
+                <p className="mt-1 text-sm font-extrabold tracking-widest" dir="ltr">{trimmed}</p>
+              </div>
+            )}
+
+            <button
+              id="edit-code-confirm"
+              type="button"
+              onClick={confirmCode}
+              disabled={!trimmed || !!takenBy || checking || !changed}
+              className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              <Check className="h-5 w-5" />
+              تأكيد الكود الجديد
+            </button>
+            <button type="button" onClick={onClose} className="btn-secondary w-full">
+              إلغاء
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
