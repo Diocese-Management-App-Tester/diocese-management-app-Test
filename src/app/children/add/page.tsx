@@ -4,11 +4,12 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 import {
-  UserPlus, Users, X, Check, Loader2, QrCode, Camera, Wand2,
+  UserPlus, Users, X, Check, Loader2, QrCode, Camera, Wand2, ScanLine,
   ArrowRight, FileSpreadsheet, ClipboardPaste, Upload, Trash2, Star, IdCard, UserCheck,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import PhotoCropModal from '@/components/PhotoCropModal';
+import QrScanner from '@/components/store/QrScanner';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
@@ -300,6 +301,15 @@ function SingleAddTab({
     setShowQr(true);
   };
 
+  // ---- Scan an existing code (national id / printed QR card) with the camera ----
+  const [showScan, setShowScan] = useState(false);
+  const onScanned = (value: string) => {
+    const v = value.trim();
+    if (!v) return;
+    setCode(v);
+    setShowScan(false);
+  };
+
   // ---- Photo square ----
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [rawImage, setRawImage] = useState('');        // object URL for cropper
@@ -523,6 +533,16 @@ function SingleAddTab({
             >
               <Wand2 className="h-5 w-5" />
             </button>
+            <button
+              id="single-code-scan"
+              type="button"
+              onClick={() => setShowScan(true)}
+              aria-label="مسح الكود بالكاميرا"
+              title="مسح الكود بالكاميرا"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-white shadow transition hover:bg-orange-600 active:scale-95"
+            >
+              <ScanLine className="h-5 w-5" />
+            </button>
           </div>
           {checkingId && (
             <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-slate-400">
@@ -738,6 +758,27 @@ function SingleAddTab({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qrDataUrl} alt="QR" className="mx-auto w-full rounded-xl" />
             <p className="mt-2 text-lg font-extrabold tracking-widest" dir="ltr">{code}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Scan-code modal (camera / gallery) */}
+      {showScan && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6" onClick={() => setShowScan(false)}>
+          <div className="w-full max-w-xs rounded-3xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-base font-extrabold">
+                <ScanLine className="h-5 w-5 text-orange-500" />
+                مسح الكود بالكاميرا
+              </h3>
+              <button type="button" onClick={() => setShowScan(false)} aria-label="إغلاق" className="rounded-full p-1.5 hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <QrScanner onCode={onScanned} idPrefix="add-person-scan" autoStart hint="شغّل الكاميرا لمسح كود المخدوم" />
+            <p className="mt-3 text-center text-[11px] font-bold text-slate-400">
+              سيتم وضع الكود الممسوح في خانة الرقم القومي مباشرة
+            </p>
           </div>
         </div>
       )}
