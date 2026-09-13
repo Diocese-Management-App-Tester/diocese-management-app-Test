@@ -7,14 +7,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, type LucideIcon } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { useModuleVisible } from '@/lib/modules-context';
 import { fetchUnreadTotal } from '@/lib/chat';
 
-export default function MessagesBell() {
+export default function MessagesBell({ icon: Icon = MessageCircle }: { icon?: LucideIcon } = {}) {
   const { profile } = useAuth();
   const visible = useModuleVisible('messages');
   const [supabase] = useState(() => createClient());
@@ -40,7 +40,7 @@ export default function MessagesBell() {
       aria-label={n > 0 ? `${n} رسائل غير مقروءة` : 'الرسائل'}
       className="relative rounded-full p-2 transition hover:bg-white/15"
     >
-      <MessageCircle className="h-6 w-6" />
+      <Icon className="h-6 w-6" />
       {n > 0 && (
         <span className="absolute -top-0.5 -right-0.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-extrabold text-white ring-2 ring-primary-700 tabular-nums">
           {n > 99 ? '99+' : n}

@@ -5,38 +5,19 @@ import { appIcon } from '@/lib/branding';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Home,
-  Users,
-  ScanLine,
-  BarChart3,
-  Settings,
-  LogOut,
-  Layers,
-  CalendarDays,
-  Clock,
-  type LucideIcon,
-} from 'lucide-react';
+import { LogOut, Layers, CalendarDays, Clock } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ROLE_LABELS } from '@/lib/types';
 import { formatCairoDate, formatCairoTime } from '@/lib/time';
 import { useAppDate } from '@/lib/app-date-context';
-import { useModules } from '@/lib/modules-context';
-import { OWNER_MODULE } from '@/lib/modules';
+import { useCustomization } from '@/lib/customization-context';
 
-// ---------- Main pages (same 5 as bottom nav) ----------
-const MAIN_PAGES: { href: string; label: string; icon: LucideIcon; id: string }[] = [
-  { href: '/', label: 'الرئيسية', icon: Home, id: 'menu-home' },
-  { href: '/children', label: 'المخدومين', icon: Users, id: 'menu-children' },
-  { href: '/scanner', label: 'الماسح', icon: ScanLine, id: 'menu-scanner' },
-  { href: '/stats', label: 'الإحصائيات', icon: BarChart3, id: 'menu-stats' },
-  { href: '/settings', label: 'الإعدادات', icon: Settings, id: 'menu-settings' },
-];
-
-// ---------- Modules ----------
-// The section under the 5 main pages shows ONLY modules: the ones granted
-// to the caller's scope (registry in `src/lib/modules.ts`, grants decided by
-// the owner in /owner/modules) + the owner module for role = owner.
+// ---------- Sections ----------
+// 1. the SAME 5 items as the bottom bar (decided by the owner in تخصيص
+//    التطبيق, resolved for this user);
+// 2. everything else the user may see: core pages moved out of the bar,
+//    the owner module (role = owner) and every module granted to his scope
+//    (registry in `src/lib/modules.ts`, grants in /owner/modules).
 
 interface SideMenuProps {
   open: boolean;
@@ -79,15 +60,7 @@ function CairoDateTime({ active }: { active: boolean }) {
 export default function SideMenu({ open, onClose }: SideMenuProps) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
-  const { visibleModules, loading: modulesLoading } = useModules();
-  const isOwner = profile?.role === 'owner';
-
-  const menuModules: { href: string; label: string; icon: LucideIcon; id: string; owner?: boolean }[] = [
-    ...(isOwner
-      ? [{ href: OWNER_MODULE.href, label: OWNER_MODULE.label, icon: OWNER_MODULE.icon, id: 'menu-owner', owner: true }]
-      : []),
-    ...visibleModules.map((m) => ({ href: m.href, label: m.label, icon: m.icon, id: `menu-${m.key}` })),
-  ];
+  const { taskbar, menuRest, loading: navLoading } = useCustomization();
 
   // Lock body scroll while the menu is open
   useEffect(() => {
@@ -159,43 +132,12 @@ export default function SideMenu({ open, onClose }: SideMenuProps) {
         {/* ---------- Body: main pages + modules ---------- */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="space-y-1">
-            {MAIN_PAGES.map(({ href, label, icon: Icon, id }) => (
-              <li key={href}>
-                <Link
-                  id={id}
-                  href={href}
-                  onClick={onClose}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
-                    isActive(href)
-                      ? 'bg-primary-100 text-primary-700'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  {label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-
-          {/* Horizontal divider */}
-          <hr id="side-menu-divider" className="my-4 border-indigo-100" />
-
-          {/* Modules section — modules only */}
-          <p className="mb-2 flex items-center gap-2 px-3 text-[11px] font-bold text-slate-400">
-            <Layers className="h-3.5 w-3.5" />
-            الوحدات
-          </p>
-          {menuModules.length === 0 ? (
-            <p id="side-menu-no-modules" className="px-3 text-xs text-slate-400">
-              {modulesLoading ? '…' : 'لا توجد وحدات مفعّلة لنطاقك'}
-            </p>
-          ) : (
-            <ul className="space-y-1">
-              {menuModules.map(({ href, label, icon: Icon, id, owner }) => (
-                <li key={href}>
+            {taskbar.map(({ key, href, label, icon: Icon, kind }) => {
+              const owner = kind === 'owner';
+              return (
+                <li key={key}>
                   <Link
-                    id={id}
+                    id={`menu-${key}`}
                     href={href}
                     onClick={onClose}
                     className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
@@ -208,7 +150,45 @@ export default function SideMenu({ open, onClose }: SideMenuProps) {
                     {label}
                   </Link>
                 </li>
-              ))}
+              );
+            })}
+          </ul>
+
+          {/* Horizontal divider */}
+          <hr id="side-menu-divider" className="my-4 border-indigo-100" />
+
+          {/* Section 2 — everything not in the bar (core pages moved out,
+              owner module, granted modules) */}
+          <p className="mb-2 flex items-center gap-2 px-3 text-[11px] font-bold text-slate-400">
+            <Layers className="h-3.5 w-3.5" />
+            الوحدات
+          </p>
+          {menuRest.length === 0 ? (
+            <p id="side-menu-no-modules" className="px-3 text-xs text-slate-400">
+              {navLoading ? '…' : 'لا توجد وحدات مفعّلة لنطاقك'}
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {menuRest.map(({ key, href, label, icon: Icon, kind, color }) => {
+                const owner = kind === 'owner';
+                return (
+                  <li key={key}>
+                    <Link
+                      id={`menu-${key}`}
+                      href={href}
+                      onClick={onClose}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                        isActive(href)
+                          ? owner ? 'bg-gold-100 text-gold-700' : 'bg-primary-100 text-primary-700'
+                          : owner ? 'text-gold-700 hover:bg-gold-50' : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Icon className={`h-5 w-5 shrink-0 ${kind === 'module' && !isActive(href) && color ? color : ''}`} />
+                      {label}
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </nav>
