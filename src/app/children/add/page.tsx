@@ -10,6 +10,7 @@ import {
 import AppShell from '@/components/AppShell';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import QrScanner from '@/components/store/QrScanner';
+import { generatePersonCode } from '@/lib/codes';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
@@ -27,12 +28,7 @@ const MONTHS_AR = [
 ];
 
 /** Random readable national id (used when the person has no real one), e.g. P-4F7K9Q2M */
-const generateCode = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return `P-${s}`;
-};
+const generateCode = generatePersonCode;
 
 /** Compose YYYY-MM-DD from separate day/month/year, or null */
 const composeBirthdate = (d: string, m: string, y: string): string | null => {
