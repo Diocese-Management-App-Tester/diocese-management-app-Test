@@ -174,7 +174,7 @@ export function CountersWidget() {
         <>
           <StatCard icon={Layers} label="الخدمات" value={c?.services} color="bg-accent-100 text-accent-700" href="/settings/services" />
           <StatCard icon={School} label="الفصول" value={c?.classes} color="bg-sky-100 text-sky-700" href="/settings/classes" />
-          <StatCard icon={UserCheck} label="طلبات معلقة" value={c?.pendingServants} color="bg-red-100 text-red-600" href="/settings/approvals" />
+          <StatCard icon={UserCheck} label="طلبات معلقة" value={c?.pendingServants} color="bg-red-100 text-red-600" href="/servants?tab=approvals" />
         </>
       )}
     </section>
