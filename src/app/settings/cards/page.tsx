@@ -13,12 +13,14 @@ import type { Church, Service, ClassRoom } from '@/lib/types';
 import type { CardTemplate } from '@/lib/card-types';
 import { DEFAULT_DESIGN, DEFAULT_PRINT_SETTINGS } from '@/lib/card-types';
 import BoundPrintTab from '@/components/cards/BoundPrintTab';
+import { useNavLabel } from '@/lib/customization-context';
 
 const ALL = '__all__';
 
 type Tab = 'templates' | 'print';
 
 export default function CardTemplatesPage() {
+  const pageName = useNavLabel('cards');
   const { profile } = useAuth();
   const supabase = createClient();
   const [templates, setTemplates] = useState<CardTemplate[]>([]);
@@ -87,7 +89,7 @@ export default function CardTemplatesPage() {
           </Link>
           <h2 className="flex items-center gap-2 text-lg font-extrabold">
             <IdCard className="h-5 w-5 text-primary-600" />
-            تصميم الكروت
+            {pageName}
             <span className="badge bg-primary-100 text-primary-700">{templates.length}</span>
           </h2>
         </div>

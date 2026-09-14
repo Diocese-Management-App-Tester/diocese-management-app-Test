@@ -15,6 +15,7 @@ import { ArrowRight, Bell, BellOff, BellRing, History, Send, Zap, Smartphone, Lo
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NOTIF_STATUS_CLASSES, NOTIF_STATUS_LABELS, fmtRelative, type InboxItem, type NotifStatus } from '@/lib/notifications';
 import { PUSH_REASON_LABELS, currentSubscription, disablePush, enablePush, pushSupport, syncPushRegistration, type PushSupport } from '@/lib/push';
+import { useNavLabel } from '@/lib/customization-context';
 
 const TABS = [
   { href: '/notifications', label: 'السجل', icon: History, id: 'notif-tab-history', exact: true },
@@ -24,6 +25,7 @@ const TABS = [
 
 export function NotifHeader({ title, badge, back = '/settings' }: { title?: string; badge?: ReactNode; back?: string }) {
   const path = usePathname();
+  const name = useNavLabel('notifications');
   return (
     <>
       <section className="mb-3 flex items-center gap-2">
@@ -32,7 +34,7 @@ export function NotifHeader({ title, badge, back = '/settings' }: { title?: stri
         </Link>
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <Bell className="h-5 w-5 text-indigo-600" />
-          الإشعارات
+          {name}
           {title && <span className="text-sm font-bold text-slate-400">· {title}</span>}
           {badge}
         </h2>

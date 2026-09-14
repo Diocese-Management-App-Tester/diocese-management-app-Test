@@ -16,6 +16,7 @@ import { useDebouncedRealtime } from '@/lib/realtime';
 import { ROLE_LABELS } from '@/lib/types';
 import { useModules } from '@/lib/modules-context';
 import { OWNER_MODULE } from '@/lib/modules';
+import { useCustomization } from '@/lib/customization-context';
 
 export default function SettingsPage() {
   const { profile, signOut } = useAuth();
@@ -35,6 +36,7 @@ export default function SettingsPage() {
   useDebouncedRealtime(supabase, 'settings-dcr-badge', [{ table: 'data_change_requests' }], loadPending, { enabled: !!profile });
 
   const { visibleModules, loading: modulesLoading } = useModules();
+  const { label } = useCustomization();
   const isOwner = profile?.role === 'owner';
   const isManager =
     profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
@@ -44,7 +46,7 @@ export default function SettingsPage() {
       <section className="mb-4">
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <Settings className="h-5 w-5 text-primary-600" />
-          الإعدادات
+          {label('settings')}
         </h2>
       </section>
 
@@ -185,7 +187,7 @@ export default function SettingsPage() {
               <SettingsLink
                 href={OWNER_MODULE.href}
                 icon={<Crown className="h-5 w-5 text-gold-500" />}
-                label={OWNER_MODULE.label}
+                label={label(OWNER_MODULE.key)}
                 desc={OWNER_MODULE.desc}
                 accent
               />
@@ -197,7 +199,7 @@ export default function SettingsPage() {
                   key={m.key}
                   href={m.href}
                   icon={<Icon className={`h-5 w-5 ${m.color}`} />}
-                  label={m.label}
+                  label={label(m.key)}
                   desc={m.desc}
                 />
               );

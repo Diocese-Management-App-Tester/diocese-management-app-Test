@@ -14,10 +14,12 @@ import {
   type OnlineClassStatus, type StreamPlatform,
 } from '@/lib/online-classes';
 import { APP_TZ } from '@/lib/time';
+import { useNavLabel } from '@/lib/customization-context';
 
 export function OnlineHeader({
   title, badge, back = '/online', actions, sub,
 }: { title?: string; badge?: React.ReactNode; back?: string; actions?: React.ReactNode; sub?: string }) {
+  const name = useNavLabel('online');
   return (
     <section className="mb-3 flex items-center gap-2">
       <Link href={back} aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
@@ -26,7 +28,7 @@ export function OnlineHeader({
       <div className="min-w-0 flex-1">
         <h2 className="flex items-center gap-2 text-lg font-extrabold leading-tight">
           <Video className="h-5 w-5 shrink-0 text-red-600" />
-          <span className="truncate">{title ?? 'الفصول الأونلاين'}</span>
+          <span className="truncate">{title ?? name}</span>
           {badge}
         </h2>
         {sub && <p className="truncate text-[11px] font-bold text-slate-400">{sub}</p>}

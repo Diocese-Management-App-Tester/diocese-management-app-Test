@@ -41,6 +41,7 @@ import { sendMessage as sendChatMessage, chatErrorMessage } from '@/lib/chat';
 import {
   fetchEnrollmentsPage, fetchMyGroupIds, fetchMyGroupEnrollments, cachedLookup, ALL, PAGE_SIZE,
 } from '@/lib/queries';
+import { useNavLabel } from '@/lib/customization-context';
 
 type AttendanceMode = 'add' | 'remove';
 type PointsMode = 'add' | 'subtract';
@@ -100,6 +101,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
 }
 
 export default function ChildrenPage() {
+  const pageName = useNavLabel('children');
   const { profile } = useAuth();
   const supabase = createClient();
   const router = useRouter();
@@ -1032,7 +1034,7 @@ export default function ChildrenPage() {
       <section id="children-header" className="mb-4 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <Users className="h-5 w-5 text-primary-600" />
-          المخدومين
+          {pageName}
           <span className="badge bg-primary-100 text-primary-700">{filtered.length}</span>
           {myGroupOnly && (
             <span id="my-group-active" className="badge bg-teal-100 text-teal-700">

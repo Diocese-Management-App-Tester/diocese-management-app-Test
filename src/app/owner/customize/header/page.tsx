@@ -26,10 +26,10 @@ import {
 
 const MAX_ITEMS = 6;
 
-function describe(item: HeaderItem) {
+function describe(item: HeaderItem, label: (key: string) => string) {
   if (isLinkItem(item.key)) {
     const d = DEST_BY_KEY[linkTarget(item.key)];
-    return { label: d.label, sub: `رابط سريع — ${KIND_LABEL[d.kind]}`, defaultIcon: d.icon, defaultName: d.iconName, isDate: false };
+    return { label: label(d.key), sub: `رابط سريع — ${KIND_LABEL[d.kind]}`, defaultIcon: d.icon, defaultName: d.iconName, isDate: false };
   }
   const w = HEADER_WIDGET_BY_KEY[item.key];
   return { label: w.label, sub: w.desc, defaultIcon: w.icon, defaultName: w.iconName, isDate: w.key === 'date' };
@@ -37,7 +37,7 @@ function describe(item: HeaderItem) {
 
 export default function CustomizeHeaderPage() {
   const { church } = useAuth();
-  const { navigation, customized, loading, saveNavigation, resetNavigation } = useCustomization();
+  const { navigation, customized, loading, saveNavigation, resetNavigation, label } = useCustomization();
 
   const [items, setItems] = useState<HeaderItem[]>(navigation.header);
   const [pristine, setPristine] = useState(JSON.stringify(navigation.header));
@@ -125,7 +125,7 @@ export default function CustomizeHeaderPage() {
               </div>
               <div className="flex items-center gap-0.5">
                 {items.map((it) => {
-                  const d = describe(it);
+                  const d = describe(it, label);
                   if (d.isDate) {
                     return (
                       <span key={it.key} className="flex h-10 w-10 flex-col items-center justify-center rounded-xl bg-white/15 text-xs font-extrabold">
@@ -163,7 +163,7 @@ export default function CustomizeHeaderPage() {
         ) : (
           <ul id="header-items" className="space-y-3">
             {items.map((it, i) => {
-              const d = describe(it);
+              const d = describe(it, label);
               const Icon = resolveIcon(it.icon, d.defaultIcon);
               return (
                 <li key={it.key} id={`header-item-${i + 1}`} className="card !p-0 overflow-hidden">
@@ -253,9 +253,9 @@ export default function CustomizeHeaderPage() {
 
         {picking !== null && items[picking] && (
           <IconPicker
-            title={`أيقونة «${describe(items[picking]).label}»`}
+            title={`أيقونة «${describe(items[picking], label).label}»`}
             value={items[picking].icon}
-            defaultName={describe(items[picking]).defaultName}
+            defaultName={describe(items[picking], label).defaultName}
             onPick={(name) => { setIcon(picking, name); setPicking(null); }}
             onClose={() => setPicking(null)}
           />
@@ -312,7 +312,7 @@ export default function CustomizeHeaderPage() {
                         <button key={d.key} type="button" onClick={() => add(`link:${d.key}`)}
                           className="flex w-full items-center gap-3 px-4 py-2.5 text-start transition hover:bg-indigo-50/50">
                           <Icon className={`h-5 w-5 shrink-0 ${d.color ?? 'text-slate-600'}`} />
-                          <span className="flex-1 text-sm font-bold">{d.label}</span>
+                          <span className="flex-1 text-sm font-bold">{label(d.key)}</span>
                           <span className="badge bg-slate-100 text-slate-500">{KIND_LABEL[d.kind]}</span>
                           <Plus className="h-4 w-4 text-slate-300" />
                         </button>

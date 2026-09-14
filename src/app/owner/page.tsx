@@ -14,7 +14,8 @@ import { useCustomization } from '@/lib/customization-context';
 
 export default function OwnerHubPage() {
   const { grants } = useModules();
-  const { customized } = useCustomization();
+  const { customized, widgetsCustomized, names, label } = useCustomization();
+  const anyCustom = customized || widgetsCustomized || Object.keys(names).length > 0;
 
   return (
     <AppShell>
@@ -25,7 +26,7 @@ export default function OwnerHubPage() {
           </Link>
           <h2 className="flex items-center gap-2 text-lg font-extrabold">
             <Crown className="h-5 w-5 text-gold-500" />
-            وحدة المالك
+            {label('owner')}
           </h2>
         </section>
 
@@ -68,11 +69,11 @@ export default function OwnerHubPage() {
               <span className="flex-1 min-w-0">
                 <span className="block font-bold text-sm">تخصيص التطبيق</span>
                 <span className="block text-xs text-slate-400 truncate">
-                  شريط المهام (الخمس أيقونات) وأيقونات الهيدر
+                  شريط المهام · أيقونات الهيدر · ودجات الرئيسية · أسماء الصفحات
                 </span>
               </span>
-              <span className={`badge ${customized ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                {customized ? 'مخصص' : 'افتراضي'}
+              <span className={`badge ${anyCustom ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                {anyCustom ? 'مخصص' : 'افتراضي'}
               </span>
               <ChevronLeft className="h-4 w-4 text-slate-300" />
             </Link>

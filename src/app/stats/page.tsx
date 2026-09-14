@@ -55,6 +55,7 @@ import {
 import {
   SectionCard, KpiTile, StackedBarChart, RankedBars, DonutRing, MiniStat, fmtNum, fmtSigned,
 } from '@/components/stats/Charts';
+import { useNavLabel } from '@/lib/customization-context';
 
 const SCOPE_LABEL: Record<'church' | 'service' | 'class', string> = {
   church: 'كل الكنيسة',
@@ -63,6 +64,7 @@ const SCOPE_LABEL: Record<'church' | 'service' | 'class', string> = {
 };
 
 export default function StatsPage() {
+  const pageName = useNavLabel('stats');
   const { profile } = useAuth();
   const { now } = useAppDate();
   const supabase = createClient();
@@ -345,7 +347,7 @@ export default function StatsPage() {
       <section id="stats-header" className="mb-3 flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <BarChart3 className="h-5 w-5 text-primary-600" />
-          الإحصائيات
+          {pageName}
         </h2>
         <div className="flex items-center gap-1.5">
           <button
