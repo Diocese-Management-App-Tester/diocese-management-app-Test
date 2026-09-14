@@ -12,7 +12,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
-  QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound,
+  QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
 } from 'lucide-react';
 
 export interface PermissionGroup {
@@ -36,6 +36,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'structure', label: 'البنية (كنائس · خدمات · فصول)', icon: Church, color: 'text-emerald-600' },
   { key: 'activity', label: 'المناسبات والأسباب ونتائج الافتقاد', icon: CalendarDays, color: 'text-cyan-600' },
   { key: 'servants', label: 'الخدام', icon: ShieldCheck, color: 'text-rose-600' },
+  { key: 'results', label: 'نتائج الامتحانات', icon: ClipboardCheck, color: 'text-emerald-600' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -74,6 +75,19 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'servants.manage', group: 'servants', label: 'إدارة الخدام', desc: 'تعديل · إيقاف · حذف' },
   { key: 'servants.invite', group: 'servants', label: 'دعوة خادم', desc: 'رابط / QR دعوة بنطاق' },
   { key: 'servants.permissions', group: 'servants', label: 'منح الصلاحيات', desc: 'ربط الخدام بملفات الصلاحيات في نطاقه' },
+
+  // ---- نتائج الامتحانات (0038) — managers hold them all; class servants
+  // view & see statistics by default and need a profile for the rest ----
+  { key: 'results.view', group: 'results', label: 'عرض النتائج', desc: 'رؤية الامتحانات والنتائج في نطاقه (افتراضي لكل خادم)' },
+  { key: 'results.enter', group: 'results', label: 'إدخال النتائج', desc: 'إدخال درجات جديدة (فردي · جماعي) وتعديل مسوداته' },
+  { key: 'results.edit', group: 'results', label: 'تعديل النتائج', desc: 'تعديل وحذف نتائج مُدخلة' },
+  { key: 'results.import', group: 'results', label: 'استيراد من Excel', desc: 'استيراد النتائج من ملف Excel بعد المعاينة' },
+  { key: 'results.export', group: 'results', label: 'تصدير النتائج', desc: 'تصدير النتائج والتقارير إلى Excel' },
+  { key: 'results.manage_exams', group: 'results', label: 'إدارة الامتحانات', desc: 'إنشاء وتعديل وحذف الامتحانات ونشرها' },
+  { key: 'results.manage_subjects', group: 'results', label: 'إدارة المواد', desc: 'مواد الامتحان ودرجاتها وترتيبها' },
+  { key: 'results.manage_grading', group: 'results', label: 'إدارة أنظمة التقدير', desc: 'التقديرات ونسبها وألوانها' },
+  { key: 'results.lock', group: 'results', label: 'قفل النتائج', desc: 'قفل / فتح نتائج الامتحان — والكتابة بعد القفل' },
+  { key: 'results.stats', group: 'results', label: 'عرض الإحصائيات', desc: 'لوحة الامتحان والتقارير (افتراضي لكل خادم)' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
@@ -108,6 +122,16 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'servants.manage': ShieldCheck,
   'servants.invite': QrCode,
   'servants.permissions': KeyRound,
+  'results.view': ClipboardCheck,
+  'results.enter': Pencil,
+  'results.edit': Pencil,
+  'results.import': FileUp,
+  'results.export': FileDown,
+  'results.manage_exams': ClipboardList,
+  'results.manage_subjects': ListOrdered,
+  'results.manage_grading': Percent,
+  'results.lock': Lock,
+  'results.stats': PieChart,
 };
 
 /** Resolve the key set from the grant rows + the profiles (owner ⇒ '*'). */

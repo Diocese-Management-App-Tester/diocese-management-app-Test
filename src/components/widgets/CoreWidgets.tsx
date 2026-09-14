@@ -205,7 +205,7 @@ export function QuickActionsWidget({ title }: WidgetProps) {
     { href: '/children', icon: Users, label: label('children'), tone: 'text-sky-600 bg-sky-50' },
     { href: '/stats', icon: BarChart3, label: label('stats'), tone: 'text-violet-600 bg-violet-50' },
   ];
-  for (const k of ['birthdays', 'messages', 'store', 'occasions', 'exams', 'online', 'achievements', 'notifications']) {
+  for (const k of ['birthdays', 'messages', 'store', 'occasions', 'exams', 'results', 'online', 'achievements', 'notifications']) {
     if (actions.length >= 8) break;
     if (!allowed.has(k)) continue;
     const d = DEST_BY_KEY[k];
