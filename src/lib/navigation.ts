@@ -18,7 +18,7 @@ import {
   Bookmark, Book, BookOpen, Church, School, Layers, Gift, Sparkles, Flag, MapPin, Camera, Image as ImageIcon,
   QrCode, Search, Plus, Send, Mail, Phone, PhoneCall, UserPlus, UserCheck, Award, Medal, Target, Zap,
   Flame, Sun, Moon, Cloud, Music, Mic, Headphones, Tv, Monitor, Smartphone, Wallet, Coins, CreditCard,
-  Package, Box, Archive, Folder, FileText, ClipboardList, ListChecks, CheckCircle2, Megaphone, Globe,
+  Package, Box, Archive, Folder, FileText, ClipboardList, ClipboardCheck, ListChecks, CheckCircle2, Megaphone, Globe,
   Compass, Map, Bus, Car, Plane, Ship, Bike, Footprints, Baby, Smile, PartyPopper, Cross, Shield,
   ShieldCheck, Lock, Key, LayoutGrid, LayoutDashboard, Grid3x3, Inbox, Pencil, Palette, Printer,
   Download, Upload, Share2, Link as LinkIcon, Bolt, Activity, TrendingUp, PieChart, LineChart, Table,
@@ -61,7 +61,7 @@ export const CORE_KEYS: CorePageKey[] = ['home', 'children', 'scanner', 'stats',
 const MODULE_ICON_NAMES: Record<string, string> = {
   cards: 'IdCard', shepherds: 'HeartHandshake', store: 'ShoppingBag', exams: 'GraduationCap',
   birthdays: 'Cake', messages: 'MessageCircle', online: 'Video', achievements: 'Trophy',
-  occasions: 'Tent', notifications: 'Bell',
+  occasions: 'Tent', notifications: 'Bell', results: 'ClipboardCheck',
 };
 
 const moduleDest = (m: AppModule): NavDestination => ({
@@ -92,7 +92,7 @@ export const ICON_LIBRARY: Record<string, LucideIcon> = {
   Bookmark, Book, BookOpen, Church, School, Layers, Gift, Sparkles, Flag, MapPin, Camera, Image: ImageIcon,
   QrCode, Search, Plus, Send, Mail, Phone, PhoneCall, UserPlus, UserCheck, Award, Medal, Target, Zap,
   Flame, Sun, Moon, Cloud, Music, Mic, Headphones, Tv, Monitor, Smartphone, Wallet, Coins, CreditCard,
-  Package, Box, Archive, Folder, FileText, ClipboardList, ListChecks, CheckCircle2, Megaphone, Globe,
+  Package, Box, Archive, Folder, FileText, ClipboardList, ClipboardCheck, ListChecks, CheckCircle2, Megaphone, Globe,
   Compass, Map, Bus, Car, Plane, Ship, Bike, Footprints, Baby, Smile, PartyPopper, Cross, Shield,
   ShieldCheck, Lock, Key, LayoutGrid, LayoutDashboard, Grid3x3, Inbox, Pencil, Palette, Printer,
   Download, Upload, Share2, Link: LinkIcon, Bolt, Activity, TrendingUp, PieChart, LineChart, Table,

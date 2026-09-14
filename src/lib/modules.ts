@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results';
 
 export interface AppModule {
   key: ModuleKey;
@@ -114,6 +114,15 @@ export const MODULES: AppModule[] = [
     icon: Bell,
     color: 'text-indigo-600',
     paths: ['/notifications'],
+  },
+  {
+    key: 'results',
+    label: 'نتائج الامتحانات',
+    desc: 'امتحانات بمواد ودرجات وأنظمة تقدير قابلة للتخصيص: إدخال جماعي سريع، استيراد من Excel، حساب النسب والتقديرات والترتيب تلقائياً، قفل النتائج، تقارير وسجل نتائج كل مخدوم',
+    href: '/results',
+    icon: ClipboardCheck,
+    color: 'text-emerald-600',
+    paths: ['/results'],
   },
 ];
 
