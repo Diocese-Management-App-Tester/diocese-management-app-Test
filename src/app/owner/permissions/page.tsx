@@ -62,7 +62,7 @@ export default function OwnerPermissionsPage() {
 
         <p className="mb-4 rounded-2xl bg-violet-50 px-4 py-3 text-xs font-bold text-violet-700 leading-relaxed">
           ملف الصلاحيات = مجموعة صلاحيات باسم (مثل «خادم فصل»، «كاشير»، «مسؤول حضور»).
-          المديرون يربطون كل خادم بملف أو أكثر من <Link href="/settings/servants" className="underline">إدارة الخدام</Link> أو عند قبول طلبه —
+          المديرون يربطون كل خادم بملف أو أكثر من <Link href="/servants" className="underline">إدارة الخدام</Link> أو عند قبول طلبه —
           وتظهر الصلاحية للخادم فوراً.
         </p>
 

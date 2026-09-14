@@ -1,0 +1,509 @@
+'use client';
+
+// ---------- إدارة الخدام — servant enrollments (architecture 0037) ----------
+// One card per servant enrollment (person + role + scope). Managers edit the
+// person data (mirrored into the enrollment by DB triggers), the role /
+// scope, suspend / delete, and connect the servant to PERMISSION PROFILES
+// (`permissions` rows) within their own level.
+
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
+import {
+  Users, ArrowRight, Loader2, X, Pencil, Save, Upload, User,
+  Phone, ShieldCheck, PauseCircle, PlayCircle, Trash2, KeyRound, IdCard, Search, Check,
+} from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { usePermissions } from '@/lib/permissions-context';
+import { createClient } from '@/lib/supabase/client';
+import { useDebouncedRealtime } from '@/lib/realtime';
+import { uploadPhoto } from '@/lib/upload';
+import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, PermissionProfile } from '@/lib/types';
+import { ROLE_LABELS, STATUS_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
+
+type Servant = ServantEnrollment & { person: Person | null };
+
+export default function ServantsPanel() {
+  const { profile } = useAuth();
+  const { profiles: permissionProfiles, grants, reload: reloadPermissions } = usePermissions();
+  const supabase = createClient();
+  const [servants, setServants] = useState<Servant[]>([]);
+  const [churches, setChurches] = useState<Church[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [classes, setClasses] = useState<ClassRoom[]>([]);
+  const [editing, setEditing] = useState<Servant | null>(null);
+  const [permsFor, setPermsFor] = useState<Servant | null>(null);
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const isManager = profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
+
+  const canManage = (p: ServantEnrollment) => {
+    if (!profile || p.id === profile.id) return false;
+    if (profile.role === 'owner') return true;
+    if (profile.role === 'church_manager') return p.church_id === profile.church_id && p.role !== 'owner';
+    if (profile.role === 'service_manager')
+      return p.role === 'class_servant' && (p.service_id === profile.service_id || (profile.service_id === null && p.church_id === profile.church_id));
+    return false;
+  };
+
+  const load = useCallback(async () => {
+    const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
+      supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').neq('status', 'pending').order('full_name'),
+      supabase.from('churches').select('*').order('name'),
+      supabase.from('services').select('*').order('name'),
+      supabase.from('classes').select('*').order('name'),
+    ]);
+    setServants((pr ?? []) as Servant[]);
+    setChurches(ch ?? []);
+    setServices(sv ?? []);
+    setClasses(cl ?? []);
+    setLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    if (profile?.status === 'approved') load();
+  }, [profile?.status, load]);
+
+  useDebouncedRealtime(supabase, 'servants-page', [{ table: SERVANTS_TABLE }, { table: 'persons' }], load, { enabled: !!profile });
+
+  const churchName = (id: string | null) => churches.find((c) => c.id === id)?.name;
+  const serviceName = (id: string | null) => services.find((s) => s.id === id)?.name;
+  const className = (id: string | null) => classes.find((c) => c.id === id)?.name;
+
+  // permission profiles per servant (from the grants the caller may see)
+  const profilesOf = useMemo(() => {
+    const byId = new Map(permissionProfiles.map((p) => [p.id, p]));
+    const out = new Map<string, PermissionProfile[]>();
+    for (const g of grants) {
+      const pp = byId.get(g.permission_profile_id);
+      if (!pp) continue;
+      out.set(g.servant_id, [...(out.get(g.servant_id) ?? []), pp]);
+    }
+    return out;
+  }, [grants, permissionProfiles]);
+
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return servants;
+    return servants.filter((s) =>
+      s.full_name.toLowerCase().includes(t)
+      || (s.person?.national_id ?? s.user_id).toLowerCase().includes(t)
+      || (s.person?.phone ?? s.phone ?? '').includes(t)
+    );
+  }, [servants, q]);
+
+  const toggleSuspend = async (p: ServantEnrollment) => {
+    const next = p.status === 'suspended' ? 'approved' : 'suspended';
+    await supabase.from(SERVANTS_TABLE).update({ status: next }).eq('id', p.id);
+    load();
+  };
+
+  const remove = async (p: ServantEnrollment) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الخادم "${p.full_name}"؟ لا يمكن التراجع.`)) return;
+    await supabase.from(SERVANTS_TABLE).delete().eq('id', p.id);
+    load();
+  };
+
+  if (!isManager) {
+    return (
+      <>
+        <div className="card py-12 text-center text-slate-400 font-bold">
+          هذه الصفحة متاحة للمديرين فقط
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="relative mb-3">
+        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input id="servants-search" className="input-field pr-9" placeholder="بحث بالاسم أو الكود أو الهاتف"
+          value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
+      ) : (
+        <ul className="space-y-3">
+          {filtered.map((p) => {
+            const pps = profilesOf.get(p.id) ?? [];
+            const photo = p.person?.image_url ?? p.photo_url;
+            return (
+              <li key={p.id} className={`card ${p.status === 'suspended' ? 'opacity-60' : ''}`}>
+                <div className="flex items-start gap-3">
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-emerald-50 ring-2 ring-emerald-100 flex items-center justify-center">
+                    {photo ? (
+                      <Image src={photo} alt={p.full_name} fill sizes="48px" className="object-cover" />
+                    ) : (
+                      <User className="h-6 w-6 text-emerald-400" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-extrabold truncate">{p.full_name}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                      <span className="badge bg-primary-100 text-primary-700">
+                        <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
+                      </span>
+                      {p.status !== 'approved' && (
+                        <span className="badge bg-amber-100 text-amber-700">{STATUS_LABELS[p.status]}</span>
+                      )}
+                      <span className="flex items-center gap-1" dir="ltr">
+                        <IdCard className="h-3 w-3" /> {p.person?.national_id ?? p.user_id}
+                      </span>
+                      <span className="flex items-center gap-1" dir="ltr">
+                        <Phone className="h-3 w-3" /> {p.person?.phone ?? p.phone}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {[churchName(p.church_id), serviceName(p.service_id), className(p.class_id)]
+                        .filter(Boolean).join(' ← ') || 'بدون نطاق محدد'}
+                    </p>
+                    {p.role !== 'owner' && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        <KeyRound className="h-3 w-3 text-slate-400" />
+                        {pps.length === 0 ? (
+                          <span className="text-[11px] font-bold text-slate-400">بدون ملف صلاحيات</span>
+                        ) : pps.map((pp) => (
+                          <span key={pp.id} className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ backgroundColor: pp.color }}>
+                            {pp.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {canManage(p) && (
+                  <div className="mt-3 grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
+                    <button onClick={() => setEditing(p)}
+                      className="flex items-center justify-center gap-1.5 rounded-xl bg-primary-50 py-2 text-xs font-bold text-primary-600 hover:bg-primary-100 transition">
+                      <Pencil className="h-3.5 w-3.5" /> تعديل
+                    </button>
+                    <button onClick={() => setPermsFor(p)}
+                      className="flex items-center justify-center gap-1.5 rounded-xl bg-violet-50 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 transition">
+                      <KeyRound className="h-3.5 w-3.5" /> الصلاحيات
+                    </button>
+                    <button onClick={() => toggleSuspend(p)}
+                      className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
+                        p.status === 'suspended' ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}>
+                      {p.status === 'suspended'
+                        ? (<><PlayCircle className="h-3.5 w-3.5" /> تفعيل</>)
+                        : (<><PauseCircle className="h-3.5 w-3.5" /> إيقاف</>)}
+                    </button>
+                    <button onClick={() => remove(p)}
+                      className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2 text-xs font-bold text-red-600 hover:bg-red-100 transition">
+                      <Trash2 className="h-3.5 w-3.5" /> حذف
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+          {filtered.length === 0 && (
+            <li className="card py-12 text-center text-slate-400 font-bold">{q ? 'لا نتائج' : 'لا يوجد خدام بعد'}</li>
+          )}
+        </ul>
+      )}
+
+      {editing && profile && (
+        <EditServantModal
+          servant={editing}
+          approver={profile}
+          churches={churches}
+          services={services}
+          classes={classes}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+
+      {permsFor && (
+        <PermissionsModal
+          servant={permsFor}
+          profiles={permissionProfiles}
+          current={(profilesOf.get(permsFor.id) ?? []).map((p) => p.id)}
+          onClose={() => setPermsFor(null)}
+          onSaved={async () => { setPermsFor(null); await reloadPermissions(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// ---------- Edit modal: person data + role + scope ----------
+function EditServantModal({
+  servant, approver, churches, services, classes, onClose, onSaved,
+}: {
+  servant: Servant;
+  approver: ServantEnrollment;
+  churches: Church[];
+  services: Service[];
+  classes: ClassRoom[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const supabase = createClient();
+  const person = servant.person;
+  const [fullName, setFullName] = useState(servant.full_name);
+  const [phoneLocal, setPhoneLocal] = useState((person?.phone ?? servant.phone ?? '').replace(/^\+2/, '').replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH));
+  const [gender, setGender] = useState<Gender | ''>(person?.gender ?? '');
+  const [birthdate, setBirthdate] = useState(person?.birthdate ?? '');
+  const [address, setAddress] = useState(person?.address ?? '');
+  const [notes, setNotes] = useState(person?.notes ?? '');
+  const [role, setRole] = useState<AppRole>(servant.role);
+  const [churchId, setChurchId] = useState(servant.church_id ?? '');
+  const [serviceId, setServiceId] = useState(servant.service_id ?? '');
+  const [classId, setClassId] = useState(servant.class_id ?? '');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const grantableRoles: AppRole[] =
+    approver.role === 'owner'
+      ? ['church_manager', 'service_manager', 'class_servant']
+      : approver.role === 'church_manager'
+      ? ['service_manager', 'class_servant']
+      : ['class_servant'];
+
+  const churchLocked = approver.role !== 'owner';
+  const serviceLocked = approver.role === 'service_manager';
+
+  const scopedServices = services.filter((s) => !churchId || s.church_id === churchId);
+  const scopedClasses = classes.filter((c) => !serviceId || c.service_id === serviceId);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (phoneLocal && phoneLocal.length !== PHONE_LOCAL_LENGTH) {
+      return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا بعد ${PHONE_PREFIX}`);
+    }
+    setSaving(true);
+
+    let photo_url = person?.image_url ?? servant.photo_url ?? null;
+    if (photoFile) {
+      try {
+        photo_url = await uploadPhoto(supabase, 'servants', photoFile);
+      } catch {
+        setError('تعذر رفع الصورة');
+        setSaving(false);
+        return;
+      }
+    }
+    const phone = phoneLocal ? `${PHONE_PREFIX}${phoneLocal}` : '';
+
+    // 1) person data (mirrored to the enrollment by trigger)
+    if (servant.person_id) {
+      const { error: pe } = await supabase.from('persons').update({
+        name: fullName.trim(),
+        phone: phone || null,
+        gender: gender || null,
+        birthdate: birthdate || null,
+        address: address.trim() || null,
+        notes: notes.trim() || null,
+        image_url: photo_url,
+      }).eq('id', servant.person_id);
+      if (pe) { setError('تعذر حفظ بيانات الشخص'); setSaving(false); return; }
+    }
+
+    // 2) the enrollment: role + scope (+ mirrors for safety)
+    const { error: err } = await supabase
+      .from(SERVANTS_TABLE)
+      .update({
+        full_name: fullName.trim(),
+        phone,
+        role,
+        church_id: churchId || null,
+        service_id: serviceId || null,
+        class_id: classId || null,
+        photo_url,
+      })
+      .eq('id', servant.id);
+
+    if (err) {
+      setError('تعذر الحفظ، تأكد من الصلاحيات');
+      setSaving(false);
+      return;
+    }
+    onSaved();
+  };
+
+  const lockCls = (locked: boolean) =>
+    `input-field ${locked ? 'bg-primary-50 pointer-events-none opacity-80' : ''}`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6">
+      <div className="w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-white p-5 max-h-[90vh] overflow-y-auto">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-extrabold">تعديل الخادم</h3>
+          <button onClick={onClose} aria-label="إغلاق" className="rounded-full p-1.5 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500" dir="ltr">
+            <IdCard className="inline h-3.5 w-3.5" /> {person?.national_id ?? servant.user_id}
+          </p>
+          <input className="input-field" placeholder="الاسم الكامل *" value={fullName}
+            onChange={(e) => setFullName(e.target.value)} required />
+
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" aria-pressed={gender === 'male'} onClick={() => setGender(gender === 'male' ? '' : 'male')}
+              className={`rounded-xl py-2 text-sm font-extrabold transition ${gender === 'male' ? 'bg-primary-600 text-white' : 'bg-primary-50 text-primary-600'}`}>
+              {GENDER_LABELS.male}
+            </button>
+            <button type="button" aria-pressed={gender === 'female'} onClick={() => setGender(gender === 'female' ? '' : 'female')}
+              className={`rounded-xl py-2 text-sm font-extrabold transition ${gender === 'female' ? 'bg-pink-500 text-white' : 'bg-pink-50 text-pink-500'}`}>
+              {GENDER_LABELS.female}
+            </button>
+          </div>
+
+          <div className="flex items-stretch overflow-hidden rounded-xl border border-indigo-100 bg-white focus-within:ring-2 focus-within:ring-primary-300" dir="ltr">
+            <span className="flex items-center bg-indigo-50 px-3 text-sm font-extrabold text-primary-700">{PHONE_PREFIX}</span>
+            <input type="tel" inputMode="numeric" className="w-full px-3 py-2.5 text-sm font-bold outline-none" placeholder="01xxxxxxxxx"
+              value={phoneLocal} maxLength={PHONE_LOCAL_LENGTH}
+              onChange={(e) => setPhoneLocal(e.target.value.replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH))} />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">تاريخ الميلاد</label>
+            <input type="date" className="input-field" value={birthdate} onChange={(e) => setBirthdate(e.target.value)} dir="ltr" />
+          </div>
+          <input className="input-field" placeholder="العنوان" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <textarea className="input-field min-h-[60px]" placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} />
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">الدور</label>
+            <select className="input-field" value={role} onChange={(e) => setRole(e.target.value as AppRole)}>
+              {grantableRoles.map((r) => (
+                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">الكنيسة</label>
+            <select className={lockCls(churchLocked)} value={churchId}
+              onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}>
+              <option value="">كل الكنائس (بدون تحديد)</option>
+              {churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">الخدمة</label>
+            <select className={lockCls(serviceLocked)} value={serviceId}
+              onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}>
+              <option value="">كل الخدمات (بدون تحديد)</option>
+              {scopedServices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">الفصل</label>
+            <select className="input-field" value={classId} onChange={(e) => setClassId(e.target.value)}>
+              <option value="">كل الفصول (بدون تحديد)</option>
+              {scopedClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 px-4 py-3 text-sm font-bold text-emerald-600">
+            <Upload className="h-4 w-4" />
+            {photoFile ? photoFile.name : (person?.image_url ?? servant.photo_url) ? 'تغيير صورة الخادم' : 'إضافة صورة الخادم (اختياري)'}
+            <input type="file" accept="image/*" className="hidden"
+              onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
+          </label>
+
+          {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>}
+          <button type="submit" disabled={saving} className="btn-primary w-full flex items-center justify-center gap-2">
+            {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+            حفظ التعديلات
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Permissions modal: connect the servant to permission profiles ----------
+function PermissionsModal({
+  servant, profiles, current, onClose, onSaved,
+}: {
+  servant: Servant;
+  profiles: PermissionProfile[];
+  current: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const supabase = createClient();
+  const [selected, setSelected] = useState<string[]>(current);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const save = async () => {
+    setError('');
+    setSaving(true);
+    const add = selected.filter((id) => !current.includes(id));
+    const del = current.filter((id) => !selected.includes(id));
+    if (add.length) {
+      const { error: e1 } = await supabase.from('permissions').insert(add.map((pid) => ({ servant_id: servant.id, permission_profile_id: pid })));
+      if (e1) { setError('تعذر منح الصلاحيات — تأكد من صلاحياتك'); setSaving(false); return; }
+    }
+    if (del.length) {
+      const { error: e2 } = await supabase.from('permissions').delete().eq('servant_id', servant.id).in('permission_profile_id', del);
+      if (e2) { setError('تعذر إزالة الصلاحيات'); setSaving(false); return; }
+    }
+    setSaving(false);
+    onSaved();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6" onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-white p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-lg font-extrabold">
+            <KeyRound className="h-5 w-5 text-violet-600" /> صلاحيات الخادم
+          </h3>
+          <button onClick={onClose} aria-label="إغلاق" className="rounded-full p-1.5 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <p className="mb-3 text-sm font-bold text-slate-500">{servant.full_name}</p>
+
+        {profiles.length === 0 ? (
+          <p className="rounded-xl bg-slate-50 px-3 py-6 text-center text-sm font-bold text-slate-400">
+            لا توجد ملفات صلاحيات بعد — يصنعها المالك من وحدة المالك ← ملفات الصلاحيات
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {profiles.map((pp) => {
+              const on = selected.includes(pp.id);
+              return (
+                <li key={pp.id}>
+                  <button type="button" onClick={() => toggle(pp.id)} aria-pressed={on}
+                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-2.5 text-right transition ${on ? 'border-transparent bg-violet-50 ring-2 ring-violet-300' : 'border-slate-100 bg-white hover:bg-slate-50'}`}>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white" style={{ backgroundColor: pp.color }}>
+                      {on ? <Check className="h-5 w-5" /> : <KeyRound className="h-4 w-4" />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-extrabold">{pp.name}</span>
+                      <span className="block truncate text-[11px] text-slate-400">
+                        {pp.description || `${pp.permissions.length} صلاحية`}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {error && <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>}
+        <button onClick={save} disabled={saving || profiles.length === 0} className="btn-primary mt-4 w-full flex items-center justify-center gap-2">
+          {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+          حفظ الصلاحيات
+        </button>
+      </div>
+    </div>
+  );
+}

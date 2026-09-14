@@ -5,8 +5,8 @@ import { BRANDING } from '@/lib/branding';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  Settings, UserCheck, Church, Layers, School, LogOut, ChevronLeft, User, Phone, ShieldCheck,
-  QrCode, Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown,
+  Settings, Church, Layers, School, LogOut, ChevronLeft, User, Phone, ShieldCheck,
+  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import EditProfileModal from '@/components/EditProfileModal';
@@ -89,22 +89,10 @@ export default function SettingsPage() {
           <h3 className="mb-2 text-sm font-extrabold text-slate-500">الإدارة</h3>
           <div className="card !p-0 divide-y divide-indigo-50 overflow-hidden">
             <SettingsLink
-              href="/settings/invite"
-              icon={<QrCode className="h-5 w-5 text-primary-600" />}
-              label="دعوة خادم جديد"
-              desc="رابط و QR للتسجيل بنطاقك"
-            />
-            <SettingsLink
-              href="/settings/approvals"
-              icon={<UserCheck className="h-5 w-5 text-emerald-600" />}
-              label="طلبات انضمام الخدام"
-              desc="قبول أو رفض طلبات التسجيل"
-            />
-            <SettingsLink
-              href="/settings/servants"
+              href="/servants"
               icon={<Users className="h-5 w-5 text-emerald-600" />}
               label="إدارة الخدام"
-              desc="تعديل وإيقاف وحذف الخدام حسب نطاقك"
+              desc="الخدام · طلبات الانضمام · دعوة بالـ QR — في صفحة واحدة"
             />
             {(isOwner || profile?.role === 'church_manager') && (
               <SettingsLink

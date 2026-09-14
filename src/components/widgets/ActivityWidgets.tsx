@@ -261,11 +261,11 @@ export function PendingApprovalsWidget({ title, size }: WidgetProps) {
 
   const total = (n?.servants ?? 0) + (n?.requests ?? 0);
   return (
-    <WidgetCard id="w-pending-approvals" icon={UserCheck} title={title} tone={total > 0 ? 'red' : 'slate'} href="/settings/approvals" flush
+    <WidgetCard id="w-pending-approvals" icon={UserCheck} title={title} tone={total > 0 ? 'red' : 'slate'} href="/servants?tab=approvals" flush
       badge={n ? <span className={`badge tabular-nums ${total > 0 ? 'bg-red-500 text-white' : 'bg-emerald-100 text-emerald-700'}`}>{fmtNum(total)}</span> : undefined}>
       {!n ? <WidgetSkeleton rows={2} /> : (
         <div className={`grid ${size === 'half' ? 'grid-cols-1 divide-y' : 'grid-cols-2 divide-x divide-x-reverse'} divide-slate-100`}>
-          <Link href="/settings/approvals" className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50">
+          <Link href="/servants?tab=approvals" className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50">
             <span className={`rounded-xl p-2 ${n.servants > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}><UserPlus className="h-4 w-4" /></span>
             <span className="min-w-0 flex-1">
               <span className="block text-lg font-extrabold tabular-nums leading-none">{fmtNum(n.servants)}</span>

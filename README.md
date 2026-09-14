@@ -87,11 +87,13 @@ permission_profiles (ملفات الصلاحيات)  permissions (الصلاحي
 4. **كلمة المرور** + confirmation.
 → `auth.signUp` (login name = the code, `code@diocese.app`) → RPC **`servant_signup`** upserts the person by code (fill-blanks only) and creates the **pending** servant enrollment. Login (`/login`) is **code + password**.
 
-**Approval:** owner / church manager / service manager approves from **الإعدادات → طلبات الانضمام** (sees the person data), assigns role + scope and may attach **permission profiles** right away. Realtime — the waiting servant is let in instantly.
+**Approval:** owner / church manager / service manager approves from **إدارة الخدام (`/servants`) → طلبات الانضمام** (sees the person data), assigns role + scope and may attach **permission profiles** right away. Realtime — the waiting servant is let in instantly.
 
-**Permissions:** the owner builds **ملفات الصلاحيات** in the owner module (`/owner/permissions`) from the permission registry (`src/lib/permissions.ts` — keys like `children.attendance`, `servants.approve`…). Managers connect servants to profiles from **إدارة الخدام → الصلاحيات** (within their level; `can_manage_servant`). `my_permissions()` / `has_permission(key)` in SQL, `usePermissions().has(key)` in the app; the owner has everything. Realtime on both tables.
+**Permissions:** the owner builds **ملفات الصلاحيات** in the owner module (`/owner/permissions`) from the permission registry (`src/lib/permissions.ts` — keys like `children.attendance`, `servants.approve`…). Managers connect servants to profiles from **إدارة الخدام (`/servants`) → الخدام → الصلاحيات** (within their level; `can_manage_servant`). `my_permissions()` / `has_permission(key)` in SQL, `usePermissions().has(key)` in the app; the owner has everything. Realtime on both tables.
 
 **Compatibility:** `public.profiles` is now a `security_invoker` **view** over `servant_enrollments`, so every older function / policy / query keeps working; the app reads `servant_enrollments` directly. Audit FKs (`created_by`, `recorded_by`…) became `ON DELETE SET NULL` so deleting a servant never fails. `supabase/tests/servants_permissions_test.sql` covers the flow.
+
+**إدارة الخدام module page (`/servants`)** — the three servant pages live in ONE page with tabs: **الخدام** (manage + permissions) · **طلبات الانضمام** (badge with the pending count) · **دعوة (QR)** (scoped invite link + QR). The old `/settings/servants|approvals|invite` paths redirect there.
 
 ## Currently Completed Features
 - ✅ PWA: manifest (RTL/Arabic), service worker, installable, app icons — **name / icon / diocese name & logo configurable through Vercel env vars** (see Setup Guide § 4)
