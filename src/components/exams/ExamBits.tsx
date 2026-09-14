@@ -10,10 +10,12 @@ import Link from 'next/link';
 import { ArrowRight, GraduationCap } from 'lucide-react';
 import { EXAM_STATUS_LABELS, EXAM_STATUS_STYLE, type ExamStatus } from '@/lib/exams';
 import { APP_TZ } from '@/lib/time';
+import { useNavLabel } from '@/lib/customization-context';
 
 export function ExamsHeader({
   title, badge, back = '/exams', actions,
 }: { title?: string; badge?: React.ReactNode; back?: string; actions?: React.ReactNode }) {
+  const name = useNavLabel('exams');
   return (
     <section className="mb-3 flex items-center gap-2">
       <Link href={back} aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
@@ -21,7 +23,7 @@ export function ExamsHeader({
       </Link>
       <h2 className="flex min-w-0 flex-1 items-center gap-2 text-lg font-extrabold">
         <GraduationCap className="h-5 w-5 shrink-0 text-violet-600" />
-        <span className="truncate">{title ?? 'الامتحانات'}</span>
+        <span className="truncate">{title ?? name}</span>
         {badge}
       </h2>
       {actions}

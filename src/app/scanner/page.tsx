@@ -26,6 +26,7 @@ import {
 } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
+import { useNavLabel } from '@/lib/customization-context';
 
 // ---------- Scanner jobs — same system as the children page ----------
 // Attendance / points / data. Calls, messages and card printing don't make
@@ -76,6 +77,7 @@ const HISTORY_STYLE: Record<HistoryKind, { label: string; bg: string; icon: Reac
 };
 
 export default function ScannerPage() {
+  const pageName = useNavLabel('scanner');
   const { profile } = useAuth();
   const supabase = createClient();
   const { now } = useAppDate();
@@ -777,7 +779,7 @@ export default function ScannerPage() {
       <section id="scanner-header" className="mb-4">
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <ScanLine className="h-5 w-5 text-primary-600" />
-          الماسح — {jobLabel}
+          {pageName} — {jobLabel}
         </h2>
         <p className="mt-1 text-xs text-slate-500">
           اختر النطاق والوظيفة ثم امسح الرقم القومي (QR) أو ابحث يدوياً — تُنفَّذ الوظيفة المختارة على المخدوم فور مسحه

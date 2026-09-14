@@ -1,0 +1,286 @@
+'use client';
+
+// ---------- CORE home widgets (part 2 — activity) ----------
+//   AttendanceTrendWidget  — 14-day mini bars + week-over-week delta
+//   WeeklyStreakWidget     — last 7 days lit when attendance happened
+//   LeaderboardWidget      — top children by points
+//   FollowUpWidget         — absentees of the last occurrence not yet called
+//   PendingApprovalsWidget — servant sign-ups + data change requests
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import {
+  TrendingUp, TrendingDown, Minus, Flame, Trophy, PhoneCall, Phone, Inbox, UserCheck, UserPlus, ChevronLeft,
+} from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/lib/auth-context';
+import { useAppDate } from '@/lib/app-date-context';
+import { useCustomization } from '@/lib/customization-context';
+import { useDebouncedRealtime, scopeFilter } from '@/lib/realtime';
+import type { AppEvent } from '@/lib/types';
+import { cairoToday, currentOccurrence, previousOccurrenceDate, WEEKDAY_SHORT } from '@/lib/time';
+import { cachedLookup } from '@/lib/queries';
+import { fetchAttendanceTimeline, fetchLeaderboard, shiftDay, type LeaderRow } from '@/lib/stats';
+import { WidgetCard, WidgetEmpty, WidgetSkeleton, Avatar, fmtNum, fmtYmdLong } from './WidgetBits';
+import type { WidgetProps } from './CoreWidgets';
+
+/** Attendance per day for the last `n` days ending today (RLS-scoped). */
+function useDailyAttendance(n: number) {
+  const { now } = useAppDate();
+  const [supabase] = useState(() => createClient());
+  const today = cairoToday(now());
+  const days = useMemo(() => Array.from({ length: n }, (_, i) => shiftDay(today, i - (n - 1))), [today, n]);
+  const [vals, setVals] = useState<number[] | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const rows = await fetchAttendanceTimeline(supabase, { from: days[0], to: today, bucket: 'day' }, {});
+      const map = new Map<string, number>();
+      rows.forEach((r) => map.set(r.bucket, (map.get(r.bucket) ?? 0) + r.attendance));
+      setVals(days.map((d) => map.get(d) ?? 0));
+    } catch { setVals(days.map(() => 0)); }
+  }, [supabase, days, today]);
+  useEffect(() => { load(); }, [load]);
+  useDebouncedRealtime(supabase, `w-daily-${n}`, [{ table: 'attendance_log' }], load, { delayMs: 3000 });
+  return { days, vals };
+}
+
+// =====================================================================
+// Attendance trend — 14 days
+// =====================================================================
+export function AttendanceTrendWidget({ title }: WidgetProps) {
+  const { days, vals } = useDailyAttendance(14);
+  const max = Math.max(1, ...(vals ?? [0]));
+  const thisWeek = (vals ?? []).slice(7).reduce((a, b) => a + b, 0);
+  const lastWeek = (vals ?? []).slice(0, 7).reduce((a, b) => a + b, 0);
+  const delta = thisWeek - lastWeek;
+  const DeltaIcon = delta > 0 ? TrendingUp : delta < 0 ? TrendingDown : Minus;
+  const deltaTone = delta > 0 ? 'bg-emerald-100 text-emerald-700' : delta < 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500';
+
+  return (
+    <WidgetCard id="w-attendance-trend" icon={TrendingUp} title={title} subtitle="هذا الأسبوع مقابل السابق" tone="sky" href="/stats"
+      badge={vals ? <span className={`badge ${deltaTone} tabular-nums`}><DeltaIcon className="h-3 w-3" /> {delta > 0 ? '+' : ''}{fmtNum(delta)}</span> : undefined}>
+      {!vals ? <WidgetSkeleton rows={2} /> : (
+        <>
+          <div className="flex h-20 items-end gap-1" dir="ltr">
+            {vals.map((v, i) => (
+              <div key={days[i]} className="flex-1" title={`${days[i]} · ${v}`}>
+                <div className={`w-full rounded-t-md transition-all ${i === 13 ? 'bg-sky-600' : i >= 7 ? 'bg-sky-400' : 'bg-sky-200'}`} style={{ height: `${Math.max(4, Math.round((v / max) * 100))}%` }} />
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 flex justify-between text-[10px] font-bold text-slate-400">
+            <span>الأسبوع السابق {fmtNum(lastWeek)}</span>
+            <span className="text-sky-700">هذا الأسبوع {fmtNum(thisWeek)}</span>
+          </div>
+        </>
+      )}
+    </WidgetCard>
+  );
+}
+
+// =====================================================================
+// Weekly streak — 7 days
+// =====================================================================
+export function WeeklyStreakWidget({ title, size }: WidgetProps) {
+  const { days, vals } = useDailyAttendance(7);
+  let streak = 0;
+  if (vals) {
+    let i = vals.length - 1;
+    if (vals[i] === 0) i--;
+    for (; i >= 0 && vals[i] > 0; i--) streak++;
+  }
+  const active = vals ? vals.filter((v) => v > 0).length : 0;
+
+  return (
+    <WidgetCard id="w-weekly-streak" icon={Flame} title={title} tone="orange" href="/stats"
+      badge={vals ? <span className="badge bg-orange-100 text-orange-700 tabular-nums"><Flame className="h-3 w-3" /> {fmtNum(streak)}</span> : undefined}>
+      {!vals ? <WidgetSkeleton rows={1} /> : (
+        <>
+          <div className="flex justify-between gap-1">
+            {days.map((d, i) => {
+              const wd = new Date(d + 'T00:00:00Z').getUTCDay();
+              const on = vals[i] > 0;
+              return (
+                <div key={d} className="flex flex-1 flex-col items-center gap-1">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-extrabold tabular-nums transition ${on ? 'bg-gradient-to-br from-orange-500 to-amber-400 text-white shadow' : 'bg-slate-100 text-slate-300'} ${i === days.length - 1 ? 'ring-2 ring-orange-300 ring-offset-1' : ''}`}>
+                    {on ? fmtNum(vals[i]) : '·'}
+                  </span>
+                  <span className="text-[9px] font-bold text-slate-400">{WEEKDAY_SHORT[wd]}</span>
+                </div>
+              );
+            })}
+          </div>
+          {size === 'full' && <p className="mt-2 text-center text-[11px] font-bold text-slate-400">{fmtNum(active)} أيام نشاط من ٧ · سلسلة {fmtNum(streak)} متتالية</p>}
+        </>
+      )}
+    </WidgetCard>
+  );
+}
+
+// =====================================================================
+// Leaderboard
+// =====================================================================
+const MEDALS = ['🥇', '🥈', '🥉'];
+
+export function LeaderboardWidget({ title, size }: WidgetProps) {
+  const { profile } = useAuth();
+  const [supabase] = useState(() => createClient());
+  const [rows, setRows] = useState<LeaderRow[] | null>(null);
+  const limit = size === 'half' ? 5 : 6;
+
+  const load = useCallback(async () => {
+    try { setRows(await fetchLeaderboard(supabase, 'points', limit, {})); } catch { setRows([]); }
+  }, [supabase, limit]);
+  useEffect(() => { load(); }, [load]);
+  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments', filter: scopeFilter(profile) }], load, { delayMs: 2500 });
+
+  return (
+    <WidgetCard id="w-leaderboard" icon={Trophy} title={title} tone="amber" href="/stats" flush>
+      {!rows ? <WidgetSkeleton /> : rows.length === 0 ? (
+        <WidgetEmpty icon={Trophy} text="لا نقاط بعد" />
+      ) : (
+        <ul className="divide-y divide-amber-50">
+          {rows.map((r, i) => (
+            <li key={r.enrollment_id} className={`flex items-center gap-2.5 px-3 py-2 ${i === 0 ? 'bg-amber-50/60' : ''}`}>
+              <span className="w-6 text-center text-base leading-none">{MEDALS[i] ?? <span className="text-xs font-extrabold tabular-nums text-slate-400">{fmtNum(i + 1)}</span>}</span>
+              <Avatar url={r.image_url} name={r.name} size={size === 'half' ? 28 : 34} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-extrabold text-slate-800">{r.name}</span>
+                {r.class_name && size === 'full' && <span className="block truncate text-[10px] font-bold text-slate-400">{r.class_name}</span>}
+              </span>
+              <span className="badge bg-gold-100 text-gold-700 tabular-nums">{fmtNum(r.points)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </WidgetCard>
+  );
+}
+
+// =====================================================================
+// Follow-up — absentees of the last finished occurrence, not yet called
+// =====================================================================
+interface AbsentRow { enrollment_id: string; name: string; phone: string | null; image_url: string | null }
+type FollowState = { ev: AppEvent; date: string; total: number; called: number; rows: AbsentRow[] } | 'none' | null;
+
+export function FollowUpWidget({ title, size }: WidgetProps) {
+  const { profile } = useAuth();
+  const { now } = useAppDate();
+  const { label } = useCustomization();
+  const [supabase] = useState(() => createClient());
+  const [state, setState] = useState<FollowState>(null);
+  const shown = size === 'half' ? 3 : 5;
+
+  const load = useCallback(async () => {
+    const at = now();
+    const events = await cachedLookup<AppEvent>(supabase, 'events', { column: 'event_date', ascending: false, nullsFirst: false });
+    // the most recent FINISHED occurrence; the default event wins ties
+    let best: { ev: AppEvent; date: string; rank: string } | null = null;
+    for (const ev of events) {
+      const occ = currentOccurrence(ev, at);
+      if (!occ) continue;
+      const date = occ.phase === 'after' ? occ.date : ev.recurrence === 'weekly' ? previousOccurrenceDate(ev, occ.date) : null;
+      if (!date) continue;
+      const rank = `${date}${ev.is_default ? 'z' : 'a'}`;
+      if (!best || rank > best.rank) best = { ev, date, rank };
+    }
+    if (!best) { setState('none'); return; }
+    let q = supabase.from('enrollments').select('id, person:persons(name, phone, image_url)').eq('church_id', best.ev.church_id).limit(1000);
+    if (best.ev.service_id) q = q.eq('service_id', best.ev.service_id);
+    if (best.ev.class_id) q = q.eq('class_id', best.ev.class_id);
+    const [{ data: enr }, { data: att }, { data: calls }] = await Promise.all([
+      q,
+      supabase.from('attendance_log').select('enrollment_id').eq('event_id', best.ev.id).eq('attended_on', best.date).limit(2000),
+      supabase.from('contact_log').select('enrollment_id').eq('event_id', best.ev.id).eq('occurrence_on', best.date).limit(2000),
+    ]);
+    const attended = new Set(((att ?? []) as { enrollment_id: string }[]).map((r) => r.enrollment_id));
+    const contacted = new Set(((calls ?? []) as { enrollment_id: string }[]).map((r) => r.enrollment_id));
+    type Row = { id: string; person: { name: string; phone: string | null; image_url: string | null } | null };
+    const absent = ((enr ?? []) as unknown as Row[]).filter((e) => e.person && !attended.has(e.id));
+    const notCalled = absent.filter((e) => !contacted.has(e.id));
+    setState({
+      ev: best.ev, date: best.date, total: absent.length, called: absent.length - notCalled.length,
+      rows: notCalled.slice(0, shown).map((e) => ({ enrollment_id: e.id, name: e.person!.name, phone: e.person!.phone, image_url: e.person!.image_url })),
+    });
+  }, [supabase, now, shown]);
+  useEffect(() => { load(); }, [load]);
+  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }, { table: 'contact_log' }, { table: 'enrollments', filter: scopeFilter(profile) }], load, { delayMs: 2500 });
+
+  const s = state && state !== 'none' ? state : null;
+  const pending = s ? s.total - s.called : 0;
+  return (
+    <WidgetCard id="w-follow-up" icon={PhoneCall} title={title} tone="teal" href="/children" flush
+      subtitle={s ? `غائبو «${s.ev.name}» · ${fmtYmdLong(s.date)}` : undefined}
+      badge={s ? <span className={`badge tabular-nums ${pending > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{fmtNum(pending)} لم يُفتقد</span> : undefined}>
+      {state === null ? <WidgetSkeleton /> : state === 'none' ? (
+        <WidgetEmpty icon={PhoneCall} text="لا توجد مناسبة منتهية بعد" hint="سيظهر هنا غائبو آخر مناسبة" />
+      ) : s!.total === 0 ? (
+        <WidgetEmpty icon={UserCheck} text="حضر الجميع 🎉" />
+      ) : pending === 0 ? (
+        <WidgetEmpty icon={PhoneCall} text={`تم افتقاد كل الغائبين (${fmtNum(s!.total)}) ✓`} />
+      ) : (
+        <>
+          <ul className="divide-y divide-teal-50">
+            {s!.rows.map((r) => (
+              <li key={r.enrollment_id} className="flex items-center gap-2.5 px-3 py-2">
+                <Avatar url={r.image_url} name={r.name} size={32} />
+                <span className="min-w-0 flex-1 truncate text-xs font-extrabold text-slate-800">{r.name}</span>
+                {r.phone ? (
+                  <a href={`tel:${r.phone}`} className="rounded-xl bg-teal-50 p-2 text-teal-700 hover:bg-teal-100" aria-label={`اتصال بـ ${r.name}`}><Phone className="h-4 w-4" /></a>
+                ) : <span className="text-[10px] font-bold text-slate-300">بلا هاتف</span>}
+              </li>
+            ))}
+          </ul>
+          <Link href="/children" className="flex items-center justify-center gap-1 bg-teal-50/60 py-2 text-[11px] font-extrabold text-teal-700 hover:bg-teal-50">
+            {pending > s!.rows.length ? `و${fmtNum(pending - s!.rows.length)} آخرون · ` : ''}{label('children')} <ChevronLeft className="h-3.5 w-3.5" />
+          </Link>
+        </>
+      )}
+    </WidgetCard>
+  );
+}
+
+// =====================================================================
+// Pending approvals
+// =====================================================================
+export function PendingApprovalsWidget({ title, size }: WidgetProps) {
+  const { profile } = useAuth();
+  const [supabase] = useState(() => createClient());
+  const [n, setN] = useState<{ servants: number; requests: number } | null>(null);
+
+  const load = useCallback(async () => {
+    const [{ count }, { data }] = await Promise.all([
+      supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.rpc('pending_data_requests_count'),
+    ]);
+    setN({ servants: count ?? 0, requests: typeof data === 'number' ? data : 0 });
+  }, [supabase]);
+  useEffect(() => { if (profile) load(); }, [load, profile]);
+  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'profiles' }, { table: 'data_change_requests' }], load, { delayMs: 1500 });
+
+  const total = (n?.servants ?? 0) + (n?.requests ?? 0);
+  return (
+    <WidgetCard id="w-pending-approvals" icon={UserCheck} title={title} tone={total > 0 ? 'red' : 'slate'} href="/settings/approvals" flush
+      badge={n ? <span className={`badge tabular-nums ${total > 0 ? 'bg-red-500 text-white' : 'bg-emerald-100 text-emerald-700'}`}>{fmtNum(total)}</span> : undefined}>
+      {!n ? <WidgetSkeleton rows={2} /> : (
+        <div className={`grid ${size === 'half' ? 'grid-cols-1 divide-y' : 'grid-cols-2 divide-x divide-x-reverse'} divide-slate-100`}>
+          <Link href="/settings/approvals" className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50">
+            <span className={`rounded-xl p-2 ${n.servants > 0 ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-400'}`}><UserPlus className="h-4 w-4" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-lg font-extrabold tabular-nums leading-none">{fmtNum(n.servants)}</span>
+              <span className="block truncate text-[10px] font-bold text-slate-400">طلبات انضمام خدام</span>
+            </span>
+          </Link>
+          <Link href="/settings/data-requests" className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50">
+            <span className={`rounded-xl p-2 ${n.requests > 0 ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-400'}`}><Inbox className="h-4 w-4" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-lg font-extrabold tabular-nums leading-none">{fmtNum(n.requests)}</span>
+              <span className="block truncate text-[10px] font-bold text-slate-400">طلبات تعديل بيانات</span>
+            </span>
+          </Link>
+        </div>
+      )}
+    </WidgetCard>
+  );
+}

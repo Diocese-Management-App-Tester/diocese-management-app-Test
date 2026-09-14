@@ -13,7 +13,8 @@ import { Lock, Loader2, Crown, ArrowRight } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { useModuleVisible } from '@/lib/modules-context';
-import { MODULE_BY_KEY, type ModuleKey } from '@/lib/modules';
+import { type ModuleKey } from '@/lib/modules';
+import { useCustomization } from '@/lib/customization-context';
 
 function Blocked({ title, desc, icon }: { title: string; desc: string; icon: ReactNode }) {
   return (
@@ -39,6 +40,7 @@ export function ModuleGate({
   module, children, shell = false,
 }: { module: ModuleKey; children: ReactNode; shell?: boolean }) {
   const visible = useModuleVisible(module);
+  const { label } = useCustomization();
   const wrap = (node: ReactNode) => (shell ? <AppShell>{node}</AppShell> : <>{node}</>);
   if (visible === null) {
     return wrap(
@@ -50,7 +52,7 @@ export function ModuleGate({
   if (!visible) {
     return wrap(
       <Blocked
-        title={`وحدة «${MODULE_BY_KEY[module].label}» غير مفعّلة لنطاقك`}
+        title={`وحدة «${label(module)}» غير مفعّلة لنطاقك`}
         desc="مالك التطبيق يحدد الكنائس والخدمات والفصول التي تظهر لها هذه الوحدة"
         icon={<Lock className="h-7 w-7" />}
       />
@@ -61,6 +63,7 @@ export function ModuleGate({
 
 export function OwnerGate({ children }: { children: ReactNode }) {
   const { profile, loading } = useAuth();
+  const { label } = useCustomization();
   if (loading || !profile) {
     return (
       <div className="flex justify-center py-16">
@@ -71,7 +74,7 @@ export function OwnerGate({ children }: { children: ReactNode }) {
   if (profile.role !== 'owner') {
     return (
       <Blocked
-        title="وحدة المالك خاصة بمالك التطبيق"
+        title={`${label('owner')} خاصة بمالك التطبيق`}
         desc="هذه الصفحة لا تظهر إلا لحساب المالك"
         icon={<Crown className="h-7 w-7" />}
       />

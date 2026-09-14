@@ -167,6 +167,33 @@ export const DEFAULT_NAVIGATION: NavigationConfig = {
 export const isLinkItem = (key: string) => key.startsWith('link:');
 export const linkTarget = (key: string) => key.slice(5);
 
+// ---------- custom display names (أسماء الوجهات, migration 0036) ----------
+// `app_settings.key = 'names'` → { <destination key>: <label> }. ONE source of
+// truth for what every page / module is CALLED everywhere in the app: the
+// taskbar, the side menu, the settings hub, the module headers and the page
+// titles. Editing the label of a taskbar slot writes here too, so renaming a
+// module in the bar renames it on its page and in every menu.
+export type NamesConfig = Record<string, string>;
+export const NAMES_SETTING_KEY = 'names';
+export const MAX_NAME_LENGTH = 30;
+
+export function normalizeNames(raw: unknown): NamesConfig {
+  const obj = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const out: NamesConfig = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const d = DEST_BY_KEY[k];
+    if (!d || typeof v !== 'string') continue;
+    const s = v.trim().slice(0, MAX_NAME_LENGTH);
+    if (s && s !== d.label) out[k] = s;
+  }
+  return out;
+}
+
+/** Display name of a destination for the current names config. */
+export function destLabel(key: string, names: NamesConfig): string {
+  return names[key] ?? DEST_BY_KEY[key]?.label ?? key;
+}
+
 /** Sanitize a stored JSON value: unknown keys dropped, taskbar padded to 5 unique slots. */
 export function normalizeNavigation(raw: unknown): NavigationConfig {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Partial<NavigationConfig>;
@@ -182,7 +209,7 @@ export function normalizeNavigation(raw: unknown): NavigationConfig {
     const icon = (s as TaskbarSlot).icon;
     if (icon && ICON_LIBRARY[icon]) slot.icon = icon;
     const label = (s as TaskbarSlot).label;
-    if (typeof label === 'string' && label.trim()) slot.label = label.trim().slice(0, 20);
+    if (typeof label === 'string' && label.trim()) slot.label = label.trim().slice(0, MAX_NAME_LENGTH);
     taskbar.push(slot);
     if (taskbar.length === TASKBAR_SIZE) break;
   }
@@ -226,7 +253,7 @@ export interface ResolvedNavItem {
  * place) by the first default core page not already in the bar, so the bar
  * is always full and the visible slots keep their positions.
  */
-export function resolveTaskbar(config: NavigationConfig, allowed: Set<string>): ResolvedNavItem[] {
+export function resolveTaskbar(config: NavigationConfig, allowed: Set<string>, names: NamesConfig = {}): ResolvedNavItem[] {
   const used = new Set<string>();
   // pass 1 — keep valid slots in their positions
   const slots: (ResolvedNavItem | null)[] = config.taskbar.slice(0, TASKBAR_SIZE).map((slot) => {
@@ -235,7 +262,8 @@ export function resolveTaskbar(config: NavigationConfig, allowed: Set<string>): 
     used.add(d.key);
     return {
       key: d.key, href: d.href, kind: d.kind, color: d.color,
-      label: slot.label ?? d.label,
+      // slot label (legacy per-slot override) → global custom name → default
+      label: slot.label ?? destLabel(d.key, names),
       icon: resolveIcon(slot.icon, d.icon),
     };
   });
@@ -246,16 +274,16 @@ export function resolveTaskbar(config: NavigationConfig, allowed: Set<string>): 
     if (s) return s;
     const c = spare.shift();
     if (!c) return null;
-    return { key: c.key, href: c.href, kind: c.kind, label: c.label, icon: c.icon };
+    return { key: c.key, href: c.href, kind: c.kind, label: destLabel(c.key, names), icon: c.icon };
   }).filter((s): s is ResolvedNavItem => s !== null);
 }
 
 /** Everything the user may see that is NOT in the taskbar — side-menu section 2. */
-export function resolveMenuRest(taskbar: ResolvedNavItem[], allowed: Set<string>): ResolvedNavItem[] {
+export function resolveMenuRest(taskbar: ResolvedNavItem[], allowed: Set<string>, names: NamesConfig = {}): ResolvedNavItem[] {
   const inBar = new Set(taskbar.map((t) => t.key));
   return ALL_DESTINATIONS
     .filter((d) => allowed.has(d.key) && !inBar.has(d.key))
-    .map((d) => ({ key: d.key, href: d.href, kind: d.kind, color: d.color, label: d.label, icon: d.icon }));
+    .map((d) => ({ key: d.key, href: d.href, kind: d.kind, color: d.color, label: destLabel(d.key, names), icon: d.icon }));
 }
 
 export interface ResolvedHeaderItem {
@@ -265,13 +293,13 @@ export interface ResolvedHeaderItem {
   icon?: string;                 // icon override (library name)
 }
 
-export function resolveHeader(config: NavigationConfig, allowed: Set<string>): ResolvedHeaderItem[] {
+export function resolveHeader(config: NavigationConfig, allowed: Set<string>, names: NamesConfig = {}): ResolvedHeaderItem[] {
   const out: ResolvedHeaderItem[] = [];
   for (const h of config.header) {
     if (isLinkItem(h.key)) {
       const d = DEST_BY_KEY[linkTarget(h.key)];
       if (!d || !allowed.has(d.key)) continue;
-      out.push({ key: h.key, icon: h.icon, link: { key: d.key, href: d.href, kind: d.kind, color: d.color, label: d.label, icon: resolveIcon(h.icon, d.icon) } });
+      out.push({ key: h.key, icon: h.icon, link: { key: d.key, href: d.href, kind: d.kind, color: d.color, label: destLabel(d.key, names), icon: resolveIcon(h.icon, d.icon) } });
     } else {
       const w = HEADER_WIDGET_BY_KEY[h.key];
       if (!w) continue;

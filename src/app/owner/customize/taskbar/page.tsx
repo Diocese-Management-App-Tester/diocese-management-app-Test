@@ -21,7 +21,7 @@ import {
 } from '@/lib/navigation';
 
 export default function CustomizeTaskbarPage() {
-  const { navigation, customized, loading, saveNavigation, resetNavigation } = useCustomization();
+  const { navigation, customized, loading, saveNavigation, resetNavigation, names, label } = useCustomization();
 
   const [slots, setSlots] = useState<TaskbarSlot[]>(navigation.taskbar);
   const [pristine, setPristine] = useState(JSON.stringify(navigation.taskbar));
@@ -113,7 +113,7 @@ export default function CustomizeTaskbarPage() {
                     <span className={`rounded-xl px-3 py-1 ${i === 0 ? (owner ? 'bg-gold-100' : 'bg-primary-100') : ''}`}>
                       <Icon className="h-5 w-5" />
                     </span>
-                    <span className="max-w-full truncate px-0.5">{s.label ?? d.label}</span>
+                    <span className="max-w-full truncate px-0.5">{s.label ?? label(s.key)}</span>
                   </div>
                 );
               })}
@@ -125,6 +125,7 @@ export default function CustomizeTaskbarPage() {
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             لكل خانة: اختر الوجهة (صفحة أساسية أو وحدة)، غيّر الأيقونة أو الاسم، وحرّك الترتيب بالأسهم.
+            <b> الاسم الذي تكتبه هنا يغيّر اسم الصفحة / الوحدة في كل مكان</b> (عنوان الصفحة والقوائم).
             الخادم الذي لا تُفعَّل له وحدة موجودة في الشريط يرى بدلاً منها صفحة أساسية.
           </span>
         </p>
@@ -135,7 +136,7 @@ export default function CustomizeTaskbarPage() {
             {slots.map((s, i) => {
               const d = DEST_BY_KEY[s.key];
               const Icon = resolveIcon(s.icon, d.icon);
-              const changed = !!s.icon || !!s.label;
+              const changed = !!s.icon || !!s.label || !!names[s.key];
               return (
                 <li key={s.key} id={`taskbar-slot-${i + 1}`} className="card !p-0 overflow-hidden">
                   <div className="flex items-center gap-3 px-3 py-3">
@@ -176,10 +177,11 @@ export default function CustomizeTaskbarPage() {
                       <input
                         id={`taskbar-slot-${i + 1}-label`}
                         className="input-field !py-2 !px-3 text-sm"
-                        placeholder={`الاسم في الشريط (الافتراضي: ${d.label})`}
-                        value={s.label ?? ''}
-                        maxLength={20}
-                        onChange={(e) => update(i, { label: e.target.value })}
+                        placeholder={`الاسم في كل مكان (الافتراضي: ${d.label})`}
+                        value={s.label ?? names[s.key] ?? ''}
+                        maxLength={30}
+                        // clearing a slot that already has a global name → write the default name (resets it on save)
+                        onChange={(e) => update(i, { label: e.target.value || (names[s.key] ? d.label : undefined) })}
                       />
                     </div>
 
@@ -209,12 +211,12 @@ export default function CustomizeTaskbarPage() {
                     <div className="flex items-center justify-between border-t border-indigo-50 bg-slate-50/60 px-3 py-1.5">
                       <span className="text-[11px] font-bold text-slate-400">
                         {s.icon && <>أيقونة: <span dir="ltr">{s.icon}</span></>}
-                        {s.icon && s.label && ' · '}
-                        {s.label && <>الاسم الافتراضي: {d.label}</>}
+                        {s.icon && (s.label || names[s.key]) && ' · '}
+                        {(s.label || names[s.key]) && <>الاسم الافتراضي: {d.label}</>}
                       </span>
                       <button
                         type="button"
-                        onClick={() => update(i, null)}
+                        onClick={() => update(i, names[s.key] ? { icon: undefined, label: d.label } : null)}
                         className="flex items-center gap-1 text-[11px] font-bold text-primary-600 hover:underline"
                       >
                         <RotateCcw className="h-3 w-3" /> الافتراضي
@@ -242,7 +244,7 @@ export default function CustomizeTaskbarPage() {
               return (
                 <div key={d.key} className="flex items-center gap-3 px-4 py-2.5">
                   <Icon className={`h-5 w-5 shrink-0 ${d.color ?? 'text-slate-500'}`} />
-                  <span className="flex-1 text-sm font-bold text-slate-700">{d.label}</span>
+                  <span className="flex-1 text-sm font-bold text-slate-700">{label(d.key)}</span>
                   <span className="badge bg-slate-100 text-slate-500 flex items-center gap-1">
                     <Layers className="h-3 w-3" /> {KIND_LABEL[d.kind]}
                   </span>
@@ -267,7 +269,7 @@ export default function CustomizeTaskbarPage() {
 
         {picking !== null && (
           <IconPicker
-            title={`أيقونة «${slots[picking].label ?? DEST_BY_KEY[slots[picking].key].label}»`}
+            title={`أيقونة «${slots[picking].label ?? label(slots[picking].key)}»`}
             value={slots[picking].icon}
             defaultName={DEST_BY_KEY[slots[picking].key].iconName}
             onPick={(name) => { update(picking, { icon: name }); setPicking(null); }}

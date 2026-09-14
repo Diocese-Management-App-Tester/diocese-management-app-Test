@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { BirthdayGreeting, GreetingKind } from '@/lib/birthdays';
 import { GREETING_LABELS } from '@/lib/birthdays';
+import { useNavLabel } from '@/lib/customization-context';
 
 const TABS = [
   { href: '/birthdays', label: 'الشهر', icon: CalendarDays, id: 'bd-tab-month', exact: true },
@@ -23,6 +24,7 @@ const TABS = [
 
 export function BirthdayHeader({ title, badge, hideTabs = false }: { title?: string; badge?: React.ReactNode; hideTabs?: boolean }) {
   const path = usePathname();
+  const name = useNavLabel('birthdays');
   return (
     <>
       <section className="mb-3 flex items-center gap-2 print:hidden">
@@ -31,7 +33,7 @@ export function BirthdayHeader({ title, badge, hideTabs = false }: { title?: str
         </Link>
         <h2 className="flex min-w-0 items-center gap-2 text-lg font-extrabold">
           <Cake className="h-5 w-5 shrink-0 text-pink-600" />
-          أعياد الميلاد
+          {name}
           {title && <span className="truncate text-sm font-bold text-slate-400">· {title}</span>}
           {badge}
         </h2>

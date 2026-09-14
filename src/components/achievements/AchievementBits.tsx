@@ -12,8 +12,10 @@ import Image from 'next/image';
 import { ArrowRight, Trophy, Star, CalendarDays } from 'lucide-react';
 import type { Church, Service, ClassRoom, AppEvent } from '@/lib/types';
 import type { Achievement } from '@/lib/achievements';
+import { useNavLabel } from '@/lib/customization-context';
 
 export function AchievementsHeader({ title, badge, back = '/settings' }: { title?: string; badge?: React.ReactNode; back?: string }) {
+  const name = useNavLabel('achievements');
   return (
     <section className="mb-3 flex items-center gap-2">
       <Link href={back} aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
@@ -21,7 +23,7 @@ export function AchievementsHeader({ title, badge, back = '/settings' }: { title
       </Link>
       <h2 className="flex items-center gap-2 text-lg font-extrabold">
         <Trophy className="h-5 w-5 text-amber-600" />
-        الإنجازات
+        {name}
         {title && <span className="text-slate-400 font-bold text-sm">· {title}</span>}
         {badge}
       </h2>

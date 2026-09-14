@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { uploadPhoto } from '@/lib/upload';
 import { ROLE_LABELS } from '@/lib/types';
 import { fmtMsgTime, type ChatMessage } from '@/lib/chat';
+import { useNavLabel } from '@/lib/customization-context';
 
 export async function compressImage(file: File): Promise<Blob> {
   const url = URL.createObjectURL(file);
@@ -48,6 +49,7 @@ export async function compressImage(file: File): Promise<Blob> {
 export function MessagesHeader({
   title, sub, badge, back = '/messages', actions, icon,
 }: { title?: string; sub?: string; badge?: ReactNode; back?: string; actions?: ReactNode; icon?: ReactNode }) {
+  const name = useNavLabel('messages');
   return (
     <section className="mb-3 flex items-center gap-2">
       <Link href={back} aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
@@ -57,7 +59,7 @@ export function MessagesHeader({
       <div className="min-w-0 flex-1">
         <h2 className="flex items-center gap-2 text-lg font-extrabold leading-tight">
           {!icon && <MessageCircle className="h-5 w-5 shrink-0 text-sky-600" />}
-          <span className="truncate">{title ?? 'الرسائل'}</span>
+          <span className="truncate">{title ?? name}</span>
           {badge}
         </h2>
         {sub && <p className="truncate text-xs font-bold text-slate-400">{sub}</p>}

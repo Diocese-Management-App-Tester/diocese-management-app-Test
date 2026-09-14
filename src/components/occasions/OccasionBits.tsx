@@ -23,8 +23,10 @@ import {
   occasionPhase, fmtDateShort, fmtTime, fmtWhen, relativeDay, remainingSeats,
   type Occasion, type OccasionCounts, type RegistrationStatus, type OccasionKind, type OccasionStatus,
 } from '@/lib/occasions';
+import { useNavLabel } from '@/lib/customization-context';
 
 export function OccasionsHeader({ title, badge, back = '/settings', action }: { title?: string; badge?: ReactNode; back?: string; action?: ReactNode }) {
+  const name = useNavLabel('occasions');
   return (
     <section className="mb-3 flex items-center gap-2">
       <Link href={back} aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
@@ -32,7 +34,7 @@ export function OccasionsHeader({ title, badge, back = '/settings', action }: { 
       </Link>
       <h2 className="flex min-w-0 flex-1 items-center gap-2 text-lg font-extrabold">
         <Tent className="h-5 w-5 shrink-0 text-cyan-600" />
-        <span className="shrink-0">الفعاليات</span>
+        <span className="shrink-0">{name}</span>
         {title && <span className="truncate text-sm font-bold text-slate-400">· {title}</span>}
         {badge}
       </h2>

@@ -31,10 +31,12 @@ import {
 import type {
   EnrollmentWithPerson, Church, Service, ClassRoom, ShepherdClaim, ShepherdGroupSummary,
 } from '@/lib/types';
+import { useNavLabel } from '@/lib/customization-context';
 
 type Tab = 'mine' | 'pick';
 
 export default function ShepherdsPage() {
+  const pageName = useNavLabel('shepherds');
   const { profile } = useAuth();
   const [supabase] = useState(() => createClient());
   const isManager = !!profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
@@ -220,7 +222,7 @@ export default function ShepherdsPage() {
         </Link>
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <HeartHandshake className="h-5 w-5 text-teal-600" />
-          الأشابين
+          {pageName}
           <span id="my-group-count" className="badge bg-teal-100 text-teal-700 tabular-nums">{mine.length}</span>
         </h2>
       </section>

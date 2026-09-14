@@ -14,6 +14,7 @@ import { ArrowRight, ShoppingBag, Package, ScanLine, Archive, ImageIcon } from '
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { cachedLookup, ALL } from '@/lib/queries';
 import type { Church, Service, ClassRoom } from '@/lib/types';
+import { useNavLabel } from '@/lib/customization-context';
 
 const TABS = [
   { href: '/store/pos', label: 'الكاشير', icon: ScanLine, id: 'store-tab-pos' },
@@ -23,6 +24,7 @@ const TABS = [
 
 export function StoreHeader({ title, badge }: { title?: string; badge?: React.ReactNode }) {
   const path = usePathname();
+  const name = useNavLabel('store');
   return (
     <>
       <section className="mb-3 flex items-center gap-2">
@@ -31,7 +33,7 @@ export function StoreHeader({ title, badge }: { title?: string; badge?: React.Re
         </Link>
         <h2 className="flex items-center gap-2 text-lg font-extrabold">
           <ShoppingBag className="h-5 w-5 text-orange-600" />
-          إستبدال النقاط
+          {name}
           {title && <span className="text-slate-400 font-bold text-sm">· {title}</span>}
           {badge}
         </h2>
