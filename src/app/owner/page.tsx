@@ -5,7 +5,8 @@
 // added here step by step; the first one is module access control.
 
 import Link from 'next/link';
-import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush } from 'lucide-react';
+import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush, KeyRound } from 'lucide-react';
+import { usePermissions } from '@/lib/permissions-context';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
 import { useModules } from '@/lib/modules-context';
@@ -16,6 +17,7 @@ export default function OwnerHubPage() {
   const { grants } = useModules();
   const { customized, widgetsCustomized, names, label } = useCustomization();
   const anyCustom = customized || widgetsCustomized || Object.keys(names).length > 0;
+  const { profiles: permissionProfiles } = usePermissions();
 
   return (
     <AppShell>
@@ -54,6 +56,26 @@ export default function OwnerHubPage() {
               </span>
               <span className="badge bg-primary-100 text-primary-700 tabular-nums">
                 {MODULES.length} وحدة · {grants.length} صلاحية
+              </span>
+              <ChevronLeft className="h-4 w-4 text-slate-300" />
+            </Link>
+
+            <Link
+              id="owner-permissions-link"
+              href="/owner/permissions"
+              className="flex items-center gap-3 px-4 py-3.5 hover:bg-indigo-50/50 transition"
+            >
+              <span className="rounded-xl bg-slate-50 p-2">
+                <KeyRound className="h-5 w-5 text-violet-600" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-bold text-sm">ملفات الصلاحيات</span>
+                <span className="block text-xs text-slate-400 truncate">
+                  مجموعات صلاحيات باسم — يربط بها المديرون تسجيلات الخدام
+                </span>
+              </span>
+              <span className="badge bg-violet-100 text-violet-700 tabular-nums">
+                {permissionProfiles.length} ملف
               </span>
               <ChevronLeft className="h-4 w-4 text-slate-300" />
             </Link>

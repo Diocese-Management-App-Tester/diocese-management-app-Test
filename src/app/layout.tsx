@@ -3,6 +3,7 @@ import './globals.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { AppDateProvider } from '@/lib/app-date-context';
 import { ModulesProvider } from '@/lib/modules-context';
+import { PermissionsProvider } from '@/lib/permissions-context';
 import { CustomizationProvider } from '@/lib/customization-context';
 import PwaRegister from '@/components/PwaRegister';
 import { BRANDING, appIcon, manifestUrl } from '@/lib/branding';
@@ -61,9 +62,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-arabic bg-gradient-to-b from-slate-50 to-indigo-50/40 min-h-screen text-slate-800 antialiased">
         <AuthProvider>
           <ModulesProvider>
-            <CustomizationProvider>
-              <AppDateProvider>{children}</AppDateProvider>
-            </CustomizationProvider>
+            <PermissionsProvider>
+              <CustomizationProvider>
+                <AppDateProvider>{children}</AppDateProvider>
+              </CustomizationProvider>
+            </PermissionsProvider>
           </ModulesProvider>
         </AuthProvider>
         <PwaRegister />

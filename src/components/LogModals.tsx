@@ -52,7 +52,7 @@ function useRecorderNames(ids: (string | null)[]) {
     let cancelled = false;
     (async () => {
       const { data } = await supabase
-        .from('profiles')
+        .from('servant_enrollments')
         .select('id, full_name')
         .in('id', key.split(','));
       if (cancelled) return;

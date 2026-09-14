@@ -161,7 +161,7 @@ export function CountersWidget() {
     setCounts({ persons: n('persons'), enrollments: n('enrollments'), todayAttendance: n('today_attendance'), pendingServants: n('pending_servants'), churches: n('churches'), services: n('services'), classes: n('classes') });
   }, [supabase, now]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'enrollments', filter: scopeFilter(profile) }, { table: 'attendance_log' }, { table: 'profiles' }], load, { delayMs: 2000 });
+  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'enrollments', filter: scopeFilter(profile) }, { table: 'attendance_log' }, { table: 'servant_enrollments' }], load, { delayMs: 2000 });
 
   const c = counts;
   return (

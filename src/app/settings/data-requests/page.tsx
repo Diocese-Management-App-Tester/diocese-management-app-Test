@@ -61,7 +61,7 @@ export default function DataRequestsPage() {
   const load = useCallback(async () => {
     let q = supabase
       .from('data_change_requests')
-      .select('*, person:persons(id, name, image_url, national_id), decider:profiles!data_change_requests_decided_by_fkey(full_name)')
+      .select('*, person:persons(id, name, image_url, national_id), decider:servant_enrollments!data_change_requests_decided_by_fkey(full_name)')
       .order('created_at', { ascending: false })
       .limit(200);
     q = tab === 'pending' ? q.eq('status', 'pending') : q.neq('status', 'pending');

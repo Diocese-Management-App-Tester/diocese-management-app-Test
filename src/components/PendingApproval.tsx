@@ -36,7 +36,7 @@ export default function PendingApproval() {
           <span className="font-bold">{profile?.full_name ?? '...'}</span>
         </p>
         <p className="text-sm mt-1">
-          <span className="text-slate-400">المعرف: </span>
+          <span className="text-slate-400">الكود: </span>
           <span className="font-bold">{profile?.user_id}</span>
         </p>
         <p className="text-sm mt-1">

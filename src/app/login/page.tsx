@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { LogIn, Loader2, User, Lock, QrCode } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { userIdToEmail } from '@/lib/types';
+import { userIdToEmail, codeToUserId } from '@/lib/types';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,12 +23,13 @@ export default function LoginPage() {
     setLoading(true);
 
     const { error: err } = await supabase.auth.signInWithPassword({
-      email: userIdToEmail(userId),
+      // 0037: the login name IS the servant's code (national id / QR)
+      email: userIdToEmail(codeToUserId(userId)),
       password,
     });
 
     if (err) {
-      setError('بيانات الدخول غير صحيحة، تأكد من المعرف وكلمة المرور');
+      setError('بيانات الدخول غير صحيحة، تأكد من الكود وكلمة المرور');
       setLoading(false);
       return;
     }
@@ -57,14 +58,14 @@ export default function LoginPage() {
         <form onSubmit={handleLogin} className="card space-y-4">
           <div>
             <label htmlFor="login-user-id" className="mb-1.5 block text-sm font-bold">
-              معرف المستخدم
+              الكود (اسم الدخول)
             </label>
             <div className="relative">
               <User className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 id="login-user-id"
                 className="input-field pr-9"
-                placeholder="user_id"
+                placeholder="الكود / الرقم القومي"
                 dir="ltr"
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}

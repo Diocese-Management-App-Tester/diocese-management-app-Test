@@ -61,11 +61,37 @@ In the settings hub **إدارة المناسبات** sits directly after **إد
 | مسؤول خدمة `service_manager` | own service |
 | خادم فصل `class_servant` | own class |
 
-### Signup / Approval flow
-1. Servant signs up with **name, user id, phone, password** (`user_id` is mapped to `user_id@diocese.app` for Supabase Auth).
-2. Profile is created with `status = pending` → user sees "طلبك قيد المراجعة".
-3. Owner / church manager / service manager approves from **الإعدادات → طلبات انضمام الخدام**, assigning role + church/service/class.
-4. Approval propagates **in realtime** — the waiting user is let in instantly.
+### Servants architecture — تسجيلات الخدام (migration 0037)
+The servant is a **person first** (same `persons` table as the children —
+his **code = `national_id` = QR**) and is then registered as a **servant
+enrollment** (`servant_enrollments`, formerly `profiles`) bound to
+church → service → class — exactly like a child's `enrollments` row.
+
+```
+persons (الأشخاص)                      servant_enrollments (تسجيلات الخدام)
+  id · national_id (code / QR)   ◀──── person_id
+  name · gender · birthdate            id = auth.users.id (login account)
+  phone · address · notes              user_id = login name derived from the code
+  image_url                            role · status · church_id · service_id · class_id
+                                       full_name · phone · photo_url (mirrors, kept in sync by triggers)
+
+permission_profiles (ملفات الصلاحيات)  permissions (الصلاحيات)
+  name · color · permissions text[]  ◀── permission_profile_id
+  (owner-made, /owner/permissions)       servant_id → servant_enrollments
+```
+
+**Signup (`/signup`, 4 steps):**
+1. **مكان الخدمة** — church → service → class (pre-filled & locked from the invite link; each level optional, the approver can set it).
+2. **الكود** — typed, **scanned (QR camera)** or generated. `signup_lookup_code` tells whether the code already belongs to a person (→ data pre-filled) or to an account (→ blocked).
+3. **البيانات** — full name · gender · phone (`+2` + 11 digits) · birthdate (day/month/year) · address · notes · optional photo — **same rules as adding a child**.
+4. **كلمة المرور** + confirmation.
+→ `auth.signUp` (login name = the code, `code@diocese.app`) → RPC **`servant_signup`** upserts the person by code (fill-blanks only) and creates the **pending** servant enrollment. Login (`/login`) is **code + password**.
+
+**Approval:** owner / church manager / service manager approves from **الإعدادات → طلبات الانضمام** (sees the person data), assigns role + scope and may attach **permission profiles** right away. Realtime — the waiting servant is let in instantly.
+
+**Permissions:** the owner builds **ملفات الصلاحيات** in the owner module (`/owner/permissions`) from the permission registry (`src/lib/permissions.ts` — keys like `children.attendance`, `servants.approve`…). Managers connect servants to profiles from **إدارة الخدام → الصلاحيات** (within their level; `can_manage_servant`). `my_permissions()` / `has_permission(key)` in SQL, `usePermissions().has(key)` in the app; the owner has everything. Realtime on both tables.
+
+**Compatibility:** `public.profiles` is now a `security_invoker` **view** over `servant_enrollments`, so every older function / policy / query keeps working; the app reads `servant_enrollments` directly. Audit FKs (`created_by`, `recorded_by`…) became `ON DELETE SET NULL` so deleting a servant never fails. `supabase/tests/servants_permissions_test.sql` covers the flow.
 
 ## Currently Completed Features
 - ✅ PWA: manifest (RTL/Arabic), service worker, installable, app icons — **name / icon / diocese name & logo configurable through Vercel env vars** (see Setup Guide § 4)

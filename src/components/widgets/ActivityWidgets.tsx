@@ -251,13 +251,13 @@ export function PendingApprovalsWidget({ title, size }: WidgetProps) {
 
   const load = useCallback(async () => {
     const [{ count }, { data }] = await Promise.all([
-      supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('servant_enrollments').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.rpc('pending_data_requests_count'),
     ]);
     setN({ servants: count ?? 0, requests: typeof data === 'number' ? data : 0 });
   }, [supabase]);
   useEffect(() => { if (profile) load(); }, [load, profile]);
-  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'profiles' }, { table: 'data_change_requests' }], load, { delayMs: 1500 });
+  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'servant_enrollments' }, { table: 'data_change_requests' }], load, { delayMs: 1500 });
 
   const total = (n?.servants ?? 0) + (n?.requests ?? 0);
   return (
