@@ -66,6 +66,43 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- 1b. COMPATIBILITY VIEW right away — the triggers / helpers that run
+--     during the backfill below (guard_profile_update → my_role →
+--     my_scope) still read `public.profiles`.
+-- ---------------------------------------------------------------------
+drop view if exists public.profiles;
+create view public.profiles with (security_invoker = true) as
+  select * from public.servant_enrollments;
+grant select, insert, update, delete on public.profiles to authenticated;
+grant select, insert, update, delete on public.profiles to service_role;
+
+-- The guard trigger must also freeze person_id for a self-update by a non-manager
+create or replace function public.guard_profile_update()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_role public.app_role;
+begin
+  -- servant_signup (security definer RPC) may attach the person / refresh
+  -- the pending request — it flags itself through app.in_servant_signup.
+  if current_setting('app.in_servant_signup', true) = '1' then
+    new.updated_at := now();
+    return new;
+  end if;
+  v_role := public.my_role();
+  if auth.uid() = new.id and (v_role is null or v_role = 'class_servant') then
+    new.role := old.role;
+    new.status := old.status;
+    new.church_id := old.church_id;
+    new.service_id := old.service_id;
+    new.class_id := old.class_id;
+    new.approved_by := old.approved_by;
+    new.approved_at := old.approved_at;
+    new.person_id := old.person_id;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+
+-- ---------------------------------------------------------------------
 -- 2. person_id — the servant IS a person
 -- ---------------------------------------------------------------------
 alter table public.servant_enrollments
@@ -83,6 +120,7 @@ declare
   v_nid text;
   v_pid uuid;
 begin
+  perform set_config('app.in_servant_signup', '1', true);   -- bypass the guard trigger
   for r in select * from public.servant_enrollments where person_id is null loop
     v_nid := r.user_id;
     if exists (select 1 from public.persons p where p.national_id = v_nid) then
@@ -93,6 +131,7 @@ begin
     returning id into v_pid;
     update public.servant_enrollments set person_id = v_pid where id = r.id;
   end loop;
+  perform set_config('app.in_servant_signup', '0', true);
 end $$;
 
 -- Any servant enrollment inserted WITHOUT a person (e.g. the bootstrap owner
@@ -212,32 +251,6 @@ create policy servant_enrollments_delete on public.servant_enrollments for delet
   ))
 );
 
--- The guard trigger must also freeze person_id for a self-update by a non-manager
-create or replace function public.guard_profile_update()
-returns trigger language plpgsql security definer set search_path = public as $$
-declare v_role public.app_role;
-begin
-  -- servant_signup (security definer RPC) may attach the person / refresh
-  -- the pending request — it flags itself through app.in_servant_signup.
-  if current_setting('app.in_servant_signup', true) = '1' then
-    new.updated_at := now();
-    return new;
-  end if;
-  v_role := public.my_role();
-  if auth.uid() = new.id and (v_role is null or v_role = 'class_servant') then
-    new.role := old.role;
-    new.status := old.status;
-    new.church_id := old.church_id;
-    new.service_id := old.service_id;
-    new.class_id := old.class_id;
-    new.approved_by := old.approved_by;
-    new.approved_at := old.approved_at;
-    new.person_id := old.person_id;
-  end if;
-  new.updated_at := now();
-  return new;
-end $$;
-
 -- PERSONS: a servant sees / edits his own person row; managers see the
 -- persons of the servant enrollments they manage (pending ones included).
 drop policy if exists persons_select_self on public.persons;
@@ -312,7 +325,7 @@ end $$;
 --    security_invoker ⇒ the caller's RLS on the base table applies.
 --    Simple single-table view ⇒ insert / update / delete pass through.
 -- ---------------------------------------------------------------------
-drop view if exists public.profiles;
+drop view if exists public.profiles;   -- recreate: person_id column added above
 create view public.profiles with (security_invoker = true) as
   select * from public.servant_enrollments;
 comment on view public.profiles is 'توافق قديم — اسم الجدول أصبح servant_enrollments (تسجيلات الخدام)';
