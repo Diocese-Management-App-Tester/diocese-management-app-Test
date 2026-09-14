@@ -1,14 +1,56 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+// ---------- SERVANT SIGNUP (تسجيل خادم جديد) — architecture 0037 ----------
+// The servant is a PERSON first (same identity table as the children), then
+// a *servant enrollment* bound to church → service → class.
+//
+//   Step 1  مكان الخدمة   church → service → class (pre-filled & locked from
+//                         the invite link; every level optional)
+//   Step 2  الكود         typed or scanned QR — looked up in `persons` and,
+//                         when known, the data is pre-filled
+//   Step 3  البيانات      name · gender · phone · birthdate · address · notes
+//                         (same rules as adding a child) + optional photo
+//   Step 4  كلمة المرور   password + confirmation
+//
+// Submit: auth.signUp (login name = the code) → RPC `servant_signup` which
+// upserts the person by code and creates the PENDING servant enrollment.
+
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { UserPlus, Loader2, Lock } from 'lucide-react';
+import {
+  UserPlus, Loader2, Lock, ChevronRight, ChevronLeft, MapPin, IdCard, User, KeyRound,
+  ScanLine, Wand2, Camera, Trash2, UserCheck, Check, AlertTriangle,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { userIdToEmail } from '@/lib/types';
-import type { Church, Service, ClassRoom } from '@/lib/types';
+import QrScanner from '@/components/store/QrScanner';
+import PhotoCropModal from '@/components/PhotoCropModal';
+import { generatePersonCode } from '@/lib/codes';
+import { uploadPhoto } from '@/lib/upload';
+import {
+  userIdToEmail, codeToUserId, PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
+  type Gender, type Church, type Service, type ClassRoom, type SignupCodeLookup, type ServantSignupResult,
+} from '@/lib/types';
+
+const MONTHS_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+
+const composeBirthdate = (d: string, m: string, y: string): string | null => {
+  if (!d || !m || !y) return null;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+};
+
+type Step = 1 | 2 | 3 | 4;
+const STEPS: { n: Step; label: string; icon: typeof MapPin }[] = [
+  { n: 1, label: 'مكان الخدمة', icon: MapPin },
+  { n: 2, label: 'الكود', icon: IdCard },
+  { n: 3, label: 'البيانات', icon: User },
+  { n: 4, label: 'كلمة المرور', icon: KeyRound },
+];
 
 export default function SignupPage() {
   return (
@@ -19,39 +61,34 @@ export default function SignupPage() {
         </div>
       }
     >
-      <SignupForm />
+      <SignupWizard />
     </Suspense>
   );
 }
 
-function SignupForm() {
+function SignupWizard() {
   const params = useSearchParams();
   const supabase = createClient();
 
-  // Invite-link scope (locked when present)
+  // ---- Invite-link scope (locked when present) ----
   const inviteChurch = params.get('church') ?? '';
   const inviteService = params.get('service') ?? '';
   const inviteClass = params.get('class') ?? '';
+  const churchLocked = !!inviteChurch;
+  const serviceLocked = !!inviteService;
+  const classLocked = !!inviteClass;
 
-  const [form, setForm] = useState({
-    full_name: '',
-    user_id: '',
-    phone: '',
-    password: '',
-    confirm: '',
-  });
+  const [step, setStep] = useState<Step>(1);
+
+  // ---- Step 1: scope ----
   const [churchId, setChurchId] = useState(inviteChurch);
   const [serviceId, setServiceId] = useState(inviteService);
   const [classId, setClassId] = useState(inviteClass);
-
   const [churches, setChurches] = useState<Church[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
+  const [structureLoading, setStructureLoading] = useState(true);
 
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // Load structure lists (anon-readable via migration 0003)
   useEffect(() => {
     (async () => {
       const [{ data: ch }, { data: sv }, { data: cl }] = await Promise.all([
@@ -62,86 +99,169 @@ function SignupForm() {
       setChurches(ch ?? []);
       setServices(sv ?? []);
       setClasses(cl ?? []);
+      setStructureLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }));
-
   const scopedServices = services.filter((s) => !churchId || s.church_id === churchId);
-  const scopedClasses = classes.filter((c) => !serviceId || c.service_id === serviceId);
-
-  const churchLocked = !!inviteChurch;
-  const serviceLocked = !!inviteService;
-  const classLocked = !!inviteClass;
-
+  const scopedClasses = classes.filter((c) => (!serviceId || c.service_id === serviceId) && (!churchId || c.church_id === churchId));
   const churchName = churches.find((c) => c.id === churchId)?.name;
   const serviceName = services.find((s) => s.id === serviceId)?.name;
   const className = classes.find((c) => c.id === classId)?.name;
 
-  const handleSignup = async (e: React.FormEvent) => {
+  // ---- Step 2: code ----
+  const [code, setCode] = useState('');
+  const [showScan, setShowScan] = useState(false);
+  const [lookup, setLookup] = useState<SignupCodeLookup | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [lookupDone, setLookupDone] = useState(false);
+
+  useEffect(() => {
+    const c = code.trim();
+    setLookup(null);
+    setLookupDone(false);
+    if (!c) return;
+    setChecking(true);
+    const t = setTimeout(async () => {
+      const { data } = await supabase.rpc('signup_lookup_code', { p_code: c });
+      setLookup((data as SignupCodeLookup | null) ?? null);
+      setChecking(false);
+      setLookupDone(true);
+    }, 450);
+    return () => { clearTimeout(t); setChecking(false); };
+  }, [code, supabase]);
+
+  // ---- Step 3: person data ----
+  const [name, setName] = useState('');
+  const [gender, setGender] = useState<Gender | ''>('');
+  const [phoneLocal, setPhoneLocal] = useState('');
+  const [bDay, setBDay] = useState('');
+  const [bMonth, setBMonth] = useState('');
+  const [bYear, setBYear] = useState('');
+  const [address, setAddress] = useState('');
+  const [notes, setNotes] = useState('');
+  const [prefilled, setPrefilled] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rawImage, setRawImage] = useState('');
+  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+
+  const fillFromLookup = (p: SignupCodeLookup) => {
+    setName(p.name ?? '');
+    setGender(p.gender ?? '');
+    setPhoneLocal(p.phone ? p.phone.replace(/^\+2/, '').replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH) : '');
+    if (p.birthdate) {
+      const [y, m, d] = p.birthdate.split('-');
+      setBYear(String(Number(y))); setBMonth(String(Number(m))); setBDay(String(Number(d)));
+    }
+    setAddress(p.address ?? '');
+    if (p.image_url && !photoPreview) setPhotoPreview(p.image_url);
+    setPrefilled(true);
+  };
+
+  const currentYear = new Date().getFullYear();
+  const years = useMemo(() => Array.from({ length: 80 }, (_, i) => currentYear - 10 - i), [currentYear]);
+  const daysInMonth = useMemo(() => {
+    if (!bMonth) return 31;
+    const y = Number(bYear) || 2000;
+    return new Date(y, Number(bMonth), 0).getDate();
+  }, [bMonth, bYear]);
+  useEffect(() => {
+    if (bDay && Number(bDay) > daysInMonth) setBDay(String(daysInMonth));
+  }, [daysInMonth, bDay]);
+
+  const phoneValid = phoneLocal.length === PHONE_LOCAL_LENGTH;
+
+  // ---- Step 4: password ----
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // ---- Navigation with per-step validation ----
+  const next = () => {
+    setError('');
+    if (step === 1) {
+      // every level optional — the approver can set it — but a chosen child
+      // level must have its parent
+      if (serviceId && !churchId) return setError('اختر الكنيسة أولاً');
+      if (classId && !serviceId) return setError('اختر الخدمة أولاً');
+      setStep(2);
+    } else if (step === 2) {
+      if (!code.trim()) return setError('اكتب الكود أو امسحه بالكاميرا أو ولّد كودًا');
+      if (lookup?.has_account) return setError('هذا الكود مرتبط بحساب خادم بالفعل — سجّل الدخول به');
+      if (lookup && !prefilled) fillFromLookup(lookup);
+      setStep(3);
+    } else if (step === 3) {
+      if (!name.trim()) return setError('اكتب الاسم الكامل');
+      if (!phoneValid) return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا بعد ${PHONE_PREFIX}`);
+      setStep(4);
+    }
+  };
+  const back = () => { setError(''); setStep((s) => (s > 1 ? ((s - 1) as Step) : s)); };
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(form.user_id)) {
-      setError('معرف المستخدم يجب أن يكون بالإنجليزية (3-30 حرف/رقم بدون مسافات)');
-      return;
-    }
-    if (form.password.length < 6) {
-      setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
-      return;
-    }
-    if (form.password !== form.confirm) {
-      setError('كلمتا المرور غير متطابقتين');
-      return;
-    }
+    if (password.length < 6) return setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    if (password !== confirm) return setError('كلمتا المرور غير متطابقتين');
 
     setLoading(true);
+    const userId = codeToUserId(code);
 
-    // 1) Create auth user
+    // 1) auth account — the login name IS the code
     const { data, error: signErr } = await supabase.auth.signUp({
-      email: userIdToEmail(form.user_id),
-      password: form.password,
+      email: userIdToEmail(userId),
+      password,
     });
-
     if (signErr || !data.user) {
       setError(
         signErr?.message?.includes('already registered')
-          ? 'هذا المعرف مستخدم بالفعل، اختر معرفاً آخر'
+          ? 'هذا الكود مسجّل بحساب بالفعل — سجّل الدخول أو استخدم كودًا آخر'
           : 'حدث خطأ أثناء إنشاء الحساب، حاول مرة أخرى'
       );
       setLoading(false);
       return;
     }
 
-    // 2) Create pending profile WITH chosen scope.
-    //    Visibility of the request follows the scope:
-    //    none -> owner only | church -> +church manager | +service -> +service manager
-    const { error: profErr } = await supabase.from('profiles').insert({
-      id: data.user.id,
-      full_name: form.full_name.trim(),
-      user_id: form.user_id.trim().toLowerCase(),
-      phone: form.phone.trim(),
-      role: 'class_servant',
-      status: 'pending',
-      church_id: churchId || null,
-      service_id: serviceId || null,
-      class_id: classId || null,
+    // 2) optional photo
+    let imageUrl: string | null = null;
+    if (photoBlob) {
+      try { imageUrl = await uploadPhoto(supabase, 'servants', photoBlob, 'servant.webp'); } catch { /* photo is optional */ }
+    }
+
+    // 3) person + pending servant enrollment
+    const { data: res, error: rpcErr } = await supabase.rpc('servant_signup', {
+      p_code: code.trim(),
+      p_full_name: name.trim(),
+      p_gender: gender || null,
+      p_birthdate: composeBirthdate(bDay, bMonth, bYear),
+      p_phone: `${PHONE_PREFIX}${phoneLocal}`,
+      p_address: address.trim() || null,
+      p_notes: notes.trim() || null,
+      p_church: churchId || null,
+      p_service: serviceId || null,
+      p_class: classId || null,
+      p_image_url: imageUrl,
     });
 
-    if (profErr) {
+    if (rpcErr) {
+      const m = rpcErr.message ?? '';
       setError(
-        profErr.message.includes('duplicate')
-          ? 'هذا المعرف مستخدم بالفعل، اختر معرفاً آخر'
-          : 'تعذر حفظ البيانات، حاول مرة أخرى'
+        m.includes('code_taken') ? 'هذا الكود مستخدم من خادم آخر'
+        : m.includes('already_registered') ? 'هذا الحساب مسجّل بالفعل'
+        : m.includes('phone_required') ? 'رقم الهاتف مطلوب'
+        : 'تعذر حفظ البيانات، حاول مرة أخرى'
       );
       setLoading(false);
       return;
     }
+    void (res as ServantSignupResult);
 
-    // 3) Hard navigation so AuthProvider re-initializes with the fresh
-    //    profile — pending screen shows immediately (part of the gate bug fix)
+    // Hard navigation so AuthProvider re-initializes with the fresh enrollment
     window.location.href = '/';
   };
 
@@ -149,28 +269,38 @@ function SignupForm() {
     `input-field ${locked ? 'bg-primary-50 text-primary-800 font-bold pointer-events-none' : ''}`;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-6 py-10">
-      <section id="signup-card" className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <div className="mx-auto mb-4 h-24 w-24 overflow-hidden rounded-3xl shadow-lg ring-2 ring-gold-300/50">
-            <Image
-              src={dioceseLogo(192)}
-              alt={`شعار ${BRANDING.dioceseName}`}
-              width={96}
-              height={96}
-              priority
-              className="h-full w-full object-cover"
-            />
+    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-8">
+      <section id="signup-card" className="w-full max-w-md">
+        <div className="mb-5 text-center">
+          <div className="mx-auto mb-3 h-20 w-20 overflow-hidden rounded-3xl shadow-lg ring-2 ring-gold-300/50">
+            <Image src={dioceseLogo(192)} alt={`شعار ${BRANDING.dioceseName}`} width={80} height={80} priority className="h-full w-full object-cover" />
           </div>
           <h1 className="text-2xl font-extrabold">تسجيل خادم جديد</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            سيتم مراجعة طلبك من المسؤول قبل التفعيل
-          </p>
+          <p className="mt-1 text-sm text-slate-500">سيتم مراجعة طلبك من المسؤول قبل التفعيل</p>
         </div>
+
+        {/* ---------- Stepper ---------- */}
+        <ol id="signup-steps" className="mb-4 grid grid-cols-4 gap-1">
+          {STEPS.map((s) => {
+            const Icon = s.icon;
+            const done = step > s.n;
+            const active = step === s.n;
+            return (
+              <li key={s.n} className="flex flex-col items-center gap-1">
+                <span className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-extrabold transition ${
+                  done ? 'bg-emerald-500 text-white' : active ? 'bg-primary-600 text-white shadow ring-4 ring-primary-100' : 'bg-slate-100 text-slate-400'
+                }`}>
+                  {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                </span>
+                <span className={`text-[11px] font-bold ${active ? 'text-primary-700' : 'text-slate-400'}`}>{s.label}</span>
+              </li>
+            );
+          })}
+        </ol>
 
         {/* Invite banner when arriving via a scoped link */}
         {(churchLocked || serviceLocked || classLocked) && (
-          <div id="invite-banner" className="mb-4 rounded-2xl bg-gradient-to-l from-primary-600 to-accent-600 px-4 py-3 text-white text-sm font-bold flex items-center gap-2">
+          <div id="invite-banner" className="mb-4 flex items-center gap-2 rounded-2xl bg-gradient-to-l from-primary-600 to-accent-600 px-4 py-3 text-sm font-bold text-white">
             <Lock className="h-4 w-4 shrink-0" />
             <span>
               دعوة للانضمام إلى: {churchName ?? '...'}
@@ -180,104 +310,276 @@ function SignupForm() {
           </div>
         )}
 
-        <form onSubmit={handleSignup} className="card space-y-4">
-          <div>
-            <label htmlFor="su-name" className="mb-1.5 block text-sm font-bold">الاسم الكامل</label>
-            <input id="su-name" className="input-field" placeholder="مثال: مينا صموئيل"
-              value={form.full_name} onChange={set('full_name')} required />
-          </div>
-
-          <div>
-            <label htmlFor="su-user-id" className="mb-1.5 block text-sm font-bold">معرف المستخدم (للدخول)</label>
-            <input id="su-user-id" className="input-field" placeholder="mina.samuel" dir="ltr"
-              value={form.user_id} onChange={set('user_id')} required autoComplete="username" />
-          </div>
-
-          <div>
-            <label htmlFor="su-phone" className="mb-1.5 block text-sm font-bold">رقم الهاتف</label>
-            <input id="su-phone" type="tel" className="input-field" placeholder="01xxxxxxxxx" dir="ltr"
-              value={form.phone} onChange={set('phone')} required />
-          </div>
-
-          {/* Scope selection — optional; locked levels come from invite link */}
-          <div id="scope-section" className="rounded-xl bg-slate-50 p-3 space-y-2">
-            <p className="text-xs font-extrabold text-slate-500">
-              مكان الخدمة <span className="font-normal">(اختياري — يمكن للمسؤول تحديده عند القبول)</span>
-            </p>
-
-            <select
-              id="su-church"
-              className={selectCls(churchLocked)}
-              value={churchId}
-              onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}
-              tabIndex={churchLocked ? -1 : 0}
-            >
-              <option value="">اختر الكنيسة</option>
-              {churches.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-
-            {churchId && (
-              <select
-                id="su-service"
-                className={selectCls(serviceLocked)}
-                value={serviceId}
-                onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}
-                tabIndex={serviceLocked ? -1 : 0}
-              >
-                <option value="">اختر الخدمة</option>
-                {scopedServices.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            )}
-
-            {serviceId && (
-              <select
-                id="su-class"
-                className={selectCls(classLocked)}
-                value={classId}
-                onChange={(e) => setClassId(e.target.value)}
-                tabIndex={classLocked ? -1 : 0}
-              >
-                <option value="">اختر الفصل</option>
-                {scopedClasses.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="su-password" className="mb-1.5 block text-sm font-bold">كلمة المرور</label>
-            <input id="su-password" type="password" className="input-field" placeholder="••••••••" dir="ltr"
-              value={form.password} onChange={set('password')} required autoComplete="new-password" />
-          </div>
-
-          <div>
-            <label htmlFor="su-confirm" className="mb-1.5 block text-sm font-bold">تأكيد كلمة المرور</label>
-            <input id="su-confirm" type="password" className="input-field" placeholder="••••••••" dir="ltr"
-              value={form.confirm} onChange={set('confirm')} required autoComplete="new-password" />
-          </div>
-
-          {error && (
-            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>
+        <form onSubmit={submit} className="card space-y-4">
+          {/* ============ STEP 1 — scope ============ */}
+          {step === 1 && (
+            <section id="step-scope" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600">
+                <MapPin className="h-4 w-4 text-primary-500" /> مكان الخدمة
+                <span className="text-xs font-normal text-slate-400">(يمكن للمسؤول تعديله عند القبول)</span>
+              </p>
+              {structureLoading ? (
+                <div className="flex justify-center py-6"><Loader2 className="h-6 w-6 animate-spin text-primary-500" /></div>
+              ) : (
+                <>
+                  <div>
+                    <label htmlFor="su-church" className="mb-1 block text-xs font-bold text-slate-500">الكنيسة</label>
+                    <select id="su-church" className={selectCls(churchLocked)} value={churchId}
+                      onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}
+                      tabIndex={churchLocked ? -1 : 0}>
+                      <option value="">اختر الكنيسة</option>
+                      {churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="su-service" className="mb-1 block text-xs font-bold text-slate-500">الخدمة</label>
+                    <select id="su-service" className={selectCls(serviceLocked)} value={serviceId}
+                      onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}
+                      disabled={!churchId} tabIndex={serviceLocked ? -1 : 0}>
+                      <option value="">{churchId ? 'اختر الخدمة' : 'اختر الكنيسة أولاً'}</option>
+                      {scopedServices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="su-class" className="mb-1 block text-xs font-bold text-slate-500">الفصل</label>
+                    <select id="su-class" className={selectCls(classLocked)} value={classId}
+                      onChange={(e) => setClassId(e.target.value)}
+                      disabled={!serviceId} tabIndex={classLocked ? -1 : 0}>
+                      <option value="">{serviceId ? 'اختر الفصل' : 'اختر الخدمة أولاً'}</option>
+                      {scopedClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+            </section>
           )}
 
-          <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2">
-            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <UserPlus className="h-5 w-5" />}
-            إرسال طلب التسجيل
-          </button>
+          {/* ============ STEP 2 — code ============ */}
+          {step === 2 && (
+            <section id="step-code" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600">
+                <IdCard className="h-4 w-4 text-primary-500" /> الكود (الرقم القومي / كود الـ QR)
+              </p>
+              <p className="text-xs text-slate-400">هو نفسه اسم الدخول للتطبيق. اكتبه أو امسح الكارت بالكاميرا — وإن لم يكن لديك كود ولّد واحدًا.</p>
+              <div className="flex gap-2">
+                <input id="su-code" className="input-field flex-1" dir="ltr" placeholder="اكتب الكود"
+                  value={code} onChange={(e) => setCode(e.target.value)} autoComplete="username" />
+                <button id="su-code-generate" type="button" onClick={() => setCode(generatePersonCode())}
+                  aria-label="توليد كود تلقائي" title="توليد كود تلقائي"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow transition hover:bg-primary-700 active:scale-95">
+                  <Wand2 className="h-5 w-5" />
+                </button>
+                <button id="su-code-scan" type="button" onClick={() => setShowScan((v) => !v)}
+                  aria-label="مسح الكود بالكاميرا" title="مسح الكود بالكاميرا" aria-pressed={showScan}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow transition active:scale-95 ${showScan ? 'bg-orange-700' : 'bg-orange-500 hover:bg-orange-600'}`}>
+                  <ScanLine className="h-5 w-5" />
+                </button>
+              </div>
+
+              {showScan && (
+                <QrScanner
+                  idPrefix="su"
+                  autoStart
+                  hint="وجّه الكاميرا إلى كود الـ QR على الكارت"
+                  onCode={(v) => { const t = v.trim(); if (t) { setCode(t); setShowScan(false); } }}
+                />
+              )}
+
+              {checking && (
+                <p className="flex items-center gap-1 text-[11px] font-bold text-slate-400">
+                  <Loader2 className="h-3 w-3 animate-spin" /> جارٍ التحقق من الكود...
+                </p>
+              )}
+              {lookupDone && lookup && !lookup.has_account && (
+                <div className="rounded-xl bg-emerald-50 px-3 py-2">
+                  <p className="flex items-center gap-1 text-xs font-extrabold text-emerald-700">
+                    <UserCheck className="h-4 w-4" /> شخص مسجّل بالفعل: {lookup.name}
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-bold text-emerald-600">سيتم ربط حسابك بنفس الشخص وتعبئة بياناته في الخطوة التالية</p>
+                </div>
+              )}
+              {lookupDone && lookup?.has_account && (
+                <div className="flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>هذا الكود مرتبط بحساب خادم بالفعل. <Link href="/login" className="underline">سجّل الدخول</Link> أو استخدم كودًا آخر.</span>
+                </div>
+              )}
+              {lookupDone && !lookup && code.trim() && (
+                <p className="text-[11px] font-bold text-slate-400">كود جديد — ستُدخل بياناتك في الخطوة التالية</p>
+              )}
+              {code.trim() && (
+                <p className="text-[11px] text-slate-400" dir="ltr">اسم الدخول: <b>{codeToUserId(code)}</b></p>
+              )}
+            </section>
+          )}
+
+          {/* ============ STEP 3 — person data ============ */}
+          {step === 3 && (
+            <section id="step-data" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600">
+                <User className="h-4 w-4 text-primary-500" /> البيانات الشخصية
+              </p>
+              {prefilled && (
+                <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700">
+                  تم تعبئة البيانات من الشخص المسجّل بهذا الكود — راجعها وأكمل الناقص
+                </p>
+              )}
+
+              {/* photo */}
+              <div className="flex items-center gap-3">
+                <button id="su-photo" type="button" onClick={() => fileInputRef.current?.click()}
+                  className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-primary-50 ring-2 ring-primary-100 transition active:scale-95">
+                  {photoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={photoPreview} alt="صورتي" className="h-full w-full object-cover" />
+                  ) : (
+                    <Camera className="h-8 w-8 text-primary-400" />
+                  )}
+                </button>
+                <div className="text-xs">
+                  <p className="font-extrabold text-slate-600">الصورة الشخصية <span className="font-normal text-slate-400">(اختياري)</span></p>
+                  {photoBlob && (
+                    <button type="button" onClick={() => { setPhotoBlob(null); if (photoPreview.startsWith('blob:')) URL.revokeObjectURL(photoPreview); setPhotoPreview(''); }}
+                      className="mt-1 flex items-center gap-1 font-bold text-red-500">
+                      <Trash2 className="h-3.5 w-3.5" /> إزالة الصورة
+                    </button>
+                  )}
+                </div>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setRawImage(URL.createObjectURL(f)); }} />
+              </div>
+
+              <div>
+                <label htmlFor="su-name" className="mb-1 block text-xs font-bold text-slate-500">الاسم الكامل *</label>
+                <input id="su-name" className="input-field" placeholder="مثال: مينا صموئيل" value={name} onChange={(e) => setName(e.target.value)} required />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">النوع</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button id="su-gender-male" type="button" aria-pressed={gender === 'male'} onClick={() => setGender(gender === 'male' ? '' : 'male')}
+                    className={`rounded-xl py-2.5 text-sm font-extrabold transition active:scale-95 ${gender === 'male' ? 'bg-primary-600 text-white shadow ring-2 ring-primary-300' : 'bg-primary-50 text-primary-600'}`}>
+                    {GENDER_LABELS.male} 👨
+                  </button>
+                  <button id="su-gender-female" type="button" aria-pressed={gender === 'female'} onClick={() => setGender(gender === 'female' ? '' : 'female')}
+                    className={`rounded-xl py-2.5 text-sm font-extrabold transition active:scale-95 ${gender === 'female' ? 'bg-pink-500 text-white shadow ring-2 ring-pink-300' : 'bg-pink-50 text-pink-500'}`}>
+                    {GENDER_LABELS.female} 👩
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="su-phone" className="mb-1 block text-xs font-bold text-slate-500">رقم الهاتف *</label>
+                <div className="flex items-stretch overflow-hidden rounded-xl border border-indigo-100 bg-white focus-within:ring-2 focus-within:ring-primary-300" dir="ltr">
+                  <span className="flex items-center bg-indigo-50 px-3 text-sm font-extrabold text-primary-700">{PHONE_PREFIX}</span>
+                  <input id="su-phone" type="tel" inputMode="numeric" className="w-full px-3 py-2.5 text-sm font-bold outline-none" placeholder="01xxxxxxxxx"
+                    value={phoneLocal} maxLength={PHONE_LOCAL_LENGTH}
+                    onChange={(e) => setPhoneLocal(e.target.value.replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH))} />
+                </div>
+                {phoneLocal && !phoneValid && (
+                  <p className="mt-1 text-[11px] font-bold text-red-500">الرقم يجب أن يكون {PHONE_LOCAL_LENGTH} رقمًا ({phoneLocal.length}/{PHONE_LOCAL_LENGTH})</p>
+                )}
+                {phoneValid && <p className="mt-1 text-[11px] font-bold text-emerald-600" dir="ltr">✓ {PHONE_PREFIX}{phoneLocal}</p>}
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">تاريخ الميلاد</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <select id="su-birth-day" aria-label="اليوم" className="input-field !px-2 text-center" value={bDay} onChange={(e) => setBDay(e.target.value)}>
+                    <option value="">اليوم</option>
+                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <select id="su-birth-month" aria-label="الشهر" className="input-field !px-2 text-center" value={bMonth} onChange={(e) => setBMonth(e.target.value)}>
+                    <option value="">الشهر</option>
+                    {MONTHS_AR.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                  </select>
+                  <select id="su-birth-year" aria-label="السنة" className="input-field !px-2 text-center" value={bYear} onChange={(e) => setBYear(e.target.value)}>
+                    <option value="">السنة</option>
+                    {years.map((y) => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="su-address" className="mb-1 block text-xs font-bold text-slate-500">العنوان</label>
+                <input id="su-address" className="input-field" placeholder="العنوان" value={address} onChange={(e) => setAddress(e.target.value)} />
+              </div>
+              <div>
+                <label htmlFor="su-notes" className="mb-1 block text-xs font-bold text-slate-500">ملاحظات</label>
+                <textarea id="su-notes" className="input-field min-h-[70px]" placeholder="أي ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} />
+              </div>
+            </section>
+          )}
+
+          {/* ============ STEP 4 — password ============ */}
+          {step === 4 && (
+            <section id="step-password" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600">
+                <KeyRound className="h-4 w-4 text-primary-500" /> كلمة المرور
+              </p>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                <p>الاسم: <b className="text-slate-700">{name}</b></p>
+                <p dir="ltr" className="text-right">اسم الدخول: <b className="text-slate-700">{codeToUserId(code)}</b></p>
+                <p>مكان الخدمة: <b className="text-slate-700">{[churchName, serviceName, className].filter(Boolean).join(' ← ') || 'يحدده المسؤول'}</b></p>
+              </div>
+              <div>
+                <label htmlFor="su-password" className="mb-1 block text-xs font-bold text-slate-500">كلمة المرور *</label>
+                <input id="su-password" type="password" className="input-field" placeholder="••••••••" dir="ltr"
+                  value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" />
+              </div>
+              <div>
+                <label htmlFor="su-confirm" className="mb-1 block text-xs font-bold text-slate-500">تأكيد كلمة المرور *</label>
+                <input id="su-confirm" type="password" className="input-field" placeholder="••••••••" dir="ltr"
+                  value={confirm} onChange={(e) => setConfirm(e.target.value)} required autoComplete="new-password" />
+                {confirm && confirm !== password && <p className="mt-1 text-[11px] font-bold text-red-500">كلمتا المرور غير متطابقتين</p>}
+              </div>
+            </section>
+          )}
+
+          {error && (
+            <p id="signup-error" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>
+          )}
+
+          {/* ---------- Nav buttons ---------- */}
+          <div className="flex gap-2 pt-1">
+            {step > 1 && (
+              <button id="su-back" type="button" onClick={back} className="btn-secondary flex items-center justify-center gap-1 !px-4">
+                <ChevronRight className="h-4 w-4" /> السابق
+              </button>
+            )}
+            {step < 4 ? (
+              <button id="su-next" type="button" onClick={next} disabled={step === 1 && structureLoading}
+                className="btn-primary flex flex-1 items-center justify-center gap-1">
+                التالي <ChevronLeft className="h-4 w-4" />
+              </button>
+            ) : (
+              <button id="su-submit" type="submit" disabled={loading} className="btn-primary flex flex-1 items-center justify-center gap-2">
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <UserPlus className="h-5 w-5" />}
+                إرسال طلب التسجيل
+              </button>
+            )}
+          </div>
         </form>
 
         <p className="mt-6 text-center text-sm text-slate-500">
           لديك حساب بالفعل؟{' '}
-          <Link href="/login" className="font-bold text-primary-600 hover:underline">
-            تسجيل الدخول
-          </Link>
+          <Link href="/login" className="font-bold text-primary-600 hover:underline">تسجيل الدخول</Link>
         </p>
       </section>
+
+      {rawImage && (
+        <PhotoCropModal
+          src={rawImage}
+          onDone={(blob) => {
+            if (photoPreview.startsWith('blob:')) URL.revokeObjectURL(photoPreview);
+            setPhotoBlob(blob);
+            setPhotoPreview(URL.createObjectURL(blob));
+            URL.revokeObjectURL(rawImage);
+            setRawImage('');
+          }}
+          onClose={() => { URL.revokeObjectURL(rawImage); setRawImage(''); }}
+        />
+      )}
     </main>
   );
 }

@@ -253,7 +253,7 @@ export function CallFeedbackModal({
     setHistory(rows);
     const ids = Array.from(new Set(rows.map((r) => r.recorded_by).filter((x): x is string => !!x)));
     if (ids.length) {
-      const { data: profs } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+      const { data: profs } = await supabase.from('servant_enrollments').select('id, full_name').in('id', ids);
       const map: Record<string, string> = {};
       (profs ?? []).forEach((p: { id: string; full_name: string }) => { map[p.id] = p.full_name; });
       setNames(map);

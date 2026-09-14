@@ -9,12 +9,16 @@ import {
   type ReactNode,
 } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { Profile, Church, Service } from '@/lib/types';
+import type { ServantEnrollment, Church, Service, Person } from '@/lib/types';
+import { SERVANTS_TABLE } from '@/lib/types';
 import type { User } from '@supabase/supabase-js';
 
 interface AuthState {
   user: User | null;
-  profile: Profile | null;
+  /** the signed-in servant's enrollment (table `servant_enrollments`, 0037) */
+  profile: ServantEnrollment | null;
+  /** the servant's identity row in `persons` (code = national_id) */
+  person: Person | null;
   church: Church | null;
   service: Service | null;
   loading: boolean;
@@ -25,6 +29,7 @@ interface AuthState {
 const AuthContext = createContext<AuthState>({
   user: null,
   profile: null,
+  person: null,
   church: null,
   service: null,
   loading: true,
@@ -34,7 +39,8 @@ const AuthContext = createContext<AuthState>({
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<ServantEnrollment | null>(null);
+  const [person, setPerson] = useState<Person | null>(null);
   const [church, setChurch] = useState<Church | null>(null);
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,29 +49,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(
     async (uid: string) => {
-      const { data: p } = await supabase
-        .from('profiles')
+      // 0037: servant_enrollments. Fall back to the old `profiles` table when
+      // the migration has not been applied yet (identical columns).
+      let { data: p, error } = await supabase
+        .from(SERVANTS_TABLE)
         .select('*')
         .eq('id', uid)
-        .single();
-      setProfile(p ?? null);
+        .maybeSingle();
+      if (error) {
+        const res = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
+        p = res.data;
+      }
+      const prof = (p ?? null) as ServantEnrollment | null;
+      setProfile(prof);
 
-      if (p?.church_id) {
+      if (prof?.person_id) {
+        const { data: per } = await supabase.from('persons').select('*').eq('id', prof.person_id).maybeSingle();
+        setPerson((per ?? null) as Person | null);
+      } else {
+        setPerson(null);
+      }
+
+      if (prof?.church_id) {
         const { data: c } = await supabase
           .from('churches')
           .select('*')
-          .eq('id', p.church_id)
+          .eq('id', prof.church_id)
           .single();
         setChurch(c ?? null);
       } else {
         setChurch(null);
       }
 
-      if (p?.service_id) {
+      if (prof?.service_id) {
         const { data: s } = await supabase
           .from('services')
           .select('*')
-          .eq('id', p.service_id)
+          .eq('id', prof.service_id)
           .single();
         setService(s ?? null);
       } else {
@@ -83,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (u) await loadProfile(u.id);
     else {
       setProfile(null);
+      setPerson(null);
       setChurch(null);
       setService(null);
     }
@@ -101,14 +122,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Realtime: react to own profile changes (e.g. approval) instantly
+  // Realtime: react to own enrollment changes (e.g. approval) instantly
   useEffect(() => {
     if (!user) return;
     const channel = supabase
-      .channel(`profile-${user.id}`)
+      .channel(`servant-${user.id}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        { event: 'UPDATE', schema: 'public', table: SERVANTS_TABLE, filter: `id=eq.${user.id}` },
         () => loadProfile(user.id)
       )
       .subscribe();
@@ -123,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [supabase]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, church, service, loading, refresh, signOut }}>
+    <AuthContext.Provider value={{ user, profile, person, church, service, loading, refresh, signOut }}>
       {children}
     </AuthContext.Provider>
   );

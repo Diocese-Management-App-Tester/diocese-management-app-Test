@@ -33,8 +33,16 @@ export interface ClassRoom {
   updated_at: string;
 }
 
-export interface Profile {
+// ---------- SERVANT ENROLLMENT (تسجيل الخادم, migration 0037) ----------
+// Table `servant_enrollments` (formerly `profiles`; a compatibility VIEW named
+// `profiles` still exists). A servant is a PERSON first (persons.national_id =
+// his code / QR) and is then registered as a servant enrollment bound to
+// church → service → class — the same architecture as a child's enrollment.
+// `id` = auth.users.id (the login account); `user_id` = the login name derived
+// from the code.
+export interface ServantEnrollment {
   id: string;
+  person_id: string | null;
   full_name: string;
   user_id: string;
   phone: string;
@@ -48,6 +56,55 @@ export interface Profile {
   approved_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** @deprecated alias kept for the existing pages — use ServantEnrollment */
+export type Profile = ServantEnrollment;
+
+/** The table the app reads servants from (0037). */
+export const SERVANTS_TABLE = 'servant_enrollments';
+
+// ---------- Permissions (migration 0037) ----------
+// permission_profiles — an owner-made named set of permission keys.
+export interface PermissionProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: string[]; // keys of PERMISSIONS (src/lib/permissions.ts)
+  color: string;
+  sort_order: number;
+  created_at: string;
+  created_by: string | null;
+  edited_at: string;
+  edited_by: string | null;
+}
+
+// permissions — connects a servant enrollment to a permission profile.
+export interface PermissionGrant {
+  id: string;
+  servant_id: string;
+  permission_profile_id: string;
+  granted_by: string | null;
+  created_at: string;
+}
+
+// servant_signup RPC result
+export interface ServantSignupResult {
+  person_id: string;
+  person_created: boolean;
+  national_id: string;
+  user_id: string;
+}
+
+// signup_lookup_code RPC result (person known for the typed / scanned code)
+export interface SignupCodeLookup {
+  name: string;
+  gender: Gender | null;
+  birthdate: string | null;
+  phone: string | null;
+  address: string | null;
+  image_url: string | null;
+  has_account: boolean;
 }
 
 export type Gender = 'male' | 'female';
@@ -418,3 +475,7 @@ export const PHOTOS_BUCKET = 'photos';
 // user_id -> synthetic email used for Supabase auth
 export const userIdToEmail = (userId: string) =>
   `${userId.trim().toLowerCase()}@diocese.app`;
+
+// servant code (national id / QR) -> login name (mirror of SQL code_to_user_id)
+export const codeToUserId = (code: string) =>
+  code.trim().toLowerCase().replace(/[^a-zA-Z0-9._-]/g, '-');

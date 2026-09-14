@@ -183,7 +183,7 @@ export async function fetchRecorderNames(
   const uniq = Array.from(new Set(ids.filter((x): x is string => !!x)));
   const m = new Map<string, string>();
   if (uniq.length === 0) return m;
-  const { data } = await supabase.from('profiles').select('id, full_name').in('id', uniq);
+  const { data } = await supabase.from('servant_enrollments').select('id, full_name').in('id', uniq);
   ((data ?? []) as { id: string; full_name: string }[]).forEach((p) => m.set(p.id, p.full_name));
   return m;
 }

@@ -1,21 +1,30 @@
 'use client';
 
+// ---------- طلبات انضمام الخدام — approvals (architecture 0037) ----------
+// A pending request is a `servant_enrollments` row (status = pending) bound
+// to a person. The approver sets role + scope and may attach permission
+// profiles right away.
+
 import { useEffect, useState, useCallback } from 'react';
+import Image from 'next/image';
 import {
-  UserCheck, Check, X, Phone, Loader2, ArrowRight, ShieldQuestion,
+  UserCheck, Check, X, Phone, Loader2, ArrowRight, ShieldQuestion, IdCard, User, KeyRound, Cake, MapPin,
 } from 'lucide-react';
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
+import { usePermissions } from '@/lib/permissions-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
-import type { Profile, Church, Service, ClassRoom, AppRole } from '@/lib/types';
-import { ROLE_LABELS } from '@/lib/types';
+import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person } from '@/lib/types';
+import { ROLE_LABELS, SERVANTS_TABLE, GENDER_LABELS } from '@/lib/types';
+
+type Request = ServantEnrollment & { person: Person | null };
 
 export default function ApprovalsPage() {
   const { profile } = useAuth();
   const supabase = createClient();
-  const [pending, setPending] = useState<Profile[]>([]);
+  const [pending, setPending] = useState<Request[]>([]);
   const [churches, setChurches] = useState<Church[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
@@ -23,25 +32,23 @@ export default function ApprovalsPage() {
 
   const load = useCallback(async () => {
     const [{ data: p }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
-      supabase.from('profiles').select('*').eq('status', 'pending').order('created_at'),
+      supabase.from(SERVANTS_TABLE).select('*, person:persons(*)').eq('status', 'pending').order('created_at'),
       supabase.from('churches').select('*').order('name'),
       supabase.from('services').select('*').order('name'),
       supabase.from('classes').select('*').order('name'),
     ]);
-    setPending(p ?? []);
+    setPending((p ?? []) as Request[]);
     setChurches(ch ?? []);
     setServices(sv ?? []);
     setClasses(cl ?? []);
     setLoading(false);
   }, [supabase]);
 
-  // Initial fetch — the realtime hook below only reloads on DB change events,
-  // so without this the page would sit on the spinner until something changed.
   useEffect(() => {
     if (profile?.status === 'approved') load();
   }, [profile?.status, load]);
 
-  useDebouncedRealtime(supabase, 'approvals-page', [{ table: 'profiles' }], load, { enabled: !!profile });
+  useDebouncedRealtime(supabase, 'approvals-page', [{ table: SERVANTS_TABLE }], load, { enabled: !!profile });
 
   const isManager =
     profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
@@ -98,27 +105,33 @@ export default function ApprovalsPage() {
   );
 }
 
+const fmtDate = (d: string | null) => {
+  if (!d) return null;
+  const [y, m, day] = d.split('-');
+  return `${Number(day)}/${Number(m)}/${y}`;
+};
+
 function ApprovalCard({
   request, approver, churches, services, classes, onDone,
 }: {
-  request: Profile;
-  approver: Profile;
+  request: Request;
+  approver: ServantEnrollment;
   churches: Church[];
   services: Service[];
   classes: ClassRoom[];
   onDone: () => void;
 }) {
   const supabase = createClient();
+  const { profiles: permissionProfiles } = usePermissions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  // Assignment scope defaults follow the approver's own scope
   const [role, setRole] = useState<AppRole>('class_servant');
   const [churchId, setChurchId] = useState(request.church_id ?? approver.church_id ?? '');
   const [serviceId, setServiceId] = useState(request.service_id ?? approver.service_id ?? '');
   const [classId, setClassId] = useState(request.class_id ?? '');
+  const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
 
-  // Roles the approver is allowed to grant
   const grantableRoles: AppRole[] =
     approver.role === 'owner'
       ? ['church_manager', 'service_manager', 'class_servant']
@@ -134,13 +147,11 @@ function ApprovalCard({
 
   const approve = async () => {
     setError('');
-    // church is required except for owner-level assignments;
-    // empty service/class = "كل الـ..." under the parent scope (null in DB)
     if (!churchId) return setError('اختر الكنيسة');
 
     setBusy(true);
     const { error: err } = await supabase
-      .from('profiles')
+      .from(SERVANTS_TABLE)
       .update({
         status: 'approved',
         role,
@@ -151,38 +162,66 @@ function ApprovalCard({
         approved_at: new Date().toISOString(),
       })
       .eq('id', request.id);
+    if (err) { setBusy(false); return setError('تعذر الاعتماد، حاول مجدداً'); }
+
+    if (selectedProfiles.length) {
+      await supabase.from('permissions').insert(
+        selectedProfiles.map((pid) => ({ servant_id: request.id, permission_profile_id: pid }))
+      );
+    }
     setBusy(false);
-    if (err) return setError('تعذر الاعتماد، حاول مجدداً');
     onDone();
   };
 
   const reject = async () => {
     setBusy(true);
-    await supabase.from('profiles').update({ status: 'rejected' }).eq('id', request.id);
+    await supabase.from(SERVANTS_TABLE).update({ status: 'rejected' }).eq('id', request.id);
     setBusy(false);
     onDone();
   };
 
+  const person = request.person;
+  const photo = person?.image_url ?? request.photo_url;
+
   return (
     <li className="card">
-      <div className="mb-3">
-        <p className="font-extrabold">{request.full_name}</p>
-        <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
-          <span dir="ltr">@{request.user_id}</span>
-          <span className="flex items-center gap-1" dir="ltr">
-            <Phone className="h-3 w-3" /> {request.phone}
-          </span>
-        </p>
-        {(request.church_id || request.service_id || request.class_id) && (
-          <p className="mt-1.5 text-xs font-bold text-primary-600 bg-primary-50 rounded-lg px-2 py-1 inline-block">
-            طلب الانضمام إلى: {churches.find((c) => c.id === request.church_id)?.name ?? '—'}
-            {request.service_id ? ` ← ${services.find((s) => s.id === request.service_id)?.name ?? ''}` : ''}
-            {request.class_id ? ` ← ${classes.find((c) => c.id === request.class_id)?.name ?? ''}` : ''}
+      <div className="mb-3 flex items-start gap-3">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-emerald-50 ring-2 ring-emerald-100 flex items-center justify-center">
+          {photo ? (
+            <Image src={photo} alt={request.full_name} fill sizes="56px" className="object-cover" />
+          ) : (
+            <User className="h-7 w-7 text-emerald-400" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-extrabold">{request.full_name}</p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+            <span className="flex items-center gap-1" dir="ltr">
+              <IdCard className="h-3 w-3" /> {person?.national_id ?? request.user_id}
+            </span>
+            <span className="flex items-center gap-1" dir="ltr">
+              <Phone className="h-3 w-3" /> {person?.phone ?? request.phone}
+            </span>
+            {person?.gender && <span>{GENDER_LABELS[person.gender]}</span>}
+            {person?.birthdate && (
+              <span className="flex items-center gap-1"><Cake className="h-3 w-3" /> {fmtDate(person.birthdate)}</span>
+            )}
           </p>
-        )}
+          {person?.address && (
+            <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400"><MapPin className="h-3 w-3" /> {person.address}</p>
+          )}
+          {person?.notes && <p className="mt-0.5 text-xs text-slate-400">📝 {person.notes}</p>}
+          {(request.church_id || request.service_id || request.class_id) && (
+            <p className="mt-1.5 inline-block rounded-lg bg-primary-50 px-2 py-1 text-xs font-bold text-primary-600">
+              طلب الانضمام إلى: {churches.find((c) => c.id === request.church_id)?.name ?? '—'}
+              {request.service_id ? ` ← ${services.find((s) => s.id === request.service_id)?.name ?? ''}` : ''}
+              {request.class_id ? ` ← ${classes.find((c) => c.id === request.class_id)?.name ?? ''}` : ''}
+            </p>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-2 mb-3">
+      <div className="mb-3 space-y-2">
         <select className="input-field" value={role} onChange={(e) => setRole(e.target.value as AppRole)}>
           {grantableRoles.map((r) => (
             <option key={r} value={r}>{ROLE_LABELS[r]}</option>
@@ -222,6 +261,32 @@ function ApprovalCard({
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+        )}
+
+        {/* permission profiles (0037) */}
+        {permissionProfiles.length > 0 && (
+          <div className="rounded-xl bg-slate-50 p-2.5">
+            <p className="mb-1.5 flex items-center gap-1 text-xs font-extrabold text-slate-500">
+              <KeyRound className="h-3.5 w-3.5 text-primary-500" /> ملفات الصلاحيات <span className="font-normal">(اختياري)</span>
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {permissionProfiles.map((pp) => {
+                const on = selectedProfiles.includes(pp.id);
+                return (
+                  <button
+                    key={pp.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setSelectedProfiles((s) => (on ? s.filter((x) => x !== pp.id) : [...s, pp.id]))}
+                    className={`rounded-full px-3 py-1 text-xs font-bold transition ${on ? 'text-white shadow' : 'bg-white text-slate-600 ring-1 ring-slate-200'}`}
+                    style={on ? { backgroundColor: pp.color } : undefined}
+                  >
+                    {pp.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
 
