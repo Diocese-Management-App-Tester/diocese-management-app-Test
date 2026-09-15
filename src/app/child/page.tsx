@@ -7,9 +7,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  CalendarCheck, Star, ChevronLeft, School, Layers, Church, Sparkles, Database, GraduationCap, MessageCircle, Video, Trophy, Tent,
+  CalendarCheck, Star, ChevronLeft, School, Layers, Church, Sparkles, Database, GraduationCap, MessageCircle, Video, Trophy, Tent, Library,
 } from 'lucide-react';
-import ChildShell, { useChildExams, useChildMessages, useChildOnline, useChildAchievements, useChildOccasions } from '@/components/child/ChildShell';
+import ChildShell, { useChildExams, useChildMessages, useChildOnline, useChildAchievements, useChildOccasions, useChildLibrary } from '@/components/child/ChildShell';
 import { Avatar, Kpi, fmtDateTime, usePortalList } from '@/components/child/ChildBits';
 import { useChild } from '@/lib/child-context';
 import { createClient } from '@/lib/supabase/client';
@@ -37,6 +37,7 @@ function HomeContent() {
   const { classes: onlineList, liveCount, upcomingCount } = useChildOnline();
   const { hasAny: hasAchievements, earnedCount, inProgress, data: achData } = useChildAchievements();
   const { list: occList, upcoming: occUpcoming, open: occOpen, withTicket } = useChildOccasions();
+  const { hasAny: hasLibrary, subjects: libSubjects, books: libBooks, lectures: libLectures } = useChildLibrary();
 
   const { rows: attendance } = usePortalList<ChildAttendanceRow>(
     token ? () => fetchChildAttendance(supabase, token) : null,
@@ -171,6 +172,20 @@ function HomeContent() {
               </span>
             </span>
             {(occOpen > 0 || withTicket > 0) && <span className="rounded-full bg-cyan-600 px-2.5 py-1 text-xs font-extrabold text-white tabular-nums">{occOpen > 0 ? occOpen : withTicket}</span>}
+            <ChevronLeft className="h-4 w-4 text-slate-300" />
+          </Link>
+        </section>
+      )}
+
+      {/* Library (المكتبة) — only when the module is granted and there are subjects */}
+      {hasLibrary && (
+        <section className="mb-4">
+          <Link id="child-home-library" href="/child/library" className="card flex items-center gap-3 !p-3 transition hover:bg-lime-50/40">
+            <span className="rounded-xl bg-lime-700 p-2.5 text-white"><Library className="h-6 w-6" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-extrabold">المكتبة</span>
+              <span className="block truncate text-xs text-slate-500">{libSubjects} موضوع · {libBooks} كتاب · {libLectures} محاضرة</span>
+            </span>
             <ChevronLeft className="h-4 w-4 text-slate-300" />
           </Link>
         </section>

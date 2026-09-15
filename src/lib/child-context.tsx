@@ -16,6 +16,7 @@ import { fetchChildChatOverview, type ChildChatOverview } from '@/lib/chat';
 import { fetchChildAchievements, type ChildAchievements } from '@/lib/achievements';
 import { fetchChildOccasions, type ChildOccasion } from '@/lib/occasions';
 import { fetchChildNotifications, type InboxItem } from '@/lib/notifications';
+import { fetchChildLibrary, setChildFavorite, type ChildLibrary } from '@/lib/library';
 import { uniqueTopic } from '@/lib/realtime';
 
 interface ChildState {
@@ -50,6 +51,10 @@ interface ChildState {
   reloadNotifications: () => void;
   /** optimistic local patch (mark read) */
   patchNotifications: (fn: (l: InboxItem[]) => InboxItem[]) => void;
+  /** library (0039): subjects · books · lectures · my ⭐ — realtime on library_* */
+  library: ChildLibrary | null;
+  reloadLibrary: () => void;
+  toggleLibraryFavorite: (kind: 'book' | 'lecture', id: string) => Promise<void>;
 }
 
 const ChildContext = createContext<ChildState>({
@@ -72,6 +77,9 @@ const ChildContext = createContext<ChildState>({
   notifications: null,
   reloadNotifications: () => {},
   patchNotifications: () => {},
+  library: null,
+  reloadLibrary: () => {},
+  toggleLibraryFavorite: async () => {},
 });
 
 export function ChildProvider({ children }: { children: ReactNode }) {
@@ -355,9 +363,52 @@ export function ChildProvider({ children }: { children: ReactNode }) {
     };
   }, [token, supabase, notifTick]);
 
+  // ---- modules: library (0039) — one fetch + realtime on library_* ; ⭐ optimistic
+  const [library, setLibrary] = useState<ChildLibrary | null>(null);
+  const [libTick, setLibTick] = useState(0);
+  const reloadLibrary = useCallback(() => setLibTick((t) => t + 1), []);
+  useEffect(() => {
+    if (!token) { setLibrary(null); return; }
+    let cancelled = false;
+    const run = () => fetchChildLibrary(supabase, token)
+      .then((r) => { if (!cancelled) setLibrary(r); })
+      .catch(() => { if (!cancelled) setLibrary({ subjects: [], books: [], lectures: [], favorites: [] }); });
+    run();
+    const onVis = () => { if (document.visibilityState === 'visible') run(); };
+    document.addEventListener('visibilitychange', onVis);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const bump = () => { if (timer) clearTimeout(timer); timer = setTimeout(run, 800); };
+    const channel = supabase.channel(uniqueTopic('child-library'));
+    try {
+      channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'library_subjects' }, bump)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'library_books' }, bump)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'library_lectures' }, bump)
+        .subscribe();
+    } catch { /* realtime unavailable → polling on focus only */ }
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+      supabase.removeChannel(channel);
+    };
+  }, [token, supabase, libTick]);
+  const toggleLibraryFavorite = useCallback(async (kind: 'book' | 'lecture', id: string) => {
+    if (!token || !library) return;
+    const on = !library.favorites.some((f) => (kind === 'book' ? f.book_id === id : f.lecture_id === id));
+    setLibrary((l) => l && ({
+      ...l,
+      favorites: on
+        ? [...l.favorites, { book_id: kind === 'book' ? id : null, lecture_id: kind === 'lecture' ? id : null }]
+        : l.favorites.filter((f) => !(kind === 'book' ? f.book_id === id : f.lecture_id === id)),
+    }));
+    try { await setChildFavorite(supabase, token, kind === 'book' ? { book_id: id } : { lecture_id: id }, on); }
+    catch { setLibTick((t) => t + 1); }
+  }, [token, library, supabase]);
+
   const value = useMemo(
-    () => ({ token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications }),
-    [token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications]
+    () => ({ token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications, library, reloadLibrary, toggleLibraryFavorite }),
+    [token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications, library, reloadLibrary, toggleLibraryFavorite]
   );
 
   return <ChildContext.Provider value={value}>{children}</ChildContext.Provider>;
