@@ -233,6 +233,29 @@ permission_profiles (ملفات الصلاحيات)  permissions (الصلاحي
 5. Copy that user's UUID into `supabase/migrations/0002_bootstrap_owner.sql` and run it
 6. Login in the app with user id `owner` + your password
 
+### 1b. Demo / test data — `seed_test_data.sql` & `wipe_test_data.sql`
+Two one-file scripts to **fill the whole database with realistic Arabic demo data** (every table, every module) and to **wipe it back to a clean install**. Run them in the SQL Editor after `full_schema.sql` (steps 3–5 are **not** needed — the seed creates its own login accounts).
+
+| Script | What it does |
+|---|---|
+| `supabase/seed_test_data.sql` | 2 churches · 3 services · 5 classes · 7 servant accounts (owner → pending request) · 26 children / 27 enrollments · 7 events (weekly + today's contest) · 8 weeks of attendance · points / deductions · calls & messages with feedback · data-change requests · card templates + print queue · shepherd groups · store items + completed / cancelled orders · online exams (published / draft / closed) with attempts · birthdays (today / +2d / +6d) with gift · chat (child · staff · broadcasts) · online classes (ended & finalized · **live now** · scheduled · cancelled) · occasions (trip · conference · celebration tomorrow · completed) with tickets & checklist · manual + automatic notifications, push subscriptions · results module (grading systems, locked exam, open exam, archive) · library (subjects / books / lectures / favorites) · module grants · permission profiles · home widgets / names / navigation. Ends with a row-count summary. **Run once** (fixed UUIDs). |
+| `supabase/wipe_test_data.sql` | `TRUNCATE … CASCADE` every public table, deletes the seeded auth users (and, by default, every auth user left without a servant row — flip `seed_only` inside to keep real accounts), clears storage objects, restores the `cards` module grant that `0024` seeds, prints what is left (should be 0). Schema / functions / policies stay. |
+
+**Demo logins** (password `Test@1234` for all — the login name is the code):
+
+| الدور | الكود | النطاق |
+|---|---|---|
+| مالك التطبيق | `10000000000001` | everything |
+| مدير كنيسة | `10000000000002` | كنيسة العذراء — الأقصر |
+| مسؤول خدمة | `10000000000003` | مدارس الأحد |
+| خادم فصل | `10000000000004` | إعدادي |
+| خادم فصل | `10000000000005` | ابتدائي |
+| خادم فصل | `10000000000006` | كنيسة مارجرجس |
+| طلب معلق | `10000000000007` | shows in طلبات الانضمام |
+
+Child portal: any child code, e.g. `30101010100001` (birthday today) · `30101010100009` (top student) · `30101010100013` (needs follow-up).
+Both scripts also run on the local shim: `psql -d app -f supabase/seed_test_data.sql` / `… wipe_test_data.sql`.
+
 ### 2. Local dev
 ```bash
 cp .env.example .env.local   # fill in Supabase URL + anon key
