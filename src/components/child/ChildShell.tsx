@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Home, CalendarCheck, Star, Database, SlidersHorizontal, Menu, X, LogOut,
-  CalendarDays, Clock, User, GraduationCap, MessageCircle, Video, Trophy, Tent, Bell, type LucideIcon,
+  CalendarDays, Clock, User, GraduationCap, MessageCircle, Video, Trophy, Tent, Bell, Library, type LucideIcon,
 } from 'lucide-react';
 import { useChild } from '@/lib/child-context';
 import { createClient } from '@/lib/supabase/client';
@@ -117,6 +117,26 @@ export function useChildNotifications(): { list: InboxItem[] | null; unread: num
   return { list: notifications, unread: (notifications ?? []).filter((n) => !n.read_at).length };
 }
 
+/**
+ * The child's library (module المكتبة, migration 0039) — from the shared
+ * ChildProvider. `null` while loading; empty when the module isn't granted
+ * to any of his enrollments (menu entry + home card stay hidden).
+ */
+export function useChildLibrary() {
+  const { library, toggleLibraryFavorite } = useChild();
+  const subjects = library?.subjects.length ?? 0;
+  return {
+    data: library,
+    hasAny: subjects > 0,
+    subjects,
+    books: library?.books.length ?? 0,
+    lectures: library?.lectures.length ?? 0,
+    favorites: library?.favorites.length ?? 0,
+    isFav: (kind: 'book' | 'lecture', id: string) => !!library?.favorites.some((f) => (kind === 'book' ? f.book_id === id : f.lecture_id === id)),
+    toggleFav: toggleLibraryFavorite,
+  };
+}
+
 // ---------- Header ----------
 function ChildHeader({ onMenu }: { onMenu: () => void }) {
   const { profile, token } = useChild();
@@ -204,6 +224,7 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
   const { list: occList, open: occOpen, withTicket } = useChildOccasions();
   const hasOccasions = !!occList && occList.length > 0;
   const { unread: notifUnread } = useChildNotifications();
+  const { hasAny: hasLibrary, favorites: libFavs } = useChildLibrary();
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -330,6 +351,22 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
               الفصول الأونلاين
               {liveCount > 0 && (
                 <span className="mr-auto flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-extrabold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> مباشر</span>
+              )}
+            </Link>
+          )}
+          {hasLibrary && (
+            <Link
+              id="child-nav-library"
+              href="/child/library"
+              onClick={onClose}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                isActive(pathname, '/child/library') ? 'bg-lime-100 text-lime-800' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Library className="h-5 w-5 text-lime-700" />
+              المكتبة
+              {libFavs > 0 && (
+                <span className="mr-auto rounded-full bg-lime-700 px-2 py-0.5 text-[10px] font-extrabold text-white tabular-nums">⭐ {libFavs}</span>
               )}
             </Link>
           )}

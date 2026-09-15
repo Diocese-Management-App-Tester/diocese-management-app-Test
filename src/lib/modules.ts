@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library';
 
 export interface AppModule {
   key: ModuleKey;
@@ -123,6 +123,15 @@ export const MODULES: AppModule[] = [
     icon: ClipboardCheck,
     color: 'text-emerald-600',
     paths: ['/results'],
+  },
+  {
+    key: 'library',
+    label: 'المكتبة',
+    desc: 'مكتبة بمواضيع: كتب (روابط PDF) ومحاضرات (فيديو أو صوت) — بحث ومفضلة، وكل محتوى يمكن إتاحته للجميع أو للخدام أو لخدمة أو فصل — والمخدوم يتصفحها من بوابته',
+    href: '/library',
+    icon: Library,
+    color: 'text-lime-700',
+    paths: ['/library'],
   },
 ];
 

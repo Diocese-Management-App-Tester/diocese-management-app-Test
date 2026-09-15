@@ -13,6 +13,7 @@ import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
   QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
+  Library, BookOpen,
 } from 'lucide-react';
 
 export interface PermissionGroup {
@@ -37,6 +38,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'activity', label: 'المناسبات والأسباب ونتائج الافتقاد', icon: CalendarDays, color: 'text-cyan-600' },
   { key: 'servants', label: 'الخدام', icon: ShieldCheck, color: 'text-rose-600' },
   { key: 'results', label: 'نتائج الامتحانات', icon: ClipboardCheck, color: 'text-emerald-600' },
+  { key: 'library', label: 'المكتبة', icon: Library, color: 'text-lime-700' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -88,6 +90,11 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'results.manage_grading', group: 'results', label: 'إدارة أنظمة التقدير', desc: 'التقديرات ونسبها وألوانها' },
   { key: 'results.lock', group: 'results', label: 'قفل النتائج', desc: 'قفل / فتح نتائج الامتحان — والكتابة بعد القفل' },
   { key: 'results.stats', group: 'results', label: 'عرض الإحصائيات', desc: 'لوحة الامتحان والتقارير (افتراضي لكل خادم)' },
+
+  // ---- المكتبة (0039) — managers hold them all; class servants browse by
+  // default and need a profile to manage content ----
+  { key: 'library.view', group: 'library', label: 'تصفح المكتبة', desc: 'رؤية المواضيع والكتب والمحاضرات المتاحة له (افتراضي لكل خادم)' },
+  { key: 'library.manage', group: 'library', label: 'إدارة المكتبة', desc: 'إضافة وتعديل وحذف المواضيع والكتب والمحاضرات في نطاقه' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
@@ -132,6 +139,8 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'results.manage_grading': Percent,
   'results.lock': Lock,
   'results.stats': PieChart,
+  'library.view': BookOpen,
+  'library.manage': Library,
 };
 
 /** Resolve the key set from the grant rows + the profiles (owner ⇒ '*'). */
