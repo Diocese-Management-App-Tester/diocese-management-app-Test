@@ -210,7 +210,8 @@ permission_profiles (ملفات الصلاحيات)  permissions (الصلاحي
 
 ### 1. Supabase
 1. Create a project at supabase.com
-2. SQL Editor → run **all** migrations in `supabase/migrations/` in numeric order (`0001` → `0031`); `0002_bootstrap_owner.sql` runs after step 5
+2. SQL Editor → **fastest path:** run `supabase/full_schema.sql` once — it is every migration (`0001` → `0039`, except `0002`) combined into one file, verified to produce a schema identical to running the files one by one. Regenerate it after adding a migration with `supabase/build_full_schema.sh`.
+   Alternatively run **all** migrations in `supabase/migrations/` in numeric order (`0001` → `0039`). Either way `0002_bootstrap_owner.sql` runs after step 5.
    ⚠️ In `0005` the `alter type ... add value 'suspended'` must run in its own query before the rest of the file
    ⚠️ `0019_performance_rls_indexes_rpc.sql` is **required** by the current frontend (home / scanner call its RPCs). It is safe to re-run (idempotent).
    ⚠️ `0020_statistics_rpcs.sql` is **required** by the الإحصائيات tab (all `stats_*` RPCs). Idempotent; depends on 0019 (`my_scope()`, `enrollment_visible()`).
