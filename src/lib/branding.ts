@@ -20,29 +20,40 @@
 //   NEXT_PUBLIC_THEME_COLOR       manifest theme colour / browser UI (default #1e3a8a)
 //   NEXT_PUBLIC_BACKGROUND_COLOR  manifest splash background (default #fdf8ee)
 //
+// Defaults (no variables set): the app is branded as the generic
+// "Diocese Management App" — short name "D.M.A" — with the bundled D.M.A
+// logo (navy background, golden church domes) in /public/icons and
+// /public/favicon*. The master copy lives in /assets/diocese-logo.png.
+//
 // Icons: when NEXT_PUBLIC_APP_ICON_URL is unset the bundled files in
-// /public/icons are used, so a deployment with no variables behaves exactly
-// as before.
+// /public/icons are used, so a deployment with no variables always shows the
+// default D.M.A logo.
 
 const env = (v: string | undefined, fallback: string): string => {
   const t = (v ?? '').trim();
   return t.length > 0 ? t : fallback;
 };
 
+/** Built-in defaults — used when the corresponding env variable is empty. */
+export const DEFAULT_APP_NAME = 'Diocese Management App';
+export const DEFAULT_SHORT_NAME = 'D.M.A';
+
 export const ICON_SIZES = [96, 180, 192, 512] as const;
 export type IconSize = (typeof ICON_SIZES)[number];
 
 export const BRANDING = {
-  appName: env(process.env.NEXT_PUBLIC_APP_NAME, 'مطرانية الأقباط الأرثوذكس — إيبارشية الأقصر وتوابعها'),
-  shortName: env(process.env.NEXT_PUBLIC_APP_SHORT_NAME, 'الإيبارشية'),
-  description: env(process.env.NEXT_PUBLIC_APP_DESCRIPTION, 'تطبيق إدارة كنائس وخدمات إيبارشية الأقصر وتوابعها'),
+  appName: env(process.env.NEXT_PUBLIC_APP_NAME, DEFAULT_APP_NAME),
+  shortName: env(process.env.NEXT_PUBLIC_APP_SHORT_NAME, DEFAULT_SHORT_NAME),
+  description: env(process.env.NEXT_PUBLIC_APP_DESCRIPTION, 'Diocese Management App — تطبيق إدارة كنائس وخدمات الإيبارشية'),
   /** Remote source of the app icon (empty → bundled /public/icons). */
   appIconUrl: env(process.env.NEXT_PUBLIC_APP_ICON_URL, ''),
-  dioceseName: env(process.env.NEXT_PUBLIC_DIOCESE_NAME, 'إيبارشية الأقصر وتوابعها'),
+  dioceseName: env(process.env.NEXT_PUBLIC_DIOCESE_NAME, DEFAULT_APP_NAME),
   /** Remote source of the diocese logo (empty → app icon). */
   dioceseLogoUrl: env(process.env.NEXT_PUBLIC_DIOCESE_LOGO_URL, ''),
   themeColor: env(process.env.NEXT_PUBLIC_THEME_COLOR, '#1e3a8a'),
-  backgroundColor: env(process.env.NEXT_PUBLIC_BACKGROUND_COLOR, '#fdf8ee'),
+  // Navy of the default D.M.A logo — splash screen and icon flattening blend
+  // seamlessly with the bundled artwork.
+  backgroundColor: env(process.env.NEXT_PUBLIC_BACKGROUND_COLOR, '#001f4e'),
 } as const;
 
 /**

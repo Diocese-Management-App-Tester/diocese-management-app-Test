@@ -18,7 +18,7 @@
 // and drop the previous brand's cache.
 const SW_PARAMS = new URLSearchParams(self.location.search);
 const BRAND_VERSION = SW_PARAMS.get('b') || '0';
-const APP_SHORT_NAME = SW_PARAMS.get('n') || 'الإيبارشية';
+const APP_SHORT_NAME = SW_PARAMS.get('n') || 'D.M.A';
 const CACHE_NAME = 'diocese-v5-' + BRAND_VERSION;
 const OFFLINE_URL = '/offline';
 // `?v=` mirrors src/lib/branding.ts so SW cache keys match the page's URLs.
