@@ -278,18 +278,18 @@ they are read from environment variables so the same repo can be deployed for
 any diocese. Set them in **Vercel → Project → Settings → Environment
 Variables** and **redeploy** (they are `NEXT_PUBLIC_*`, i.e. inlined at build
 time). Every variable is optional — an empty value keeps the built-in default
-(إيبارشية الأقصر وتوابعها + the bundled `/public/icons`).
+(**Diocese Management App** / **D.M.A** + the bundled D.M.A logo in `/public/icons`, master copy `assets/diocese-logo.png`).
 
 | Variable | Used for | Default |
 |---|---|---|
-| `NEXT_PUBLIC_APP_NAME` | manifest `name`, `applicationName` | مطرانية الأقباط الأرثوذكس — إيبارشية الأقصر وتوابعها |
-| `NEXT_PUBLIC_APP_SHORT_NAME` | home-screen label (manifest `short_name`), iOS title, push title fallback, footers | الإيبارشية |
-| `NEXT_PUBLIC_APP_DESCRIPTION` | manifest / meta description | تطبيق إدارة كنائس وخدمات … |
-| `NEXT_PUBLIC_APP_ICON_URL` | **app icon** — public URL of a square image ≥ 512px (PNG/JPG/WebP/SVG, e.g. Supabase Storage). PWA icons (96/192/512, any + maskable), favicon, apple-touch-icon (180), push notification icon/badge, offline page | bundled `/icons/*` |
-| `NEXT_PUBLIC_DIOCESE_NAME` | **diocese name** — `<title>`, header fallback (staff + child portal) before a church is resolved, login / signup / child-login headings, offline page | إيبارشية الأقصر وتوابعها |
+| `NEXT_PUBLIC_APP_NAME` | manifest `name`, `applicationName` | Diocese Management App |
+| `NEXT_PUBLIC_APP_SHORT_NAME` | home-screen label (manifest `short_name`), iOS title, push title fallback, footers | D.M.A |
+| `NEXT_PUBLIC_APP_DESCRIPTION` | manifest / meta description | Diocese Management App — تطبيق إدارة كنائس وخدمات الإيبارشية |
+| `NEXT_PUBLIC_APP_ICON_URL` | **app icon** — public URL of a square image ≥ 512px (PNG/JPG/WebP/SVG, e.g. Supabase Storage). PWA icons (96/192/512, any + maskable), favicon, apple-touch-icon (180), push notification icon/badge, offline page | bundled D.M.A logo `/icons/*` |
+| `NEXT_PUBLIC_DIOCESE_NAME` | **diocese name** — `<title>`, header fallback (staff + child portal) before a church is resolved, login / signup / child-login headings, offline page | Diocese Management App |
 | `NEXT_PUBLIC_DIOCESE_LOGO_URL` | **diocese logo** — header fallback avatar and the login / signup / child-login logo | app icon |
 | `NEXT_PUBLIC_THEME_COLOR` | manifest `theme_color`, browser UI colour | `#1e3a8a` |
-| `NEXT_PUBLIC_BACKGROUND_COLOR` | manifest `background_color`, icon flatten colour | `#fdf8ee` |
+| `NEXT_PUBLIC_BACKGROUND_COLOR` | manifest `background_color`, icon flatten colour | `#001f4e` (navy of the D.M.A logo) |
 
 How it works:
 - `src/app/branding/manifest/route.ts` generates the manifest at `/branding/manifest?v=<hash>` at build time from the variables (replaces the old static `public/manifest.json`; not `app/manifest.ts` because that convention injects an un-versioned link).
