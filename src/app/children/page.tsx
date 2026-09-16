@@ -7,8 +7,8 @@ import {
   Users, Search, Plus, Phone, MapPin, Star, CalendarCheck, X, Loader2, GraduationCap,
   SlidersHorizontal, ChevronDown, School, Check, Minus,
   MessageSquare, Inbox, PenSquare, ArrowUpDown, ArrowUp, ArrowDown,
-  Eye, Pencil, Trash2, Database, Printer, IdCard, CalendarDays, UserCheck, UserX, CircleDashed,
-  HeartHandshake, Trophy,
+  Eye, Database, Printer, IdCard, CalendarDays, UserCheck, UserX, CircleDashed,
+  HeartHandshake, Trophy, Ban, Settings2,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
@@ -31,9 +31,7 @@ import {
 import { useAppDate } from '@/lib/app-date-context';
 import { useModules } from '@/lib/modules-context';
 import NumPadModal from '@/components/NumPadModal';
-import {
-  ViewPersonModal, EditPersonModal, DeletePersonModal,
-} from '@/components/PersonDataModals';
+import { ViewPersonModal } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import AwardModal from '@/components/achievements/AwardModal';
 import { useDebouncedRealtime, scopeFilter } from '@/lib/realtime';
@@ -61,8 +59,8 @@ const STATUS_STYLE: Record<ChildEventStatus, { cls: string; icon: React.ReactNod
   not_registered: { cls: 'bg-slate-100 text-slate-500 !ring-slate-200',    icon: <CircleDashed className="h-3.5 w-3.5" /> },
   absent:         { cls: 'bg-red-500 text-white !ring-red-600/20',         icon: <UserX className="h-3.5 w-3.5" /> },
 };
-// البيانات job — view / edit / delete a person's data
-type DataMode = 'view' | 'edit' | 'delete';
+// البيانات job — VIEW only (0043): editing / deleting / stopping people lives
+// in «إدارة المخدومين → المخدومين» (/children/manage?tab=people)
 
 // ---------- Sorting ----------
 type SortKey = 'name' | 'age' | 'points' | 'attendance';
@@ -182,8 +180,7 @@ export default function ChildrenPage() {
   const [messageChannel, setMessageChannel] = useState<MessageChannel>('whatsapp');
   const [messageTemplate, setMessageTemplate] = useState('');
   const [showCompose, setShowCompose] = useState(false);
-  // البيانات job: which action is armed + which person the modal is open for
-  const [dataMode, setDataMode] = useState<DataMode>('view');
+  // البيانات job: which person the view modal is open for
   const [dataTarget, setDataTarget] = useState<EnrollmentWithPerson | null>(null);
 
   // ---------- Filter accordion ----------
@@ -623,6 +620,7 @@ export default function ChildrenPage() {
           alert(`${e.person.name} — حضوره مسجل بالفعل في هذه المناسبة اليوم`);
           return;
         }
+        if (error?.message?.includes('enrollment_stopped')) { alert(`${e.person.name} — موقوف، لا يمكن تسجيل حضوره`); return; }
         if (error) { alert('تعذر تسجيل الحضور، حاول مجدداً'); return; }
         // Optimistic local patch — no refetch; realtime reconciles later.
         patchEnrollment(e.id, { attendance_count: e.attendance_count + 1, points: e.points + effectiveEventPoints });
@@ -707,7 +705,9 @@ export default function ChildrenPage() {
       });
       setBusyChild(null);
       if (error) {
-        alert('تعذر تسجيل النقاط — تأكد من تشغيل تحديث قاعدة البيانات (0022)');
+        alert(error.message?.includes('enrollment_stopped')
+          ? `${e.person.name} — موقوف، لا يمكن تسجيل نقاطه`
+          : 'تعذر تسجيل النقاط — تأكد من تشغيل تحديث قاعدة البيانات (0022)');
         return;
       }
       patchEnrollment(e.id, { points: e.points + delta });
@@ -866,6 +866,7 @@ export default function ChildrenPage() {
   // pale green = present; white = not registered (occurrence still open);
   // pale red = absent (occurrence over and he never attended) ----------
   const cardTone = (child: EnrollmentWithPerson): string => {
+    if (child.status === 'stopped') return 'bg-slate-100/80';
     const s = statusOf(child);
     if (s === 'present') return 'bg-emerald-50';
     if (s === 'absent') return 'bg-red-50';
@@ -876,6 +877,20 @@ export default function ChildrenPage() {
   const childButton = (child: EnrollmentWithPerson) => {
     if (busyChild === child.id) {
       return <Loader2 className="h-6 w-6 animate-spin text-primary-500" />;
+    }
+    // 0043: a STOPPED person gets no attendance / points / card / achievement —
+    // only view, call and message keep working
+    if (child.status === 'stopped' && !['data', 'call', 'message'].includes(job)) {
+      return (
+        <span
+          id={`job-btn-${child.id}`}
+          aria-label="موقوف"
+          title="موقوف — أعد تفعيله من إدارة المخدومين"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-slate-400"
+        >
+          <Ban className="h-5 w-5" />
+        </span>
+      );
     }
     if (job === 'attendance') {
       const add = attendanceMode === 'add';
@@ -958,26 +973,14 @@ export default function ChildrenPage() {
       );
     }
     if (job === 'data') {
-      const tone =
-        dataMode === 'view'
-          ? 'bg-primary-600 hover:bg-primary-700'
-          : dataMode === 'edit'
-            ? 'bg-amber-500 hover:bg-amber-600'
-            : 'bg-red-500 hover:bg-red-600';
       return (
         <button
           id={`job-btn-${child.id}`}
-          aria-label={dataMode === 'view' ? 'عرض البيانات' : dataMode === 'edit' ? 'تعديل البيانات' : 'حذف الطفل'}
+          aria-label="عرض البيانات"
           onClick={() => doJob(child)}
-          className={`flex h-10 w-10 items-center justify-center rounded-full text-white shadow transition active:scale-95 ${tone}`}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-600 text-white shadow transition hover:bg-primary-700 active:scale-95"
         >
-          {dataMode === 'view' ? (
-            <Eye className="h-5 w-5" />
-          ) : dataMode === 'edit' ? (
-            <Pencil className="h-5 w-5" />
-          ) : (
-            <Trash2 className="h-5 w-5" />
-          )}
+          <Eye className="h-5 w-5" />
         </button>
       );
     }
@@ -1349,51 +1352,26 @@ export default function ChildrenPage() {
           </>
         )}
 
-        {/* Data: view / edit / delete mode buttons (البيانات) */}
+        {/* Data (البيانات): view only — edit / delete / stop live in إدارة المخدومين (0043) */}
         {job === 'data' && (
           <>
             <button
               id="data-mode-view"
               aria-label="عرض البيانات"
-              aria-pressed={dataMode === 'view'}
-              onClick={() => setDataMode('view')}
-              className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 ${
-                dataMode === 'view'
-                  ? 'bg-primary-600 text-white shadow ring-2 ring-primary-300'
-                  : 'bg-primary-50 text-primary-600'
-              }`}
+              aria-pressed
+              className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary-600 text-xs font-extrabold text-white shadow ring-2 ring-primary-300"
             >
               <Eye className="h-4 w-4" />
               عرض
             </button>
-            <button
-              id="data-mode-edit"
-              aria-label="تعديل البيانات"
-              aria-pressed={dataMode === 'edit'}
-              onClick={() => setDataMode('edit')}
-              className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 ${
-                dataMode === 'edit'
-                  ? 'bg-amber-500 text-white shadow ring-2 ring-amber-300'
-                  : 'bg-amber-50 text-amber-600'
-              }`}
+            <Link
+              id="data-mode-manage"
+              href="/children/manage?tab=people"
+              className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-amber-50 text-xs font-extrabold text-amber-700 transition hover:bg-amber-100 active:scale-95"
             >
-              <Pencil className="h-4 w-4" />
-              تعديل
-            </button>
-            <button
-              id="data-mode-delete"
-              aria-label="حذف الطفل"
-              aria-pressed={dataMode === 'delete'}
-              onClick={() => setDataMode('delete')}
-              className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 ${
-                dataMode === 'delete'
-                  ? 'bg-red-500 text-white shadow ring-2 ring-red-300'
-                  : 'bg-red-50 text-red-500'
-              }`}
-            >
-              <Trash2 className="h-4 w-4" />
-              حذف
-            </button>
+              <Settings2 className="h-4 w-4" />
+              تعديل · حذف · إيقاف
+            </Link>
           </>
         )}
 
@@ -1477,20 +1455,10 @@ export default function ChildrenPage() {
       {job === 'data' && (
         <p
           id="data-mode-hint"
-          className={`mb-3 flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold ${
-            dataMode === 'delete'
-              ? 'bg-red-50 text-red-600'
-              : dataMode === 'edit'
-                ? 'bg-amber-50 text-amber-600'
-                : 'bg-primary-50 text-primary-600'
-          }`}
+          className="mb-3 flex items-center gap-1.5 rounded-xl bg-primary-50 px-3 py-2 text-xs font-bold text-primary-600"
         >
           <Database className="h-3.5 w-3.5 shrink-0" />
-          {dataMode === 'view'
-            ? 'اضغط زر المخدوم لعرض بياناته الكاملة مع كود QR وكل تسجيلاته'
-            : dataMode === 'edit'
-              ? 'اضغط زر المخدوم لتعديل بياناته الشخصية'
-              : 'اضغط زر المخدوم لحذفه — من الفصل والخدمة والكنيسة أو حذفًا نهائيًا من قاعدة البيانات'}
+          اضغط زر المخدوم لعرض بياناته الكاملة مع كود QR وكل تسجيلاته — التعديل والحذف والإيقاف من «إدارة المخدومين ← المخدومين»
         </p>
       )}
 
@@ -1788,7 +1756,7 @@ export default function ChildrenPage() {
               {kind === 'child' && (
                 <button
                   id="go-manage-children"
-                  onClick={() => router.push('/children/manage')}
+                  onClick={() => router.push('/children/manage?tab=add')}
                   className="btn-primary mt-4 inline-flex items-center gap-1 !py-2 !px-4 text-sm"
                 >
                   <Plus className="h-4 w-4" /> إدارة المخدومين
@@ -1847,7 +1815,14 @@ export default function ChildrenPage() {
                         <div className="flex items-center gap-3">
                           <PersonAvatar name={child.person.name} imageUrl={child.person.image_url} />
                           <div className="min-w-0 flex-1">
-                            <p className="font-extrabold truncate">{child.person.name}</p>
+                            <p className={`font-extrabold truncate ${child.status === 'stopped' ? 'text-slate-400 line-through decoration-slate-300' : ''}`}>
+                              {child.person.name}
+                            </p>
+                            {child.status === 'stopped' && (
+                              <span id={`stopped-badge-${child.id}`} className="badge bg-slate-200 text-slate-600">
+                                <Ban className="h-3 w-3" /> موقوف
+                              </span>
+                            )}
                           </div>
                           {/* Single job button */}
                           <div className="shrink-0">{childButton(child)}</div>
@@ -1983,30 +1958,13 @@ export default function ChildrenPage() {
         />
       )}
 
-      {/* البيانات job modals */}
-      {dataTarget && dataMode === 'view' && (
+      {/* البيانات job modal (view only) */}
+      {dataTarget && (
         <ViewPersonModal
           enrollment={dataTarget}
           churches={churches}
           services={services}
           classes={classes}
-          onClose={() => setDataTarget(null)}
-        />
-      )}
-      {dataTarget && dataMode === 'edit' && (
-        <EditPersonModal
-          enrollment={dataTarget}
-          onSaved={load}
-          onClose={() => setDataTarget(null)}
-        />
-      )}
-      {dataTarget && dataMode === 'delete' && (
-        <DeletePersonModal
-          enrollment={dataTarget}
-          churches={churches}
-          services={services}
-          classes={classes}
-          onDeleted={load}
           onClose={() => setDataTarget(null)}
         />
       )}

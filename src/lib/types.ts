@@ -209,7 +209,18 @@ export interface Enrollment {
   kind?: 'child' | 'servant';
   /** the servant_enrollments.id this mirror row belongs to (kind = 'servant') */
   servant_id?: string | null;
+  /** migration 0043: 'active' (default) or 'stopped' — no attendance / points / portal login */
+  status?: EnrollmentStatus;
 }
+
+// ---------- Stop (إيقاف) — migration 0043 ----------
+export type EnrollmentStatus = 'active' | 'stopped';
+export const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, string> = {
+  active: 'يعمل',
+  stopped: 'موقوف',
+};
+/** The default login / portal password (children who never set one, new servant accounts). */
+export const DEFAULT_PASSWORD = '000000';
 
 // Enrollment joined with its person (the shape most pages work with)
 export interface EnrollmentWithPerson extends Enrollment {

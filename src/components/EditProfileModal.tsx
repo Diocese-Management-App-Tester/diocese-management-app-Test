@@ -10,7 +10,7 @@ import { X, Save, User, Phone, Upload, IdCard, Cake, MapPin } from 'lucide-react
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
-import { SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
+import { SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, userIdToEmail, codeToUserId, type Gender } from '@/lib/types';
 import ResetPasswordSection from '@/components/ResetPasswordSection';
 
 export default function EditProfileModal({ onClose }: { onClose: () => void }) {
@@ -146,12 +146,22 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
           </label>
 
-          {/* 0042: change MY login password (Supabase Auth, current session) */}
+          {/* 0043: change MY login password — OLD + NEW + CONFIRM. The old one is
+              verified by re-authenticating (Supabase Auth has no server-side
+              «current password» check). A forgotten password is reset by a
+              superior from إدارة الخدام (no old password needed there). */}
           <ResetPasswordSection
             idPrefix="my-pw"
             title="تغيير كلمة المرور"
-            hint="كلمة دخولك للتطبيق — 6 أحرف على الأقل"
-            onReset={async (pw) => {
+            hint="أدخل كلمتك القديمة ثم الجديدة وتأكيدها — 6 أحرف على الأقل"
+            requireCurrent
+            onReset={async (pw, current) => {
+              const login = person?.national_id ?? profile?.user_id ?? '';
+              const { error: e0 } = await supabase.auth.signInWithPassword({
+                email: userIdToEmail(codeToUserId(login)),
+                password: current ?? '',
+              });
+              if (e0) return 'كلمة المرور القديمة غير صحيحة';
               const { error: e } = await supabase.auth.updateUser({ password: pw });
               if (!e) return null;
               const m = (e.message ?? '').toLowerCase();

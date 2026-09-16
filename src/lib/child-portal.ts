@@ -434,7 +434,9 @@ export function setChildSignupRequest(id: string | null) {
 const ERROR_MESSAGES: Record<string, string> = {
   // accounts (0042)
   session_expired: 'انتهت الجلسة — سجّل الدخول مجدداً',
-  no_password: 'لم تُضبط كلمة مرور لهذا الكود بعد — اطلب من الخادم ضبطها أو سجّل حساباً جديداً',
+  no_password: 'لم تُضبط كلمة مرور لهذا الكود بعد — جرّب الكلمة الافتراضية 000000 أو اطلب من الخادم ضبطها',
+  account_stopped: 'هذا الحساب موقوف — تواصل مع خادم فصلك',
+  enrollment_stopped: 'هذا التسجيل موقوف — لا يمكن تسجيل حضور أو نقاط',
   wrong_password: 'كلمة المرور غير صحيحة',
   weak_password: 'كلمة المرور قصيرة — 6 أحرف على الأقل',
   already_registered: 'هذا الكود له حساب بالفعل — سجّل الدخول بدلاً من ذلك',

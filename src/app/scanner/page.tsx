@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   ScanLine, Camera, CameraOff, CheckCircle2, AlertCircle, Search, Star, Loader2, School,
-  Check, X, Plus, Minus, Eye, Pencil, Trash2, Database, CalendarCheck, Calculator, History,
-  UserCheck, UserX, CircleDashed,
+  Check, X, Plus, Minus, Eye, Database, CalendarCheck, Calculator, History,
+  UserCheck, UserX, CircleDashed, Settings2, Ban,
 } from 'lucide-react';
+import Link from 'next/link';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -21,9 +22,7 @@ import {
 } from '@/lib/time';
 import { useAppDate } from '@/lib/app-date-context';
 import NumPadModal from '@/components/NumPadModal';
-import {
-  ViewPersonModal, EditPersonModal, DeletePersonModal, ModalFrame,
-} from '@/components/PersonDataModals';
+import { ViewPersonModal, ModalFrame } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
 import { useNavLabel } from '@/lib/customization-context';
@@ -41,7 +40,7 @@ const SCANNER_JOBS: { value: ScannerJob; label: string }[] = [
 type AttendanceMode = 'add' | 'remove';
 // 'manual' = NEW: scanning opens a modal (name + points + number + add/subtract + cause)
 type PointsMode = 'add' | 'subtract' | 'manual';
-type DataMode = 'view' | 'edit' | 'delete';
+// البيانات job — view only (0043): edit / delete / stop live in إدارة المخدومين
 
 type ScanResult = { type: 'ok' | 'dup' | 'err'; message: string };
 
@@ -99,7 +98,6 @@ export default function ScannerPage() {
   const [job, setJob] = useState<ScannerJob>('attendance');
   const [attendanceMode, setAttendanceMode] = useState<AttendanceMode>('add');
   const [pointsMode, setPointsMode] = useState<PointsMode>('add');
-  const [dataMode, setDataMode] = useState<DataMode>('view');
   const [eventId, setEventId] = useState<string>('');
   const [causeId, setCauseId] = useState<string>('');
 
@@ -373,6 +371,12 @@ export default function ScannerPage() {
     async (e: EnrollmentWithPerson) => {
       setPicker(null);
 
+      // 0043: a STOPPED person — only viewing his data is allowed here
+      if (e.status === 'stopped' && job !== 'data') {
+        setResult({ type: 'err', message: `⛔ ${e.person.name} — موقوف. أعد تفعيله من إدارة المخدومين ← المخدومين` });
+        return;
+      }
+
       if (job === 'attendance') {
         if (attendanceMode === 'add') {
           const ev = events.find((x) => x.id === eventId);
@@ -404,6 +408,7 @@ export default function ScannerPage() {
             setResult({ type: 'dup', message: `${e.person.name} — حضوره مسجل بالفعل في هذه المناسبة اليوم` });
             return;
           }
+          if (error?.message?.includes('enrollment_stopped')) { setResult({ type: 'err', message: `${e.person.name} — موقوف، لا يمكن تسجيل حضوره` }); return; }
           if (error) { setResult({ type: 'err', message: 'تعذر تسجيل الحضور، حاول مجدداً' }); return; }
           patchEnrollment(e.id, { attendance_count: e.attendance_count + 1, points: e.points + effectiveEventPoints });
           markAttended(e.id, cairoToday(now()), true);
@@ -490,6 +495,7 @@ export default function ScannerPage() {
           recorded_by: profile?.id,
         });
         setBusyId(null);
+        if (error?.message?.includes('enrollment_stopped')) { setResult({ type: 'err', message: `${e.person.name} — موقوف، لا يمكن تسجيل نقاطه` }); return; }
         if (error) { setResult({ type: 'err', message: 'تعذر تسجيل النقاط، حاول مجدداً (تأكد من تطبيق migration 0022)' }); return; }
         patchEnrollment(e.id, { points: e.points + delta });
         setResult({
@@ -500,11 +506,11 @@ export default function ScannerPage() {
       } else if (job === 'data') {
         setResult(null);
         setDataTarget(e);
-        logOp(e, 'data', dataMode === 'view' ? 'عرض البيانات' : dataMode === 'edit' ? 'تعديل البيانات' : 'حذف');
+        logOp(e, 'data', 'عرض البيانات');
       }
     },
     [
-      job, attendanceMode, pointsMode, dataMode, events, eventId, causes, causeId,
+      job, attendanceMode, pointsMode, events, eventId, causes, causeId,
       effectiveEventPoints, effectiveCausePoints, supabase, profile, now,
       className, patchEnrollment, logOp, selectedEvent, markAttended,
     ]
@@ -693,21 +699,15 @@ export default function ScannerPage() {
         </button>
       );
     }
-    // data
-    const tone =
-      dataMode === 'view'
-        ? 'bg-primary-600 hover:bg-primary-700'
-        : dataMode === 'edit'
-          ? 'bg-amber-500 hover:bg-amber-600'
-          : 'bg-red-500 hover:bg-red-600';
+    // data — view only
     return (
       <button
         id={`job-btn-${e.id}`}
-        aria-label={dataMode === 'view' ? 'عرض البيانات' : dataMode === 'edit' ? 'تعديل البيانات' : 'حذف الطفل'}
+        aria-label="عرض البيانات"
         onClick={() => doJob(e)}
-        className={`flex h-10 w-10 items-center justify-center rounded-full text-white shadow transition active:scale-95 ${tone}`}
+        className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-600 text-white shadow transition hover:bg-primary-700 active:scale-95"
       >
-        {dataMode === 'view' ? <Eye className="h-5 w-5" /> : dataMode === 'edit' ? <Pencil className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
+        <Eye className="h-5 w-5" />
       </button>
     );
   };
@@ -972,36 +972,18 @@ export default function ScannerPage() {
               <button
                 id="data-mode-view"
                 aria-label="عرض البيانات"
-                aria-pressed={dataMode === 'view'}
-                onClick={() => setDataMode('view')}
-                className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 ${
-                  dataMode === 'view' ? 'bg-primary-600 text-white shadow ring-2 ring-primary-300' : 'bg-primary-50 text-primary-600'
-                }`}
+                aria-pressed
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary-600 text-xs font-extrabold text-white shadow ring-2 ring-primary-300"
               >
                 <Eye className="h-4 w-4" /> عرض
               </button>
-              <button
-                id="data-mode-edit"
-                aria-label="تعديل البيانات"
-                aria-pressed={dataMode === 'edit'}
-                onClick={() => setDataMode('edit')}
-                className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 ${
-                  dataMode === 'edit' ? 'bg-amber-500 text-white shadow ring-2 ring-amber-300' : 'bg-amber-50 text-amber-600'
-                }`}
+              <Link
+                id="data-mode-manage"
+                href="/children/manage?tab=people"
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-amber-50 text-xs font-extrabold text-amber-700 transition hover:bg-amber-100 active:scale-95"
               >
-                <Pencil className="h-4 w-4" /> تعديل
-              </button>
-              <button
-                id="data-mode-delete"
-                aria-label="حذف الطفل"
-                aria-pressed={dataMode === 'delete'}
-                onClick={() => setDataMode('delete')}
-                className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 ${
-                  dataMode === 'delete' ? 'bg-red-500 text-white shadow ring-2 ring-red-300' : 'bg-red-50 text-red-500'
-                }`}
-              >
-                <Trash2 className="h-4 w-4" /> حذف
-              </button>
+                <Settings2 className="h-4 w-4" /> تعديل · حذف · إيقاف
+              </Link>
             </>
           )}
         </div>
@@ -1029,18 +1011,9 @@ export default function ScannerPage() {
           </p>
         )}
         {job === 'data' && (
-          <p
-            id="data-mode-hint"
-            className={`mb-2 flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold ${
-              dataMode === 'delete' ? 'bg-red-50 text-red-600' : dataMode === 'edit' ? 'bg-amber-50 text-amber-600' : 'bg-primary-50 text-primary-600'
-            }`}
-          >
+          <p id="data-mode-hint" className="mb-2 flex items-center gap-1.5 rounded-xl bg-primary-50 px-3 py-2 text-xs font-bold text-primary-600">
             <Database className="h-3.5 w-3.5 shrink-0" />
-            {dataMode === 'view'
-              ? 'امسح المخدوم لعرض بياناته الكاملة مع كود QR وكل تسجيلاته'
-              : dataMode === 'edit'
-                ? 'امسح المخدوم لتعديل بياناته الشخصية'
-                : 'امسح المخدوم لحذفه — من الفصل والخدمة والكنيسة أو حذفًا نهائيًا من قاعدة البيانات'}
+            امسح المخدوم لعرض بياناته الكاملة مع كود QR وكل تسجيلاته — التعديل والحذف والإيقاف من «إدارة المخدومين ← المخدومين»
           </p>
         )}
       </div>
@@ -1256,34 +1229,9 @@ export default function ScannerPage() {
         />
       )}
 
-      {/* ---------- البيانات modals ---------- */}
-      {dataTarget && dataMode === 'view' && (
+      {/* ---------- البيانات modal (view only) ---------- */}
+      {dataTarget && (
         <ViewPersonModal enrollment={dataTarget} churches={churches} services={services} classes={classes} onClose={() => setDataTarget(null)} />
-      )}
-      {dataTarget && dataMode === 'edit' && (
-        <EditPersonModal
-          enrollment={dataTarget}
-          onSaved={async () => {
-            // Re-read the edited person so the search rows show the new data
-            const { data } = await supabase.from('persons').select('*').eq('id', dataTarget.person_id).maybeSingle();
-            if (data) patchEnrollment(dataTarget.id, { person: data as Person });
-            setResult({ type: 'ok', message: `تم حفظ بيانات ${(data as Person | null)?.name ?? dataTarget.person.name} ✔` });
-          }}
-          onClose={() => setDataTarget(null)}
-        />
-      )}
-      {dataTarget && dataMode === 'delete' && (
-        <DeletePersonModal
-          enrollment={dataTarget}
-          churches={churches}
-          services={services}
-          classes={classes}
-          onDeleted={() => {
-            setSearchRows((prev) => prev.filter((x) => x.id !== dataTarget.id));
-            setResult({ type: 'ok', message: `تم حذف ${dataTarget.person.name}` });
-          }}
-          onClose={() => setDataTarget(null)}
-        />
       )}
     </AppShell>
   );
@@ -1383,7 +1331,7 @@ function ManualPointsModal({
       recorded_by: recorderId,
     });
     setBusy(null);
-    if (err) { setError('تعذر تسجيل النقاط، حاول مجدداً'); return; }
+    if (err) { setError(err.message?.includes('enrollment_stopped') ? 'هذا الشخص موقوف — لا يمكن تسجيل نقاطه' : 'تعذر تسجيل النقاط، حاول مجدداً'); return; }
     setLastOp({ delta, cause: cause.name });
     onApplied(delta, cause); // parent patches the balance; modal stays open
   };
