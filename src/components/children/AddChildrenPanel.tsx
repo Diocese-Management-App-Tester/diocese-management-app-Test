@@ -28,6 +28,7 @@ import {
   PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
   type Gender, type Church, type Service, type ClassRoom,
   type Person, type AddPersonResult,
+  DEFAULT_PASSWORD,
 } from '@/lib/types';
 
 // ---------- Helpers ----------
@@ -715,11 +716,12 @@ function SingleAddTab({
             type="text"
             dir="ltr"
             className="input-field"
-            placeholder="يدخل بها المخدوم مع كوده"
+            placeholder={`فارغة = الافتراضية ${DEFAULT_PASSWORD}`}
             value={password}
             autoComplete="off"
             onChange={(e) => setPassword(e.target.value)}
           />
+          <p className="mt-1 text-[11px] text-slate-400">بدون كلمة مرور يدخل المخدوم بالافتراضية <b dir="ltr">{DEFAULT_PASSWORD}</b> ويغيّرها من بوابته (القديمة + الجديدة)</p>
           {existingPerson && (
             <p className="mt-1 text-[11px] text-slate-400">لشخص موجود: تُضبط فقط إن لم تكن له كلمة مرور بعد — لإعادة التعيين استخدم «تعديل البيانات»</p>
           )}
@@ -1335,7 +1337,7 @@ function BulkAddTab({
                 type="text"
                 dir="ltr"
                 className="input-field"
-                placeholder="مثال: 123456 — يستطيع المخدوم تغييرها لاحقًا"
+                placeholder={`فارغة = الافتراضية ${DEFAULT_PASSWORD} — يغيّرها المخدوم لاحقًا`}
                 value={defaultPassword}
                 autoComplete="off"
                 onChange={(e) => setDefaultPassword(e.target.value)}

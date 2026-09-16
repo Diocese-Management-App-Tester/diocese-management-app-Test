@@ -13,7 +13,7 @@ export const ALL = 'all';
 export type EnrollmentKind = 'child' | 'servant' | 'all';
 
 export const ENROLLMENT_LIST_SELECT =
-  'id, person_id, church_id, service_id, class_id, attendance_count, points, created_at, kind, servant_id, ' +
+  'id, person_id, church_id, service_id, class_id, attendance_count, points, created_at, kind, servant_id, status, ' +
   'person:persons(id, national_id, name, birthdate, gender, phone, address, notes, image_url)';
 
 export interface ScopeSelection {
@@ -36,12 +36,13 @@ export const PAGE_SIZE = 200;
 export async function fetchEnrollmentsPage(
   supabase: SupabaseClient,
   scope: ScopeSelection,
-  opts: { page?: number; pageSize?: number; search?: string; kind?: EnrollmentKind } = {}
+  opts: { page?: number; pageSize?: number; search?: string; kind?: EnrollmentKind; status?: 'active' | 'stopped' | 'all' } = {}
 ): Promise<{ rows: EnrollmentWithPerson[]; hasMore: boolean }> {
   const page = opts.page ?? 0;
   const size = opts.pageSize ?? PAGE_SIZE;
   const search = (opts.search ?? '').trim();
   const kind = opts.kind ?? 'child';
+  const status = opts.status ?? 'all';
 
   const select = search
     ? ENROLLMENT_LIST_SELECT.replace('person:persons(', 'person:persons!inner(')
@@ -49,6 +50,7 @@ export async function fetchEnrollmentsPage(
 
   let q = supabase.from('enrollments').select(select);
   if (kind !== 'all') q = q.eq('kind', kind);
+  if (status !== 'all') q = q.eq('status', status);
   if (scope.church && scope.church !== ALL) q = q.eq('church_id', scope.church);
   if (scope.service && scope.service !== ALL) q = q.eq('service_id', scope.service);
   if (scope.class && scope.class !== ALL) q = q.eq('class_id', scope.class);

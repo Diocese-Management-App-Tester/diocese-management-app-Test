@@ -1,17 +1,19 @@
 'use client';
 
-// ---------- إدارة المخدومين — one module page with 3 tabs (migration 0042) ----------
+// ---------- إدارة المخدومين — one module page with 4 tabs (migrations 0042 + 0043) ----------
+//   المخدومين         → ManagePeoplePanel  (edit · delete · stop — children AND servants,
+//                        organized by church / service / class; stop a whole scope)
 //   إضافة             → AddChildrenPanel   (single / bulk — moved here from /children/add)
 //   الطلبات           → ChildRequestsPanel (child signups awaiting approval, badge = count)
 //   دعوة مخدوم (QR)   → ChildInvitePanel   (scoped invite link + QR → /child/signup)
-// URL: /children/manage?tab=add|requests|invite — linked from Settings → الإدارة.
+// URL: /children/manage?tab=people|add|requests|invite — linked from Settings → الإدارة.
 // Any approved servant can use it (a class servant manages HIS class; RLS
 // scopes the requests, the add RPC checks the class access).
 
 import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight, GraduationCap, UserCheck, UserPlus, QrCode, Loader2, Users } from 'lucide-react';
+import { ArrowRight, GraduationCap, UserCheck, UserPlus, QrCode, Loader2, Users, UserCog } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -19,9 +21,11 @@ import { useDebouncedRealtime } from '@/lib/realtime';
 import AddChildrenPanel from '@/components/children/AddChildrenPanel';
 import ChildRequestsPanel from '@/components/children/ChildRequestsPanel';
 import ChildInvitePanel from '@/components/children/ChildInvitePanel';
+import ManagePeoplePanel from '@/components/children/ManagePeoplePanel';
 
-type Tab = 'add' | 'requests' | 'invite';
+type Tab = 'people' | 'add' | 'requests' | 'invite';
 const TABS: { key: Tab; label: string; icon: typeof Users; color: string }[] = [
+  { key: 'people', label: 'المخدومين', icon: UserCog, color: 'text-amber-600' },
   { key: 'add', label: 'إضافة', icon: UserPlus, color: 'text-violet-600' },
   { key: 'requests', label: 'الطلبات', icon: UserCheck, color: 'text-red-600' },
   { key: 'invite', label: 'دعوة (QR)', icon: QrCode, color: 'text-primary-600' },
@@ -43,7 +47,7 @@ function ChildrenManageModule() {
   const params = useSearchParams();
   const [supabase] = useState(() => createClient());
   const raw = params.get('tab');
-  const tab: Tab = raw === 'requests' || raw === 'invite' ? raw : 'add';
+  const tab: Tab = raw === 'requests' || raw === 'invite' || raw === 'add' ? raw : 'people';
   const [pendingCount, setPendingCount] = useState(0);
 
   const loadCount = useCallback(async () => {
@@ -53,7 +57,7 @@ function ChildrenManageModule() {
   useEffect(() => { if (profile?.status === 'approved') loadCount(); }, [profile?.status, loadCount]);
   useDebouncedRealtime(supabase, 'children-manage-count', [{ table: 'child_join_requests' }], loadCount, { enabled: !!profile });
 
-  const setTab = (t: Tab) => router.replace(t === 'add' ? '/children/manage' : `/children/manage?tab=${t}`);
+  const setTab = (t: Tab) => router.replace(t === 'people' ? '/children/manage' : `/children/manage?tab=${t}`);
 
   return (
     <>
@@ -72,7 +76,7 @@ function ChildrenManageModule() {
         </Link>
       </section>
 
-      <div id="children-manage-tabs" className="mb-4 grid grid-cols-3 gap-1 rounded-2xl bg-indigo-50 p-1">
+      <div id="children-manage-tabs" className="mb-4 grid grid-cols-4 gap-1 rounded-2xl bg-indigo-50 p-1">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -98,6 +102,7 @@ function ChildrenManageModule() {
         })}
       </div>
 
+      {tab === 'people' && <ManagePeoplePanel />}
       {tab === 'add' && <AddChildrenPanel />}
       {tab === 'requests' && <ChildRequestsPanel />}
       {tab === 'invite' && <ChildInvitePanel />}

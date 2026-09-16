@@ -15,7 +15,9 @@
 // Who may call: an APPROVED owner / church manager / service manager whose
 // scope covers the target servant (same rule as editing him in ServantsPanel:
 // owner → anyone; church manager → his church; service manager → his service).
-// A servant may also reset HIS OWN password here (self-service).
+// 0043: ONLY a SUPERIOR may reset a password without knowing the old one.
+// A servant changing HIS OWN password goes through Supabase Auth in the
+// browser (old + new + confirm — EditProfileModal), never through here.
 //
 // Env (server): SUPABASE_SERVICE_ROLE_KEY. Without it → 503 «not configured».
 
@@ -39,7 +41,7 @@ type Actor = { id: string; role: string; status: string; church_id: string | nul
 type Target = { id: string; role: string; person_id: string | null; church_id: string | null; service_id: string | null; user_id: string };
 
 function canManage(actor: Actor, target: Target): boolean {
-  if (actor.id === target.id) return true; // self-service (password only — enforced below)
+  if (actor.id === target.id) return false; // never self — own password = old + new in the app
   if (actor.role === 'owner') return true;
   if (target.role === 'owner') return false;
   if (actor.role === 'church_manager') return !!actor.church_id && target.church_id === actor.church_id;
@@ -81,11 +83,6 @@ export async function POST(req: NextRequest) {
   }
 
   // ---------- change code ----------
-  // self-service code change is NOT allowed (the code is the identity the
-  // managers control) — a plain servant can only reset his own password
-  if (actor.id === target.id && !['owner', 'church_manager', 'service_manager'].includes(actor.role)) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
-  }
   const code = typeof body.code === 'string' ? body.code.trim().slice(0, 80) : '';
   const userId = codeToUserId(code);
   if (!code || !userId) return NextResponse.json({ error: 'code_required' }, { status: 400 });

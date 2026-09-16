@@ -27,7 +27,7 @@ import PhotoCropModal from '@/components/PhotoCropModal';
 import BulkAddServants from '@/components/servants/BulkAddServants';
 import { useServantScope, RoleScopeFields, ProfileChips, postAddServants, outcomeLabel } from '@/components/servants/AddServantBits';
 import {
-  GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, codeToUserId,
+  GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, codeToUserId, DEFAULT_PASSWORD,
   type Church, type Service, type ClassRoom, type Gender, type ServantEnrollment, type AdminCodeLookup,
 } from '@/lib/types';
 
@@ -166,7 +166,8 @@ function SingleAddServant({
   useEffect(() => { if (bDay && Number(bDay) > daysInMonth) setBDay(String(daysInMonth)); }, [daysInMonth, bDay]);
 
   // ---- password + profiles ----
-  const [password, setPassword] = useState(() => generatePassword());
+  // 0043: the DEFAULT password (000000) — the manager may generate / type another
+  const [password, setPassword] = useState<string>(DEFAULT_PASSWORD);
   const [showPw, setShowPw] = useState(true);
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
 
@@ -182,7 +183,7 @@ function SingleAddServant({
     setName(''); setGender(''); setPhoneLocal(''); setBDay(''); setBMonth(''); setBYear('');
     setAddress(''); setNotes('');
     setPhotoBlob(null); if (photoPreview.startsWith('blob:')) URL.revokeObjectURL(photoPreview); setPhotoPreview('');
-    setPassword(generatePassword()); setSelectedProfiles([]);
+    setPassword(DEFAULT_PASSWORD); setSelectedProfiles([]);
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -402,7 +403,12 @@ function SingleAddServant({
             <RefreshCw className="h-5 w-5" />
           </button>
         </div>
-        <p className="text-[11px] font-bold text-slate-400">6 أحرف على الأقل — يمكن للخادم تغييرها لاحقًا من ملفه.</p>
+        <p className="text-[11px] font-bold text-slate-400">
+          الافتراضية <b dir="ltr">{DEFAULT_PASSWORD}</b> — 6 أحرف على الأقل؛ يغيّرها الخادم لاحقًا من ملفه (القديمة + الجديدة)، أو يعيد مسؤوله تعيينها.
+          {password !== DEFAULT_PASSWORD && (
+            <button type="button" onClick={() => { setPassword(DEFAULT_PASSWORD); setShowPw(true); }} className="mr-1 text-primary-600 underline">استخدم الافتراضية</button>
+          )}
+        </p>
         <ProfileChips profiles={permissionProfiles} selected={selectedProfiles} idPrefix="add"
           onToggle={(id) => setSelectedProfiles((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))} />
       </div>

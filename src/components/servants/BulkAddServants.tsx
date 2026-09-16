@@ -17,6 +17,7 @@ import {
   normalizePhone, parseFullDate, parseSplitDate, parseGender, parsePastedTable, readSpreadsheet,
   toLatinDigits, generatePassword, type DateOrder,
 } from '@/lib/bulk-import';
+import { DEFAULT_PASSWORD } from '@/lib/types';
 import { useServantScope, RoleScopeFields, ProfileChips, postAddServants, outcomeLabel } from '@/components/servants/AddServantBits';
 import {
   PHONE_LOCAL_LENGTH, ROLE_LABELS,
@@ -105,6 +106,8 @@ export default function BulkAddServants({
   const [defaultGender, setDefaultGender] = useState<Gender | ''>('');
   const [autoCodes, setAutoCodes] = useState(true);
   const [autoPasswords, setAutoPasswords] = useState(true);
+  // 0043: rows without a password get the DEFAULT (000000) or a random one
+  const [pwMode, setPwMode] = useState<'default' | 'random'>('default');
   const [dateOrder, setDateOrder] = useState<DateOrder>('auto');
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
 
@@ -155,7 +158,7 @@ export default function BulkAddServants({
     let code = cellOf(row, 'code');
     if (!code && autoCodes) code = 'AUTO';
     let password = cellOf(row, 'password');
-    if (!password && autoPasswords) password = 'AUTO';
+    if (!password && autoPasswords) password = pwMode === 'default' ? DEFAULT_PASSWORD : 'AUTO';
 
     let birthdate: string | null = null, birthdateRaw = '';
     if (hasFullDate) { birthdateRaw = cellOf(row, 'birthdate'); birthdate = parseFullDate(birthdateRaw, dateOrder); }
@@ -168,7 +171,7 @@ export default function BulkAddServants({
       row, name: cellOf(row, 'name'), gender, code, password, birthdate, birthdateRaw,
       phone: normalizePhone(cellOf(row, 'phone')), address: cellOf(row, 'address'), notes: cellOf(row, 'notes'),
     };
-  }), [dataRows, cellOf, hasGenderData, defaultGender, autoCodes, autoPasswords, hasFullDate, hasSplitDate, dateOrder]);
+  }), [dataRows, cellOf, hasGenderData, defaultGender, autoCodes, autoPasswords, pwMode, hasFullDate, hasSplitDate, dateOrder]);
 
   const cycleGender = (key: number) =>
     setRows((rs) => rs.map((r) => {
@@ -360,8 +363,20 @@ export default function BulkAddServants({
               <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
                 <input id="bulk-srv-auto-pw" type="checkbox" checked={autoPasswords} onChange={(e) => setAutoPasswords(e.target.checked)} className="h-4 w-4 accent-primary-600" />
                 <KeyRound className="h-4 w-4 text-violet-500" />
-                توليد كلمة مرور تلقائية {hasPasswordCol ? 'للصفوف التي بلا كلمة مرور' : 'لكل الخدام'} <span className="font-normal text-slate-400">(8 أحرف)</span>
+                كلمة مرور تلقائية {hasPasswordCol ? 'للصفوف التي بلا كلمة مرور' : 'لكل الخدام'}
               </label>
+              {autoPasswords && (
+                <div className="mr-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="group" aria-label="نوع كلمة المرور التلقائية">
+                  <button id="bulk-srv-pw-default" type="button" aria-pressed={pwMode === 'default'} onClick={() => setPwMode('default')}
+                    className={`h-8 rounded-lg text-[11px] font-extrabold transition ${pwMode === 'default' ? 'bg-white text-primary-700 shadow' : 'text-slate-500'}`}>
+                    الافتراضية <span dir="ltr">{DEFAULT_PASSWORD}</span>
+                  </button>
+                  <button id="bulk-srv-pw-random" type="button" aria-pressed={pwMode === 'random'} onClick={() => setPwMode('random')}
+                    className={`h-8 rounded-lg text-[11px] font-extrabold transition ${pwMode === 'random' ? 'bg-white text-primary-700 shadow' : 'text-slate-500'}`}>
+                    عشوائية (8 أحرف)
+                  </button>
+                </div>
+              )}
               {(missingCodes > 0 || missingPw > 0) && (
                 <p className="text-[11px] font-bold text-amber-600">
                   ⚠ {missingCodes > 0 ? `${missingCodes} صف بلا كود` : ''}{missingCodes > 0 && missingPw > 0 ? ' · ' : ''}{missingPw > 0 ? `${missingPw} صف بلا كلمة مرور صالحة (6 أحرف+)` : ''} — لن تُستورد

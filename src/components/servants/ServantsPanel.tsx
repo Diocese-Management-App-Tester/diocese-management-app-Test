@@ -21,10 +21,21 @@ import { uploadPhoto } from '@/lib/upload';
 import ResetPasswordSection from '@/components/ResetPasswordSection';
 import { EditCodeModal } from '@/components/PersonDataModals';
 import { changeServantCode, resetServantPassword, servantAccountMessage } from '@/lib/servant-account';
+import ScopeOrganizer, { organize, type OrganizeBy, type OrganizeDir } from '@/components/ScopeOrganizer';
 import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, PermissionProfile } from '@/lib/types';
-import { ROLE_LABELS, STATUS_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
+import { ROLE_LABELS, STATUS_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, DEFAULT_PASSWORD, type Gender } from '@/lib/types';
 
-type Servant = ServantEnrollment & { person: Person | null };
+export type Servant = ServantEnrollment & { person: Person | null };
+
+/** Who may edit / suspend / delete this servant (mirror of the RLS + can_manage_servant). */
+export const canManageServant = (profile: ServantEnrollment | null | undefined, p: ServantEnrollment): boolean => {
+  if (!profile || p.id === profile.id) return false;
+  if (profile.role === 'owner') return true;
+  if (profile.role === 'church_manager') return p.church_id === profile.church_id && p.role !== 'owner';
+  if (profile.role === 'service_manager')
+    return p.role === 'class_servant' && (p.service_id === profile.service_id || (profile.service_id === null && p.church_id === profile.church_id));
+  return false;
+};
 
 export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
   const { profile } = useAuth();
@@ -38,17 +49,13 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
   const [permsFor, setPermsFor] = useState<Servant | null>(null);
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
+  // 0043: organize by church / service / class
+  const [orgBy, setOrgBy] = useState<OrganizeBy>('class');
+  const [orgDir, setOrgDir] = useState<OrganizeDir>('asc');
 
   const isManager = profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
 
-  const canManage = (p: ServantEnrollment) => {
-    if (!profile || p.id === profile.id) return false;
-    if (profile.role === 'owner') return true;
-    if (profile.role === 'church_manager') return p.church_id === profile.church_id && p.role !== 'owner';
-    if (profile.role === 'service_manager')
-      return p.role === 'class_servant' && (p.service_id === profile.service_id || (profile.service_id === null && p.church_id === profile.church_id));
-    return false;
-  };
+  const canManage = (p: ServantEnrollment) => canManageServant(profile, p);
 
   const load = useCallback(async () => {
     const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
@@ -96,6 +103,11 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
     );
   }, [servants, q]);
 
+  const groups = useMemo(
+    () => organize(filtered, orgBy, orgDir, { churches, services, classes }, (s) => s.full_name),
+    [filtered, orgBy, orgDir, churches, services, classes]
+  );
+
   const toggleSuspend = async (p: ServantEnrollment) => {
     const next = p.status === 'suspended' ? 'approved' : 'suspended';
     await supabase.from(SERVANTS_TABLE).update({ status: next }).eq('id', p.id);
@@ -134,94 +146,108 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
         )}
       </div>
 
+      <ScopeOrganizer idPrefix="servants-organize" by={orgBy} dir={orgDir} onBy={setOrgBy} onDir={setOrgDir} total={filtered.length} />
+
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {filtered.map((p) => {
-            const pps = profilesOf.get(p.id) ?? [];
-            const photo = p.person?.image_url ?? p.photo_url;
-            return (
-              <li key={p.id} className={`card ${p.status === 'suspended' ? 'opacity-60' : ''}`}>
-                <div className="flex items-start gap-3">
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-emerald-50 ring-2 ring-emerald-100 flex items-center justify-center">
-                    {photo ? (
-                      <Image src={photo} alt={p.full_name} fill sizes="48px" className="object-cover" />
-                    ) : (
-                      <User className="h-6 w-6 text-emerald-400" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-extrabold truncate">{p.full_name}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                      <span className="badge bg-primary-100 text-primary-700">
-                        <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
-                      </span>
-                      {p.status !== 'approved' && (
-                        <span className="badge bg-amber-100 text-amber-700">{STATUS_LABELS[p.status]}</span>
-                      )}
-                      <span className="flex items-center gap-1" dir="ltr">
-                        <IdCard className="h-3 w-3" /> {p.person?.national_id ?? p.user_id}
-                      </span>
-                      <span className="flex items-center gap-1" dir="ltr">
-                        <Phone className="h-3 w-3" /> {p.person?.phone ?? p.phone}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {[churchName(p.church_id), serviceName(p.service_id), className(p.class_id)]
-                        .filter(Boolean).join(' ← ') || 'بدون نطاق محدد'}
-                    </p>
-                    {p.role !== 'owner' && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        <KeyRound className="h-3 w-3 text-slate-400" />
-                        {pps.length === 0 ? (
-                          <span className="text-[11px] font-bold text-slate-400">بدون ملف صلاحيات</span>
-                        ) : pps.map((pp) => (
-                          <span key={pp.id} className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ backgroundColor: pp.color }}>
-                            {pp.name}
-                          </span>
-                        ))}
+        <div className="space-y-4">
+          {groups.map((g) => (
+            <section key={g.key} id={`servants-group-${g.key}`}>
+              {g.title && (
+                <h3 className="sticky top-[71px] z-10 mb-2 flex items-center justify-between rounded-xl bg-emerald-50/95 px-3 py-1.5 text-xs font-extrabold text-emerald-800 backdrop-blur">
+                  <span className="truncate">{g.title}</span>
+                  <span className="badge bg-white text-emerald-700">{g.rows.length}</span>
+                </h3>
+              )}
+              <ul className="space-y-3">
+                {g.rows.map((p) => {
+                  const pps = profilesOf.get(p.id) ?? [];
+                  const photo = p.person?.image_url ?? p.photo_url;
+                  return (
+                    <li key={p.id} className={`card ${p.status === 'suspended' ? 'opacity-60' : ''}`}>
+                      <div className="flex items-start gap-3">
+                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-emerald-50 ring-2 ring-emerald-100 flex items-center justify-center">
+                          {photo ? (
+                            <Image src={photo} alt={p.full_name} fill sizes="48px" className="object-cover" />
+                          ) : (
+                            <User className="h-6 w-6 text-emerald-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-extrabold truncate">{p.full_name}</p>
+                          <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                            <span className="badge bg-primary-100 text-primary-700">
+                              <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
+                            </span>
+                            {p.status !== 'approved' && (
+                              <span className="badge bg-amber-100 text-amber-700">{STATUS_LABELS[p.status]}</span>
+                            )}
+                            <span className="flex items-center gap-1" dir="ltr">
+                              <IdCard className="h-3 w-3" /> {p.person?.national_id ?? p.user_id}
+                            </span>
+                            <span className="flex items-center gap-1" dir="ltr">
+                              <Phone className="h-3 w-3" /> {p.person?.phone ?? p.phone}
+                            </span>
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {[churchName(p.church_id), serviceName(p.service_id), className(p.class_id)]
+                              .filter(Boolean).join(' ← ') || 'بدون نطاق محدد'}
+                          </p>
+                          {p.role !== 'owner' && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                              <KeyRound className="h-3 w-3 text-slate-400" />
+                              {pps.length === 0 ? (
+                                <span className="text-[11px] font-bold text-slate-400">بدون ملف صلاحيات</span>
+                              ) : pps.map((pp) => (
+                                <span key={pp.id} className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ backgroundColor: pp.color }}>
+                                  {pp.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                </div>
-                {canManage(p) && (
-                  <div className="mt-3 grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
-                    <button onClick={() => setEditing(p)}
-                      className="flex items-center justify-center gap-1.5 rounded-xl bg-primary-50 py-2 text-xs font-bold text-primary-600 hover:bg-primary-100 transition">
-                      <Pencil className="h-3.5 w-3.5" /> تعديل
-                    </button>
-                    <button onClick={() => setPermsFor(p)}
-                      className="flex items-center justify-center gap-1.5 rounded-xl bg-violet-50 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 transition">
-                      <KeyRound className="h-3.5 w-3.5" /> الصلاحيات
-                    </button>
-                    <button onClick={() => toggleSuspend(p)}
-                      className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
-                        p.status === 'suspended' ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}>
-                      {p.status === 'suspended'
-                        ? (<><PlayCircle className="h-3.5 w-3.5" /> تفعيل</>)
-                        : (<><PauseCircle className="h-3.5 w-3.5" /> إيقاف</>)}
-                    </button>
-                    <button onClick={() => remove(p)}
-                      className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2 text-xs font-bold text-red-600 hover:bg-red-100 transition">
-                      <Trash2 className="h-3.5 w-3.5" /> حذف
-                    </button>
-                  </div>
-                )}
-              </li>
-            );
-          })}
+                      {canManage(p) && (
+                        <div className="mt-3 grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
+                          <button onClick={() => setEditing(p)}
+                            className="flex items-center justify-center gap-1.5 rounded-xl bg-primary-50 py-2 text-xs font-bold text-primary-600 hover:bg-primary-100 transition">
+                            <Pencil className="h-3.5 w-3.5" /> تعديل
+                          </button>
+                          <button onClick={() => setPermsFor(p)}
+                            className="flex items-center justify-center gap-1.5 rounded-xl bg-violet-50 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 transition">
+                            <KeyRound className="h-3.5 w-3.5" /> الصلاحيات
+                          </button>
+                          <button onClick={() => toggleSuspend(p)}
+                            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
+                              p.status === 'suspended' ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}>
+                            {p.status === 'suspended'
+                              ? (<><PlayCircle className="h-3.5 w-3.5" /> تفعيل</>)
+                              : (<><PauseCircle className="h-3.5 w-3.5" /> إيقاف</>)}
+                          </button>
+                          <button onClick={() => remove(p)}
+                            className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2 text-xs font-bold text-red-600 hover:bg-red-100 transition">
+                            <Trash2 className="h-3.5 w-3.5" /> حذف
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
           {filtered.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">
+            <div className="card py-12 text-center text-slate-400 font-bold">
               {q ? 'لا نتائج' : 'لا يوجد خدام بعد'}
               {!q && onAdd && (
                 <button type="button" onClick={onAdd} className="mx-auto mt-3 flex items-center gap-1.5 rounded-xl bg-violet-50 px-4 py-2 text-sm font-extrabold text-violet-700">
                   <UserPlus className="h-4 w-4" /> أضف خادمًا الآن
                 </button>
               )}
-            </li>
+            </div>
           )}
-        </ul>
+        </div>
       )}
 
       {editing && profile && (
@@ -250,7 +276,7 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
 }
 
 // ---------- Edit modal: person data + role + scope ----------
-function EditServantModal({
+export function EditServantModal({
   servant, approver, churches, services, classes, onClose, onSaved,
 }: {
   servant: Servant;
