@@ -75,6 +75,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'servants.view', group: 'servants', label: 'عرض الخدام', desc: 'قائمة الخدام في نطاقه' },
   { key: 'servants.approve', group: 'servants', label: 'قبول طلبات الانضمام', desc: 'اعتماد أو رفض الخدام الجدد' },
   { key: 'servants.manage', group: 'servants', label: 'إدارة الخدام', desc: 'تعديل · إيقاف · حذف' },
+  { key: 'servants.add', group: 'servants', label: 'إضافة خدام', desc: 'إضافة خدام معتمدين مباشرة — فردي أو جماعي (Excel)' },
   { key: 'servants.invite', group: 'servants', label: 'دعوة خادم', desc: 'رابط / QR دعوة بنطاق' },
   { key: 'servants.permissions', group: 'servants', label: 'منح الصلاحيات', desc: 'ربط الخدام بملفات الصلاحيات في نطاقه' },
 
@@ -127,6 +128,7 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'servants.view': Users,
   'servants.approve': UserCheck,
   'servants.manage': ShieldCheck,
+  'servants.add': UserPlus,
   'servants.invite': QrCode,
   'servants.permissions': KeyRound,
   'results.view': ClipboardCheck,
