@@ -27,7 +27,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import QrScanner from '@/components/store/QrScanner';
 import PhotoCropModal from '@/components/PhotoCropModal';
-import { generatePersonCode } from '@/lib/codes';
+import { generateCode as renderCode, normalizeCodes, type CodesConfig } from '@/lib/code-templates';
 import { uploadPhoto } from '@/lib/upload';
 import {
   userIdToEmail, codeToUserId, PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
@@ -88,17 +88,21 @@ function SignupWizard() {
   const [services, setServices] = useState<Service[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
   const [structureLoading, setStructureLoading] = useState(true);
+  // the owner's نظام الأكواد — read through the anon-safe RPC (no account yet); null = built-in generator
+  const [codesCfg, setCodesCfg] = useState<CodesConfig | null>(null);
 
   useEffect(() => {
     (async () => {
-      const [{ data: ch }, { data: sv }, { data: cl }] = await Promise.all([
+      const [{ data: ch }, { data: sv }, { data: cl }, { data: cod }] = await Promise.all([
         supabase.from('churches').select('*').order('name'),
         supabase.from('services').select('*').order('name'),
         supabase.from('classes').select('*').order('name'),
+        supabase.rpc('code_settings'),
       ]);
       setChurches(ch ?? []);
       setServices(sv ?? []);
       setClasses(cl ?? []);
+      setCodesCfg(cod ? normalizeCodes(cod) : null);
       setStructureLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -364,7 +368,7 @@ function SignupWizard() {
               <div className="flex gap-2">
                 <input id="su-code" className="input-field flex-1" dir="ltr" placeholder="اكتب الكود"
                   value={code} onChange={(e) => setCode(e.target.value)} autoComplete="username" />
-                <button id="su-code-generate" type="button" onClick={() => setCode(generatePersonCode())}
+                <button id="su-code-generate" type="button" onClick={() => setCode(renderCode(codesCfg, 'servant', { churchId, serviceId, classId }))}
                   aria-label="توليد كود تلقائي" title="توليد كود تلقائي"
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow transition hover:bg-primary-700 active:scale-95">
                   <Wand2 className="h-5 w-5" />

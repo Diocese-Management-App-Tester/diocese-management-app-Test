@@ -15,8 +15,8 @@ import { useCustomization } from '@/lib/customization-context';
 
 export default function OwnerHubPage() {
   const { grants } = useModules();
-  const { customized, widgetsCustomized, names, label } = useCustomization();
-  const anyCustom = customized || widgetsCustomized || Object.keys(names).length > 0;
+  const { customized, widgetsCustomized, names, label, codesCustomized } = useCustomization();
+  const anyCustom = customized || widgetsCustomized || Object.keys(names).length > 0 || codesCustomized;
   const { profiles: permissionProfiles } = usePermissions();
 
   return (
@@ -91,7 +91,7 @@ export default function OwnerHubPage() {
               <span className="flex-1 min-w-0">
                 <span className="block font-bold text-sm">تخصيص التطبيق</span>
                 <span className="block text-xs text-slate-400 truncate">
-                  شريط المهام · أيقونات الهيدر · ودجات الرئيسية · أسماء الصفحات
+                  شريط المهام · أيقونات الهيدر · ودجات الرئيسية · أسماء الصفحات · نظام الأكواد
                 </span>
               </span>
               <span className={`badge ${anyCustom ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>

@@ -5,12 +5,13 @@
 // · picture (compressed to a small webp) · price in points · stock · active
 // · scope church → service → class (null = all, like causes).
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Save, Loader2, Upload, Shuffle, QrCode, Trash2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
 import { useAuth } from '@/lib/auth-context';
-import { storeErrorMessage, suggestItemCode } from '@/lib/store';
+import { storeErrorMessage } from '@/lib/store';
+import { useCodeGenerator } from '@/lib/customization-context';
 import { ItemThumb } from '@/components/store/StoreBits';
 import type { StoreItem, Church, Service, ClassRoom } from '@/lib/types';
 
@@ -55,12 +56,13 @@ export default function ItemFormModal({
   const { profile } = useAuth();
   const [supabase] = useState(() => createClient());
   const mode = item ? 'edit' : 'add';
+  const genItemCode = useCodeGenerator('store_item');
 
   const defaultChurch = item?.church_id ?? profile?.church_id ?? (churches.length === 1 ? churches[0].id : '');
   const [churchId, setChurchId] = useState(defaultChurch);
   const [serviceId, setServiceId] = useState(item ? (item.service_id ?? ALL) : (profile?.service_id ?? ALL));
   const [classId, setClassId] = useState(item ? (item.class_id ?? ALL) : (profile?.class_id ?? ALL));
-  const [code, setCode] = useState(item?.code ?? suggestItemCode());
+  const [code, setCode] = useState(item?.code ?? '');
   const [name, setName] = useState(item?.name ?? '');
   const [description, setDescription] = useState(item?.description ?? '');
   const [price, setPrice] = useState(String(item?.price ?? 1));
@@ -76,6 +78,20 @@ export default function ItemFormModal({
   const churchLocked = !!profile && profile.role !== 'owner';
   const serviceLocked = !!profile && !!profile.service_id && profile.role !== 'owner' && profile.role !== 'church_manager';
   const classLocked = !!profile && !!profile.class_id && profile.role === 'class_servant';
+
+  // code suggestion follows the owner's نظام الأكواد ('all' scope → no abbreviation)
+  const suggestCode = useCallback(() => genItemCode({
+    churchId: churchId || null,
+    serviceId: serviceId === ALL ? null : serviceId,
+    classId: classId === ALL ? null : classId,
+  }), [genItemCode, churchId, serviceId, classId]);
+  // pre-fill a suggestion once when ADDING (the generator is ready after the context loads)
+  const suggestedOnce = useRef(false);
+  useEffect(() => {
+    if (mode !== 'add' || suggestedOnce.current) return;
+    suggestedOnce.current = true;
+    setCode((c) => c || suggestCode());
+  }, [mode, suggestCode]);
 
   const visibleServices = useMemo(() => services.filter((s) => s.church_id === churchId), [services, churchId]);
   const visibleClasses = useMemo(
@@ -181,7 +197,7 @@ export default function ItemFormModal({
                 <input id="item-code" className="input-field pr-9 font-mono" dir="ltr" value={code}
                   onChange={(e) => setCode(e.target.value)} required maxLength={64} />
               </div>
-              <button type="button" onClick={() => setCode(suggestItemCode())} aria-label="كود عشوائي" title="كود عشوائي"
+              <button type="button" onClick={() => setCode(suggestCode())} aria-label="كود عشوائي" title="كود عشوائي"
                 className="btn-secondary !px-3"><Shuffle className="h-4 w-4" /></button>
             </div>
           </div>

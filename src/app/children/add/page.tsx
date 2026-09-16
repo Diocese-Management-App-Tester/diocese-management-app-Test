@@ -10,7 +10,8 @@ import {
 import AppShell from '@/components/AppShell';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import QrScanner from '@/components/store/QrScanner';
-import { generatePersonCode } from '@/lib/codes';
+import { useCodeGenerator } from '@/lib/customization-context';
+import { monotonicClock } from '@/lib/code-templates';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
@@ -26,9 +27,6 @@ const MONTHS_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
 ];
-
-/** Random readable national id (used when the person has no real one), e.g. P-4F7K9Q2M */
-const generateCode = generatePersonCode;
 
 /** Compose YYYY-MM-DD from separate day/month/year, or null */
 const composeBirthdate = (d: string, m: string, y: string): string | null => {
@@ -245,6 +243,9 @@ function SingleAddTab({
 }) {
   const supabase = createClient();
   const scope = useScope(churches, services, classes);
+  // code generator following the owner's نظام الأكواد (scope → church/service/class abbreviations)
+  const genPersonCode = useCodeGenerator('person');
+  const generateCode = () => genPersonCode({ churchId: scope.churchId, serviceId: scope.serviceId, classId: scope.classId });
 
   // ---- National ID (the QR code) + QR square ----
   const [code, setCode] = useState('');
@@ -937,6 +938,7 @@ function BulkAddTab({
 }) {
   const supabase = createClient();
   const scope = useScope(churches, services, classes);
+  const genPersonCode = useCodeGenerator('person');
 
   const [rows, setRows] = useState<BulkRow[]>([]);
   const [mapping, setMapping] = useState<BulkField[]>([]);
@@ -1120,6 +1122,9 @@ function BulkAddTab({
 
     setImporting(true);
     let ok = 0, fail = 0;
+    // monotonic clock → timestamp-based codes never collide inside one import
+    const tick = monotonicClock();
+    const generateCode = () => genPersonCode({ churchId: cls.church_id, serviceId: cls.service_id, classId: cls.id, now: tick() });
 
     for (const r of resolved) {
       if (r.row.status === 'ok') continue;   // already imported in a previous run
