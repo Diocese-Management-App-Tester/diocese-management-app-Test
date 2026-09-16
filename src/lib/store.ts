@@ -6,6 +6,7 @@
 // a transaction (module, scope, stock, balance) and writes the bill +
 // the −points row. Cancelling is `store_cancel_order` (managers only).
 
+import { legacyCode } from '@/lib/code-templates';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   StoreItem, StoreOrder, StoreOrderItem, StoreCheckoutResult, EnrollmentWithPerson,
@@ -196,10 +197,7 @@ export const LABEL_SIZES: Record<LabelSize, { w: number; h: number; qr: number; 
   large:  { w: 70, h: 40, qr: 30, label: 'كبير 70×40 مم' },
 };
 
-/** A short readable item code suggestion, e.g. ST-4F7K2Q */
+/** Built-in item code suggestion, e.g. ST-4F7K2Q — components use useCodeGenerator('store_item') */
 export function suggestItemCode(): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return `ST-${s}`;
+  return legacyCode('store_item');
 }

@@ -5,6 +5,7 @@
 //   • 'navigation' — the 5 taskbar slots + header icons
 //   • 'widgets'    — the home-page widgets (order · size · heading)
 //   • 'names'      — custom display names of every destination
+//   • 'codes'      — the code system (templates per generator + scope abbreviations, 0040)
 // keeps them fresh in realtime and RESOLVES them for the signed-in user: a
 // taskbar slot / widget bound to a module hidden from him is skipped or falls
 // back, header widgets vanish when the module isn't granted, and every label
@@ -29,6 +30,10 @@ import {
   DEFAULT_WIDGETS, WIDGETS_SETTING_KEY, normalizeWidgets, resolveWidgets,
   type WidgetsConfig, type ResolvedWidget,
 } from '@/lib/widgets';
+import {
+  DEFAULT_CODES, CODES_SETTING_KEY, normalizeCodes, generateCode as renderCode,
+  type CodesConfig, type CodeKind, type CodeContext,
+} from '@/lib/code-templates';
 
 interface CustomizationState {
   navigation: NavigationConfig;
@@ -38,6 +43,11 @@ interface CustomizationState {
   widgetsCustomized: boolean;
   /** custom display names { destination key → label } */
   names: NamesConfig;
+  /** the code system (نظام الأكواد) */
+  codes: CodesConfig;
+  codesCustomized: boolean;
+  /** generate a code for a generator using the owner's design (legacy when unset) */
+  generateCode: (kind: CodeKind, ctx?: CodeContext) => string;
   /** destination keys the signed-in user may see */
   allowed: Set<string>;
   taskbar: ResolvedNavItem[];
@@ -55,6 +65,8 @@ interface CustomizationState {
   saveWidgets: (cfg: WidgetsConfig) => Promise<string | null>;
   resetWidgets: () => Promise<string | null>;
   saveNames: (names: NamesConfig) => Promise<string | null>;
+  saveCodes: (cfg: CodesConfig) => Promise<string | null>;
+  resetCodes: () => Promise<string | null>;
 }
 
 const defaultAllowed = new Set<string>(CORE_KEYS);
@@ -65,6 +77,9 @@ const CustomizationContext = createContext<CustomizationState>({
   widgetsConfig: DEFAULT_WIDGETS,
   widgetsCustomized: false,
   names: {},
+  codes: DEFAULT_CODES,
+  codesCustomized: false,
+  generateCode: (kind, ctx) => renderCode(null, kind, ctx),
   allowed: defaultAllowed,
   taskbar: resolveTaskbar(DEFAULT_NAVIGATION, defaultAllowed),
   menuRest: [],
@@ -78,9 +93,11 @@ const CustomizationContext = createContext<CustomizationState>({
   saveWidgets: async () => 'not ready',
   resetWidgets: async () => 'not ready',
   saveNames: async () => 'not ready',
+  saveCodes: async () => 'not ready',
+  resetCodes: async () => 'not ready',
 });
 
-const SETTING_KEYS = [NAVIGATION_SETTING_KEY, WIDGETS_SETTING_KEY, NAMES_SETTING_KEY];
+const SETTING_KEYS = [NAVIGATION_SETTING_KEY, WIDGETS_SETTING_KEY, NAMES_SETTING_KEY, CODES_SETTING_KEY];
 
 export function CustomizationProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
@@ -91,6 +108,8 @@ export function CustomizationProvider({ children }: { children: ReactNode }) {
   const [widgetsConfig, setWidgetsConfig] = useState<WidgetsConfig>(DEFAULT_WIDGETS);
   const [widgetsCustomized, setWidgetsCustomized] = useState(false);
   const [names, setNames] = useState<NamesConfig>({});
+  const [codes, setCodes] = useState<CodesConfig>(DEFAULT_CODES);
+  const [codesCustomized, setCodesCustomized] = useState(false);
   const [loading, setLoading] = useState(true);
   const approved = profile?.status === 'approved';
 
@@ -98,6 +117,7 @@ export function CustomizationProvider({ children }: { children: ReactNode }) {
     setNavigation(DEFAULT_NAVIGATION); setCustomized(false);
     setWidgetsConfig(DEFAULT_WIDGETS); setWidgetsCustomized(false);
     setNames({});
+    setCodes(DEFAULT_CODES); setCodesCustomized(false);
   };
 
   const reload = useCallback(async () => {
@@ -117,6 +137,9 @@ export function CustomizationProvider({ children }: { children: ReactNode }) {
       setWidgetsConfig(wid ? normalizeWidgets(wid) : DEFAULT_WIDGETS);
       setWidgetsCustomized(!!wid);
       setNames(normalizeNames(byKey.get(NAMES_SETTING_KEY)));
+      const cod = byKey.get(CODES_SETTING_KEY);
+      setCodes(cod ? normalizeCodes(cod) : DEFAULT_CODES);
+      setCodesCustomized(!!cod);
     }
     setLoading(false);
   }, [supabase, approved]);
@@ -196,6 +219,23 @@ export function CustomizationProvider({ children }: { children: ReactNode }) {
     return null;
   }, [remove]);
 
+  const saveCodes = useCallback(async (cfg: CodesConfig): Promise<string | null> => {
+    const value = normalizeCodes(cfg);
+    const err = await upsert(CODES_SETTING_KEY, value);
+    if (err) return err;
+    setCodes(value);
+    setCodesCustomized(true);
+    return null;
+  }, [upsert]);
+
+  const resetCodes = useCallback(async (): Promise<string | null> => {
+    const err = await remove(CODES_SETTING_KEY);
+    if (err) return err;
+    setCodes(DEFAULT_CODES);
+    setCodesCustomized(false);
+    return null;
+  }, [remove]);
+
   // destination keys this user may see
   const allowed = useMemo(() => {
     const s = new Set<string>(CORE_KEYS);
@@ -214,12 +254,15 @@ export function CustomizationProvider({ children }: { children: ReactNode }) {
       header: resolveHeader(navigation, allowed, names),
       widgets: resolveWidgets(widgetsConfig, moduleKeys, profile?.role),
       label: (key: string) => destLabel(key, names),
+      codes, codesCustomized,
+      generateCode: (kind: CodeKind, ctx?: CodeContext) => renderCode(codesCustomized ? codes : null, kind, ctx),
       loading: loading || modulesLoading,
-      reload, saveNavigation, resetNavigation, saveWidgets, resetWidgets, saveNames,
+      reload, saveNavigation, resetNavigation, saveWidgets, resetWidgets, saveNames, saveCodes, resetCodes,
     };
   }, [
-    navigation, customized, widgetsConfig, widgetsCustomized, names, allowed, moduleKeys, profile?.role,
-    loading, modulesLoading, reload, saveNavigation, resetNavigation, saveWidgets, resetWidgets, saveNames,
+    navigation, customized, widgetsConfig, widgetsCustomized, names, codes, codesCustomized, allowed, moduleKeys,
+    profile?.role, loading, modulesLoading, reload, saveNavigation, resetNavigation, saveWidgets, resetWidgets,
+    saveNames, saveCodes, resetCodes,
   ]);
 
   return <CustomizationContext.Provider value={value}>{children}</CustomizationContext.Provider>;
@@ -235,4 +278,15 @@ export const useCustomization = () => useContext(CustomizationContext);
 export function useNavLabel(key: string): string {
   const { label } = useCustomization();
   return label(key);
+}
+
+/**
+ * Code generator following the owner's code system (نظام الأكواد). Pass the
+ * selected scope so church / service / class abbreviation parts resolve:
+ *   const gen = useCodeGenerator('person');
+ *   gen({ churchId, serviceId, classId })  → 'STM-C1-1702655732293'
+ */
+export function useCodeGenerator(kind: CodeKind): (ctx?: CodeContext) => string {
+  const { generateCode } = useCustomization();
+  return useCallback((ctx?: CodeContext) => generateCode(kind, ctx), [generateCode, kind]);
 }

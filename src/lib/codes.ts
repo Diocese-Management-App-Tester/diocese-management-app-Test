@@ -1,9 +1,11 @@
 // ---------- Person code (national id / QR) helpers ----------
+// The OWNER designs how codes look from تخصيص التطبيق → نظام الأكواد
+// (`src/lib/code-templates.ts`). Components should use `useCodeGenerator()`
+// (customization-context) so the owner's template + scope abbreviations are
+// applied. This file keeps the built-in (legacy) generator for callers that
+// have no access to the context.
 
-/** Random readable person code (used when the person has no real national id), e.g. P-4F7K9Q2M */
-export const generatePersonCode = () => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return `P-${s}`;
-};
+import { legacyCode } from '@/lib/code-templates';
+
+/** Built-in random readable person code, e.g. P-4F7K9Q2M */
+export const generatePersonCode = () => legacyCode('person');

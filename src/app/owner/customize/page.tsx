@@ -1,18 +1,20 @@
 'use client';
 
 // ---------- OWNER MODULE → تخصيص التطبيق (hub) ----------
-// Owner-only. Four tools: TASKBAR (5 bottom slots) · HEADER icons ·
-// HOME WIDGETS · NAMES of pages/modules (applied everywhere).
+// Owner-only. Five tools: TASKBAR (5 bottom slots) · HEADER icons ·
+// HOME WIDGETS · NAMES of pages/modules (applied everywhere) · CODE SYSTEM
+// (how generated codes look).
 
 import Link from 'next/link';
 import {
-  Paintbrush, ChevronLeft, PanelBottom, PanelTop, LayoutGrid, Type, Sparkles, Check, type LucideIcon,
+  Paintbrush, ChevronLeft, PanelBottom, PanelTop, LayoutGrid, Type, Hash, Sparkles, Check, type LucideIcon,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
 import { useCustomization } from '@/lib/customization-context';
 import { HEADER_WIDGET_BY_KEY, isLinkItem, linkTarget } from '@/lib/navigation';
 import { WIDGET_BY_KEY } from '@/lib/widgets';
+import { summarizeCodes } from '@/lib/code-templates';
 import { EditorHeader } from '@/components/customize/shared';
 
 function Tool({
@@ -36,7 +38,7 @@ function Tool({
 }
 
 export default function CustomizeHubPage() {
-  const { navigation, customized, widgetsConfig, widgetsCustomized, names, label } = useCustomization();
+  const { navigation, customized, widgetsConfig, widgetsCustomized, names, label, codes, codesCustomized } = useCustomization();
 
   const taskbarSummary = navigation.taskbar.map((s) => label(s.key)).join(' · ');
   const headerSummary = navigation.header.length === 0
@@ -55,7 +57,8 @@ export default function CustomizeHubPage() {
     ? 'كل الأسماء افتراضية'
     : `${namesCount} اسم مخصص — ${Object.entries(names).slice(0, 3).map(([, v]) => v).join(' · ')}${namesCount > 3 ? ' …' : ''}`;
 
-  const anyCustom = customized || widgetsCustomized || namesCount > 0;
+  const codesSummary = summarizeCodes(codes, codesCustomized);
+  const anyCustom = customized || widgetsCustomized || namesCount > 0 || codesCustomized;
 
   return (
     <AppShell>
@@ -104,6 +107,15 @@ export default function CustomizeHubPage() {
               title="أسماء الصفحات والوحدات"
               desc="غيّر اسم أي صفحة أو وحدة — يظهر الاسم الجديد في عنوان الصفحة والقوائم والشريط"
               summary={namesSummary}
+            />
+            <Tool
+              id="customize-codes-link"
+              href="/owner/customize/codes"
+              icon={Hash}
+              tone="text-violet-600"
+              title="نظام الأكواد"
+              desc="صمّم شكل الأكواد المولّدة: بادئة · الوقت · تاريخ · عشوائي · اختصار الكنيسة/الخدمة/الفصل — نظام واحد للكل أو لكل كود تصميمه"
+              summary={codesSummary}
             />
           </div>
         </section>

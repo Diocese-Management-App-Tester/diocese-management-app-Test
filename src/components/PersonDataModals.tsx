@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
-import { generatePersonCode } from '@/lib/codes';
+import { useCodeGenerator } from '@/lib/customization-context';
+import type { CodeContext } from '@/lib/code-templates';
 import QrScanner from '@/components/store/QrScanner';
 import {
   GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH,
@@ -427,6 +428,7 @@ export function EditPersonModal({
           personId={person.id}
           currentCode={person.national_id}
           initialCode={code}
+          scope={{ churchId: enrollment.church_id, serviceId: enrollment.service_id, classId: enrollment.class_id }}
           onConfirm={(c) => { setCode(c); setCodeModal(false); }}
           onClose={() => setCodeModal(false)}
         />
@@ -441,15 +443,18 @@ export function EditPersonModal({
 // persisted when the user saves the edit form (after a final confirm).
 // =====================================================================
 function EditCodeModal({
-  personId, currentCode, initialCode, onConfirm, onClose,
+  personId, currentCode, initialCode, scope, onConfirm, onClose,
 }: {
   personId: string;
   currentCode: string;
   initialCode: string;
+  /** enrollment scope → church / service / class abbreviations in the owner's code design */
+  scope?: CodeContext;
   onConfirm: (code: string) => void;
   onClose: () => void;
 }) {
   const supabase = createClient();
+  const genPersonCode = useCodeGenerator('person');
   const [value, setValue] = useState(initialCode);
   const [scanning, setScanning] = useState(false);
   const [qrUrl, setQrUrl] = useState('');
@@ -554,7 +559,7 @@ function EditCodeModal({
                 <button
                   id="edit-code-generate"
                   type="button"
-                  onClick={() => setValue(generatePersonCode())}
+                  onClick={() => setValue(genPersonCode(scope))}
                   aria-label="توليد كود تلقائي"
                   title="توليد كود تلقائي"
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-600 text-white shadow transition hover:bg-primary-700 active:scale-95"
