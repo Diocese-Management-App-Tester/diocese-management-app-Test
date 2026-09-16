@@ -1,0 +1,130 @@
+// POST /api/servants/account — manage a servant's LOGIN account
+//   (إعادة تعيين كلمة المرور / تعديل الكود) — migration 0042 features.
+//
+// The browser cannot touch another user's Supabase Auth account, so both
+// operations run here with the service role:
+//
+//   { action: 'reset_password', servant_id, password }
+//       → auth.admin.updateUserById(password)
+//   { action: 'change_code', servant_id, code }
+//       → auth.admin.updateUserById(email = newcode@diocese.app)
+//       → servant_enrollments.user_id = normalized code
+//       → persons.national_id = code (the servant's identity row; also
+//         re-keys his QR card, portal code and every mirror enrollment)
+//
+// Who may call: an APPROVED owner / church manager / service manager whose
+// scope covers the target servant (same rule as editing him in ServantsPanel:
+// owner → anyone; church manager → his church; service manager → his service).
+// A servant may also reset HIS OWN password here (self-service).
+//
+// Env (server): SUPABASE_SERVICE_ROLE_KEY. Without it → 503 «not configured».
+
+import { NextResponse, type NextRequest } from 'next/server';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { createClient as createSessionClient } from '@/lib/supabase/server';
+import { codeToUserId, userIdToEmail, SERVANTS_TABLE } from '@/lib/types';
+
+export const dynamic = 'force-dynamic';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function adminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createAdminClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+type Actor = { id: string; role: string; status: string; church_id: string | null; service_id: string | null };
+type Target = { id: string; role: string; person_id: string | null; church_id: string | null; service_id: string | null; user_id: string };
+
+function canManage(actor: Actor, target: Target): boolean {
+  if (actor.id === target.id) return true; // self-service (password only — enforced below)
+  if (actor.role === 'owner') return true;
+  if (target.role === 'owner') return false;
+  if (actor.role === 'church_manager') return !!actor.church_id && target.church_id === actor.church_id;
+  if (actor.role === 'service_manager') return !!actor.service_id && target.service_id === actor.service_id;
+  return false;
+}
+
+export async function POST(req: NextRequest) {
+  const session = createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const admin = adminClient();
+  if (!admin) return NextResponse.json({ error: 'not_configured' }, { status: 503 });
+
+  let body: Record<string, unknown>;
+  try { body = (await req.json()) as Record<string, unknown>; } catch { return NextResponse.json({ error: 'bad_json' }, { status: 400 }); }
+
+  const action = body.action;
+  const servantId = typeof body.servant_id === 'string' && UUID_RE.test(body.servant_id) ? body.servant_id : null;
+  if (!servantId) return NextResponse.json({ error: 'servant_required' }, { status: 400 });
+  if (action !== 'reset_password' && action !== 'change_code') return NextResponse.json({ error: 'bad_action' }, { status: 400 });
+
+  const [{ data: actor }, { data: target }] = await Promise.all([
+    admin.from(SERVANTS_TABLE).select('id, role, status, church_id, service_id').eq('id', user.id).maybeSingle(),
+    admin.from(SERVANTS_TABLE).select('id, role, person_id, church_id, service_id, user_id').eq('id', servantId).maybeSingle(),
+  ]);
+  if (!actor || actor.status !== 'approved') return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  if (!target) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  if (!canManage(actor as Actor, target as Target)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+
+  // ---------- reset password ----------
+  if (action === 'reset_password') {
+    const password = typeof body.password === 'string' ? body.password : '';
+    if (password.length < 6) return NextResponse.json({ error: 'weak_password' }, { status: 400 });
+    const { error } = await admin.auth.admin.updateUserById(servantId, { password });
+    if (error) return NextResponse.json({ error: 'failed', detail: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // ---------- change code ----------
+  // self-service code change is NOT allowed (the code is the identity the
+  // managers control) — a plain servant can only reset his own password
+  if (actor.id === target.id && !['owner', 'church_manager', 'service_manager'].includes(actor.role)) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+  const code = typeof body.code === 'string' ? body.code.trim().slice(0, 80) : '';
+  const userId = codeToUserId(code);
+  if (!code || !userId) return NextResponse.json({ error: 'code_required' }, { status: 400 });
+  if (userId === target.user_id && code === (await currentCode(admin, target as Target))) {
+    return NextResponse.json({ ok: true, unchanged: true });
+  }
+
+  // uniqueness: another servant with the same login, or another person with the same code
+  const [{ data: dupServant }, { data: dupPerson }] = await Promise.all([
+    admin.from(SERVANTS_TABLE).select('id').eq('user_id', userId).neq('id', servantId).maybeSingle(),
+    admin.from('persons').select('id').eq('national_id', code).maybeSingle(),
+  ]);
+  if (dupServant) return NextResponse.json({ error: 'code_taken' }, { status: 409 });
+  if (dupPerson && dupPerson.id !== target.person_id) return NextResponse.json({ error: 'code_taken' }, { status: 409 });
+
+  // 1) auth e-mail (login name)
+  const { error: authErr } = await admin.auth.admin.updateUserById(servantId, {
+    email: userIdToEmail(userId),
+    email_confirm: true,
+    user_metadata: { code },
+  });
+  if (authErr) {
+    const m = authErr.message.toLowerCase();
+    const taken = m.includes('already') || m.includes('exists') || m.includes('registered');
+    return NextResponse.json({ error: taken ? 'code_taken' : 'failed', detail: authErr.message }, { status: taken ? 409 : 500 });
+  }
+  // 2) servant row
+  const { error: seErr } = await admin.from(SERVANTS_TABLE).update({ user_id: userId }).eq('id', servantId);
+  if (seErr) return NextResponse.json({ error: 'failed', detail: seErr.message }, { status: 500 });
+  // 3) identity row (persons.national_id)
+  if (target.person_id) {
+    const { error: pErr } = await admin.from('persons').update({ national_id: code }).eq('id', target.person_id);
+    if (pErr) return NextResponse.json({ error: pErr.code === '23505' ? 'code_taken' : 'failed', detail: pErr.message }, { status: pErr.code === '23505' ? 409 : 500 });
+  }
+  return NextResponse.json({ ok: true, user_id: userId, code });
+}
+
+async function currentCode(admin: ReturnType<typeof adminClient>, target: Target): Promise<string | null> {
+  if (!admin || !target.person_id) return null;
+  const { data } = await admin.from('persons').select('national_id').eq('id', target.person_id).maybeSingle();
+  return (data?.national_id as string | undefined) ?? null;
+}

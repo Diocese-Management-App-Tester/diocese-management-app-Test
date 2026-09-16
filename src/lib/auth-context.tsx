@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { ServantEnrollment, Church, Service, Person } from '@/lib/types';
 import { SERVANTS_TABLE } from '@/lib/types';
 import type { User } from '@supabase/supabase-js';
+import { servantSessionStale, clearServantRememberFlags } from '@/lib/session';
 
 interface AuthState {
   user: User | null;
@@ -96,6 +97,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const refresh = useCallback(async () => {
+    // «تذكرني» not ticked → the session was tab-only; drop it on a cold start
+    if (servantSessionStale()) {
+      clearServantRememberFlags();
+      await supabase.auth.signOut();
+      setUser(null);
+      setProfile(null);
+      setPerson(null);
+      setChurch(null);
+      setService(null);
+      setLoading(false);
+      if (!window.location.pathname.startsWith('/login')) window.location.href = '/login';
+      return;
+    }
     const {
       data: { user: u },
     } = await supabase.auth.getUser();
@@ -139,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, supabase, loadProfile]);
 
   const signOut = useCallback(async () => {
+    clearServantRememberFlags();
     await supabase.auth.signOut();
     window.location.href = '/login';
   }, [supabase]);

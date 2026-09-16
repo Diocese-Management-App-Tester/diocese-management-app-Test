@@ -9,11 +9,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   SlidersHorizontal, LogOut, RefreshCw, ChevronLeft, Database, CalendarCheck, Star, Camera,
-  Pencil, Church, Layers, School, Loader2, Info, ShieldCheck, Smartphone,
+  Pencil, Church, Layers, School, Loader2, Info, ShieldCheck, Smartphone, KeyRound, Eye, EyeOff, CheckCircle2,
 } from 'lucide-react';
 import ChildShell from '@/components/child/ChildShell';
 import { Avatar, PageTitle, fmtDate } from '@/components/child/ChildBits';
 import { useChild } from '@/lib/child-context';
+import { createClient } from '@/lib/supabase/client';
+import { childChangePassword, childErrorMessage } from '@/lib/child-portal';
 
 export default function ChildOptionsPage() {
   return (
@@ -118,11 +120,14 @@ function OptionsContent() {
             <span className="rounded-xl bg-slate-50 p-2"><Info className="h-5 w-5 text-slate-500" /></span>
             <span className="flex-1 min-w-0">
               <span className="block font-bold text-sm">عن البوابة</span>
-              <span className="block text-xs text-slate-400">تدخل بكارتك فقط — لا يمكنك تعديل الحضور أو النقاط، وأي تعديل في البيانات يحتاج موافقة الخادم</span>
+              <span className="block text-xs text-slate-400">تدخل بكودك وكلمة مرورك — لا يمكنك تعديل الحضور أو النقاط، وأي تعديل في البيانات يحتاج موافقة الخادم</span>
             </span>
           </div>
         </div>
       </section>
+
+      {/* Password (0042) */}
+      <ChangePasswordCard />
 
       {/* Logout */}
       {!confirmOut ? (
@@ -136,12 +141,12 @@ function OptionsContent() {
         </button>
       ) : (
         <div className="card space-y-3 border-red-100">
-          <p className="text-center text-sm font-bold">ستحتاج لمسح كارتك مرة أخرى للدخول — متأكد؟</p>
+          <p className="text-center text-sm font-bold">ستحتاج لإدخال كودك وكلمة المرور مرة أخرى للدخول — متأكد؟</p>
           <div className="flex gap-2">
             <button onClick={() => setConfirmOut(false)} className="btn-secondary flex-1">إلغاء</button>
             <button
               id="child-options-logout-confirm"
-              onClick={() => { logout(); router.replace('/child/login'); }}
+              onClick={() => { logout(); router.replace('/login?as=child'); }}
               className="flex-1 rounded-xl bg-red-600 px-4 py-3 font-bold text-white hover:bg-red-700"
             >
               خروج
@@ -152,6 +157,112 @@ function OptionsContent() {
 
       <p className="mt-6 text-center text-xs text-slate-400">بوابة المخدوم — {BRANDING.shortName}</p>
     </>
+  );
+}
+
+function ChangePasswordCard() {
+  const { token } = useChild();
+  const supabase = createClient();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (next.length < 6) { setError('كلمة المرور الجديدة قصيرة — 6 أحرف على الأقل'); return; }
+    if (next !== confirm) { setError('تأكيد كلمة المرور غير مطابق'); return; }
+    if (!token) return;
+    setBusy(true);
+    try {
+      await childChangePassword(supabase, token, current, next);
+      setDone(true);
+      setCurrent(''); setNext(''); setConfirm('');
+      setTimeout(() => { setDone(false); setOpen(false); }, 1800);
+    } catch (err) {
+      setError(childErrorMessage(err, 'تعذّر تغيير كلمة المرور'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="mb-5">
+      <h2 className="mb-2 px-1 text-xs font-extrabold text-slate-400">الحساب</h2>
+      <div className="card !p-0 overflow-hidden">
+        <button
+          id="child-change-password-btn"
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center gap-3 px-4 py-3.5 text-right hover:bg-indigo-50/50 transition"
+        >
+          <span className="rounded-xl bg-slate-50 p-2"><KeyRound className="h-5 w-5 text-primary-600" /></span>
+          <span className="flex-1 min-w-0">
+            <span className="block font-bold text-sm">تغيير كلمة المرور</span>
+            <span className="block text-xs text-slate-400">تُغلق الجلسات الأخرى تلقائياً بعد التغيير</span>
+          </span>
+          <ChevronLeft className={`h-4 w-4 text-slate-300 transition ${open ? '-rotate-90' : ''}`} />
+        </button>
+        {open && (
+          <form onSubmit={submit} className="space-y-3 border-t border-slate-100 px-4 py-4">
+            <div className="relative">
+              <input
+                id="child-pw-current"
+                type={show ? 'text' : 'password'}
+                className="input-field pl-10"
+                dir="ltr"
+                placeholder="كلمة المرور الحالية"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                required
+                autoComplete="current-password"
+              />
+              <button type="button" onClick={() => setShow((x) => !x)} aria-label="إظهار" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <input
+              id="child-pw-new"
+              type={show ? 'text' : 'password'}
+              className="input-field"
+              dir="ltr"
+              placeholder="كلمة المرور الجديدة (6 أحرف على الأقل)"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              required
+              minLength={6}
+              autoComplete="new-password"
+            />
+            <input
+              id="child-pw-confirm"
+              type={show ? 'text' : 'password'}
+              className="input-field"
+              dir="ltr"
+              placeholder="تأكيد كلمة المرور الجديدة"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+              autoComplete="new-password"
+            />
+            {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>}
+            {done && (
+              <p className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" /> تم تغيير كلمة المرور
+              </p>
+            )}
+            <button id="child-pw-submit" type="submit" disabled={busy} className="btn-primary w-full flex items-center justify-center gap-2">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              حفظ كلمة المرور
+            </button>
+          </form>
+        )}
+      </div>
+    </section>
   );
 }
 

@@ -269,17 +269,28 @@ export const FIELD_LABELS: Record<string, string> = {
 };
 
 // ---------- Token (localStorage) ----------
+/**
+ * Session token storage (migration 0042): the token is issued by `child_login`.
+ * «تذكرني» → localStorage (survives closing the browser, 90 days server-side);
+ * otherwise sessionStorage (dies with the tab, 12 hours server-side).
+ */
 export function getChildToken(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    return window.localStorage.getItem(CHILD_TOKEN_KEY);
+    return window.localStorage.getItem(CHILD_TOKEN_KEY) ?? window.sessionStorage.getItem(CHILD_TOKEN_KEY);
   } catch {
     return null;
   }
 }
-export function setChildToken(token: string) {
+export function setChildToken(token: string, remember = true) {
   try {
-    window.localStorage.setItem(CHILD_TOKEN_KEY, token);
+    if (remember) {
+      window.localStorage.setItem(CHILD_TOKEN_KEY, token);
+      window.sessionStorage.removeItem(CHILD_TOKEN_KEY);
+    } else {
+      window.sessionStorage.setItem(CHILD_TOKEN_KEY, token);
+      window.localStorage.removeItem(CHILD_TOKEN_KEY);
+    }
   } catch {
     /* private mode */
   }
@@ -287,13 +298,151 @@ export function setChildToken(token: string) {
 export function clearChildToken() {
   try {
     window.localStorage.removeItem(CHILD_TOKEN_KEY);
+    window.sessionStorage.removeItem(CHILD_TOKEN_KEY);
   } catch {
     /* ignore */
   }
 }
 
+// ---------- Accounts (migration 0042) ----------
+export interface ChildLoginResult {
+  token: string;
+  expires_at: string;
+  person_id: string;
+  remember: boolean;
+}
+
+/** code + password → session token */
+export async function childLogin(
+  supabase: SupabaseClient,
+  code: string,
+  password: string,
+  remember: boolean
+): Promise<ChildLoginResult> {
+  const ua = typeof navigator === 'undefined' ? null : navigator.userAgent.slice(0, 300);
+  const { data, error } = await supabase.rpc('child_login', {
+    p_code: code.trim(),
+    p_password: password,
+    p_remember: remember,
+    p_user_agent: ua,
+  });
+  if (error) throw error;
+  return data as ChildLoginResult;
+}
+
+export async function childLogout(supabase: SupabaseClient, token: string): Promise<void> {
+  await supabase.rpc('child_logout', { p_token: token });
+}
+
+/** Validates + refreshes the session (extends a «remember me» session). */
+export async function childSessionTouch(
+  supabase: SupabaseClient,
+  token: string
+): Promise<{ person_id: string; expires_at: string; remember: boolean }> {
+  const { data, error } = await supabase.rpc('child_session_touch', { p_token: token });
+  if (error) throw error;
+  return data as { person_id: string; expires_at: string; remember: boolean };
+}
+
+export async function childChangePassword(
+  supabase: SupabaseClient,
+  token: string,
+  current: string,
+  next: string
+): Promise<void> {
+  const { error } = await supabase.rpc('child_change_password', {
+    p_token: token,
+    p_current: current,
+    p_new: next,
+  });
+  if (error) throw error;
+}
+
+export interface ChildSignupLookup {
+  exists: boolean;
+  has_password: boolean;
+  pending: boolean;
+  name: string | null;
+}
+
+export async function childSignupLookupCode(supabase: SupabaseClient, code: string): Promise<ChildSignupLookup> {
+  const { data, error } = await supabase.rpc('child_signup_lookup_code', { p_code: code.trim() });
+  if (error) throw error;
+  return data as ChildSignupLookup;
+}
+
+export interface ChildSignupInput {
+  code: string;
+  name: string;
+  password: string;
+  gender: Gender | null;
+  birthdate: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  image_url: string | null;
+  church_id: string;
+  service_id: string;
+  class_id: string;
+}
+
+export async function childSignup(
+  supabase: SupabaseClient,
+  input: ChildSignupInput
+): Promise<{ request_id: string; code: string }> {
+  const { data, error } = await supabase.rpc('child_signup', {
+    p_code: input.code.trim(),
+    p_name: input.name.trim(),
+    p_password: input.password,
+    p_gender: input.gender,
+    p_birthdate: input.birthdate,
+    p_phone: input.phone,
+    p_address: input.address,
+    p_notes: input.notes,
+    p_image_url: input.image_url,
+    p_church: input.church_id,
+    p_service: input.service_id,
+    p_class: input.class_id,
+  });
+  if (error) throw error;
+  return data as { request_id: string; code: string };
+}
+
+export async function childSignupStatus(
+  supabase: SupabaseClient,
+  requestId: string
+): Promise<{ status: 'pending' | 'approved' | 'rejected'; decision_note: string | null; code: string } | null> {
+  const { data, error } = await supabase.rpc('child_signup_status', { p_request: requestId });
+  if (error) throw error;
+  return (data ?? null) as { status: 'pending' | 'approved' | 'rejected'; decision_note: string | null; code: string } | null;
+}
+
+/** Pending signup id (so the child can come back to the waiting screen). */
+export const CHILD_SIGNUP_KEY = 'child_signup_request';
+export function getChildSignupRequest(): string | null {
+  if (typeof window === 'undefined') return null;
+  try { return window.localStorage.getItem(CHILD_SIGNUP_KEY); } catch { return null; }
+}
+export function setChildSignupRequest(id: string | null) {
+  try {
+    if (id) window.localStorage.setItem(CHILD_SIGNUP_KEY, id);
+    else window.localStorage.removeItem(CHILD_SIGNUP_KEY);
+  } catch { /* ignore */ }
+}
+
 // ---------- Error mapping (RPC raise -> Arabic) ----------
 const ERROR_MESSAGES: Record<string, string> = {
+  // accounts (0042)
+  session_expired: 'انتهت الجلسة — سجّل الدخول مجدداً',
+  no_password: 'لم تُضبط كلمة مرور لهذا الكود بعد — اطلب من الخادم ضبطها أو سجّل حساباً جديداً',
+  wrong_password: 'كلمة المرور غير صحيحة',
+  weak_password: 'كلمة المرور قصيرة — 6 أحرف على الأقل',
+  already_registered: 'هذا الكود له حساب بالفعل — سجّل الدخول بدلاً من ذلك',
+  code_required: 'الكود مطلوب',
+  name_required: 'الاسم مطلوب',
+  church_required: 'اختر الكنيسة والخدمة والفصل',
+  service_not_in_church: 'الخدمة لا تنتمي لهذه الكنيسة',
+  class_not_in_service: 'الفصل لا ينتمي لهذه الخدمة',
   invalid_code: 'الكود غير صالح',
   unknown_code: 'هذا الكود غير مسجل — تأكد من كارت المخدوم',
   invalid_kind: 'نوع الطلب غير صالح',

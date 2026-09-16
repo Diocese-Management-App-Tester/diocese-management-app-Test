@@ -425,7 +425,7 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
         <div className="border-t border-indigo-100 p-3">
           <button
             id="child-logout-btn"
-            onClick={() => { logout(); onClose(); router.replace('/child/login'); }}
+            onClick={() => { logout(); onClose(); router.replace('/login?as=child'); }}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-extrabold text-red-600 hover:bg-red-50 transition"
           >
             <LogOut className="h-5 w-5" />
@@ -476,7 +476,7 @@ export default function ChildShell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (!loading && !token) router.replace('/child/login');
+    if (!loading && !token) router.replace('/login?as=child');
   }, [loading, token, router]);
 
   if (loading || (!profile && !error && token)) {

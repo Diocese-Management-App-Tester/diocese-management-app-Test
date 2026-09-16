@@ -18,6 +18,9 @@ import { usePermissions } from '@/lib/permissions-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
+import ResetPasswordSection from '@/components/ResetPasswordSection';
+import { EditCodeModal } from '@/components/PersonDataModals';
+import { changeServantCode, resetServantPassword, servantAccountMessage } from '@/lib/servant-account';
 import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, PermissionProfile } from '@/lib/types';
 import { ROLE_LABELS, STATUS_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
 
@@ -274,6 +277,20 @@ function EditServantModal({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // 0042: the code (= login name) is editable through the same confirmed
+  // flow as for children (generate / scan / type) → service-role API updates
+  // the auth account + servant row + person.
+  const currentCode = person?.national_id ?? servant.user_id;
+  const [code, setCode] = useState(currentCode);
+  const [codeModal, setCodeModal] = useState(false);
+  const codeChanged = code.trim() !== currentCode;
+  const startCodeEdit = () => {
+    const ok = confirm(
+      `⚠️ تعديل كود الخادم\n\nالكود هو اسم دخول «${servant.full_name}» للتطبيق وهويته في كل التسجيلات وما يُطبع على بطاقته.\n\nتغييره يجعل البطاقة القديمة غير صالحة ويلزمه الدخول بالكود الجديد.\n\nهل تريد المتابعة؟`
+    );
+    if (ok) setCodeModal(true);
+  };
+
   const grantableRoles: AppRole[] =
     approver.role === 'owner'
       ? ['church_manager', 'service_manager', 'class_servant']
@@ -306,6 +323,16 @@ function EditServantModal({
       }
     }
     const phone = phoneLocal ? `${PHONE_PREFIX}${phoneLocal}` : '';
+
+    // 0) code → login account + user_id + persons.national_id (service role)
+    if (codeChanged) {
+      const ok = confirm(
+        `تأكيد تغيير الكود\n\nمن: ${currentCode}\nإلى: ${code.trim()}\n\nسيدخل الخادم بالكود الجديد من الآن.\n\nهل أنت متأكد؟`
+      );
+      if (!ok) { setSaving(false); return; }
+      const r = await changeServantCode(servant.id, code.trim());
+      if (!r.ok) { setError(servantAccountMessage(r.error)); setSaving(false); return; }
+    }
 
     // 1) person data (mirrored to the enrollment by trigger)
     if (servant.person_id) {
@@ -356,9 +383,39 @@ function EditServantModal({
           </button>
         </div>
         <form onSubmit={submit} className="space-y-3">
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500" dir="ltr">
-            <IdCard className="inline h-3.5 w-3.5" /> {person?.national_id ?? servant.user_id}
-          </p>
+          {/* code (login name) — disabled + confirmed edit (0042) */}
+          <div>
+            <div className="flex gap-2">
+              <input
+                id="edit-servant-code"
+                className={`input-field flex-1 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${codeChanged ? '!border-amber-300 !bg-amber-50 !text-amber-800' : ''}`}
+                dir="ltr"
+                value={code}
+                disabled
+                readOnly
+                aria-label="الكود"
+              />
+              <button
+                id="edit-servant-code-edit"
+                type="button"
+                onClick={startCodeEdit}
+                disabled={saving}
+                aria-label="تعديل الكود"
+                title="تعديل الكود"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow transition hover:bg-amber-600 active:scale-95 disabled:opacity-60"
+              >
+                <Pencil className="h-5 w-5" />
+              </button>
+            </div>
+            {codeChanged ? (
+              <p className="mt-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+                <span>سيتغير الكود من <span dir="ltr">{currentCode}</span> إلى <span dir="ltr">{code}</span> عند الحفظ</span>
+                <button type="button" onClick={() => setCode(currentCode)} className="shrink-0 rounded-lg bg-white px-2 py-1 text-amber-700 hover:bg-amber-100">تراجع</button>
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] text-slate-400"><IdCard className="inline h-3 w-3" /> الكود = اسم الدخول — اضغط زر التعديل لتغييره (توليد أو مسح كود)</p>
+            )}
+          </div>
           <input className="input-field" placeholder="الاسم الكامل *" value={fullName}
             onChange={(e) => setFullName(e.target.value)} required />
 
@@ -427,6 +484,17 @@ function EditServantModal({
               onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
           </label>
 
+          {/* 0042: reset the servant's login password */}
+          <ResetPasswordSection
+            idPrefix="edit-servant-pw"
+            title="إعادة تعيين كلمة المرور"
+            hint="كلمة دخول الخادم للتطبيق — تُغلق جلساته الحالية ويدخل بالجديدة"
+            onReset={async (pw) => {
+              const r = await resetServantPassword(servant.id, pw);
+              return r.ok ? null : servantAccountMessage(r.error);
+            }}
+          />
+
           {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>}
           <button type="submit" disabled={saving} className="btn-primary w-full flex items-center justify-center gap-2">
             {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
@@ -434,6 +502,18 @@ function EditServantModal({
           </button>
         </form>
       </div>
+
+      {codeModal && (
+        <EditCodeModal
+          personId={servant.person_id ?? servant.id}
+          currentCode={currentCode}
+          initialCode={code}
+          codeKind="servant"
+          scope={{ churchId: churchId || undefined, serviceId: serviceId || undefined, classId: classId || undefined }}
+          onConfirm={(c) => { setCode(c); setCodeModal(false); }}
+          onClose={() => setCodeModal(false)}
+        />
+      )}
     </div>
   );
 }

@@ -103,6 +103,28 @@ Besides the signup wizard, a manager can now **add servants himself** from **إ�
 - **How it works** — the browser calls **`POST /api/servants/create`** (`src/app/api/servants/create/route.ts`) with `{ items: AddServantInput[] }`. The route reads the caller's session, requires an approved owner / church manager / service manager, then per item: `auth.admin.createUser` (login = the code, e-mail confirmed) → RPC **`admin_add_servant(actor, account, …)`** (SECURITY DEFINER, **service_role only**) which re-validates the actor's role + scope, upserts the person by code (typed data wins, blanks keep old values), inserts the **approved** `servant_enrollments` row (`approved_by` = actor) and grants the profiles. If the RPC fails the auth account is deleted again (no orphans). One outcome per item, so a bad row never stops a batch. Needs **`SUPABASE_SERVICE_ROLE_KEY`** on the server (already required by the notifications dispatcher) — without it the route answers 503 and the UI explains.
 - Permission key `servants.add`; shared parsing helpers moved to `src/lib/bulk-import.ts` (used by both children and servants bulk import). Test: `supabase/tests/admin_add_servants_test.sql`.
 
+### Child accounts, unified login & servant mirror — حسابات المخدومين (migration 0042)
+`supabase/migrations/0042_child_accounts_servant_mirror.sql` · test `supabase/tests/child_accounts_test.sql`
+
+**Unified login (`/login`)** — one page with a **دخول الخادم | دخول المخدوم** switch (`?as=child` pre-selects the child tab). Both entries: the **code** (typed, or **scanned** with the camera / picked from the gallery via `QrScanner`), the **password**, a **«تذكرني»** switch, «تسجيل الدخول» and «إنشاء حساب» (→ `/signup` for servants, `/child/signup` for children).
+- Servant → Supabase Auth as before (`code@diocese.app`). «تذكرني» off = tab-only session: `src/lib/session.ts` keeps a sessionStorage marker and `AuthProvider` signs out on the next cold start.
+- Child → RPC **`child_login(code, password, remember)`** → a random **session token** (sha256-hashed in `child_sessions`, 12 h or 90 d with «تذكرني»). The token — never the raw code — is what every `child_portal_*` RPC now receives (`child_portal_person` resolves it; expired → `session_expired`). `child_session_touch` validates/extends on boot & tab focus, `child_logout` deletes the session, `child_change_password` (Options → الحساب) kills the other sessions. `/child/login` just redirects to `/login?as=child`.
+- Passwords live in **`person_credentials`** (bcrypt via pgcrypto), never readable by any client role.
+
+**Child signup (`/child/signup`)** — same 4-step wizard as the servants (الفصل — required, locked from an invite link → الكود typed/scanned/generated with a live `child_signup_lookup_code` check → البيانات + photo → كلمة المرور). Submit → RPC **`child_signup`** creates a **pending `child_join_requests` row** (password hash stored, hidden by column-level grants). The page then polls `child_signup_status` and offers the login button once approved (request id kept in localStorage so the child can come back).
+
+**إدارة المخدومين (`/children/manage`)** — new Settings link (الإدارة for managers, النشاط for class servants; badge = pending child requests via `pending_child_join_requests_count`). Tabs mirror إدارة الخدام:
+- **إضافة** — the former `/children/add` (single + bulk) moved here (`src/components/children/AddChildrenPanel.tsx`; the old URL redirects). Both forms gained an optional **كلمة مرور البوابة** (`add_person_and_enroll … p_password`, result carries `has_password`; for an existing person it is set only if he has none yet).
+- **الطلبات** — `ChildRequestsPanel`: pending signups (scoped by RLS to whoever can access the requested class) with correctable church/service/class → RPC **`review_child_join_request(approve, note, scope)`**: approve = upsert person by code + enrollment + credentials; reject = note shown to the child. A **السجل** view lists decided requests.
+- **دعوة (QR)** — `ChildInvitePanel`: scoped link/QR to `/child/signup?church=…&service=…&class=…`.
+- The **«إضافة»** button left the children page (an empty class now links to «إدارة المخدومين»).
+
+**Servants as classes on the children page** — `enrollments.kind` (`'child' | 'servant'`) + `servant_id`. Trigger `sync_servant_mirror_enrollment` keeps **one mirror enrollment per approved/suspended servant with a full scope** (created / moved / removed as his `servant_enrollments` row changes; re-reads the live row so `auto_person_for_servant`'s nested update can't leave a stale NEW). The children page has a **المخدومين | الخدام** switch (`fetchEnrollmentsPage(…, { kind })`) — servants are grouped by class with **every job** (attendance, points, call, message, data, card printing, achievements…). Everything that enumerates a scope (stats `p_kind` default `'child'` — pass `'servant'` / `'all'`, dashboard counts, leaderboard, birthdays, chat/notification audiences, exam candidates, online-class eligibility) counts **children only**, so mirrors never inflate numbers. Deleting a servant mirror from البيانات is refused (managed from إدارة الخدام).
+
+**Password reset & code edit** — `ResetPasswordSection` (generate / show / confirm):
+- Child (EditPersonModal) → RPC **`admin_set_child_password`** (owner / whoever can access the person; closes all his sessions).
+- Servant (EditPersonModal on a mirror row, and **إدارة الخدام → تعديل**) → **`POST /api/servants/account`** (`src/app/api/servants/account/route.ts`, service role): `reset_password` → `auth.admin.updateUserById`; `change_code` → new login e-mail + `servant_enrollments.user_id` + `persons.national_id` (uniqueness checked). Scope rule = who may edit the servant; a servant may reset **his own** password. The servant edit modal now has the same **confirmed code-edit flow** as children (`EditCodeModal` with `codeKind="servant"`), and «تعديل بياناتي» in Settings has **تغيير كلمة المرور** (`supabase.auth.updateUser`).
+
 ## Currently Completed Features
 - ✅ PWA: manifest (RTL/Arabic), service worker, installable, app icons — **name / icon / diocese name & logo configurable through Vercel env vars** (see Setup Guide § 4)
 - ✅ Multi-tenant Postgres schema with **full RLS** (`supabase/migrations/0001_schema.sql`)
@@ -157,7 +179,10 @@ Besides the signup wizard, a manager can now **add servants himself** from **إ�
 | `/settings/services` | manage services (photo, church select) |
 | `/settings/classes` | manage classes (photo, church→service cascade) |
 | `/signup?church=..&service=..&class=..` | invite-scoped signup (locked pre-fill) |
-| `/child/login` | **بوابة المخدوم** — scan QR (camera / gallery / typed national id), public |
+| `/login?as=child` | **دخول المخدوم** (0042) — code (scan / type) + password + تذكرني; `/child/login` redirects here |
+| `/child/signup?church=..&service=..&class=..` | child signup wizard → pending join request (0042), public |
+| `/children/manage?tab=add\|requests\|invite` | **إدارة المخدومين** (0042): add single/bulk (+ portal password) · join requests · invite QR; `/children/add` redirects |
+| `POST /api/servants/account` | service-role: reset a servant's password / change his code (0042) |
 | `/child` | child main page: name, picture, attendance & points, enrollments, latest activity |
 | `/child/attendance` | child attendance: by day, event filter, registration date/time, points |
 | `/child/points` | child points: balance, added/removed, by cause / attendance |

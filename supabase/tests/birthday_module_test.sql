@@ -33,6 +33,10 @@ insert into public.persons (id, national_id, name, birthdate, phone) values
   ('40000000-0000-0000-0000-000000000004', '29901010000004', 'سارة',  '2013-07-01', '01000000004'),
   ('40000000-0000-0000-0000-000000000005', '29901010000005', 'بلا تاريخ', null, null),
   ('40000000-0000-0000-0000-000000000006', '29901010000006', 'كبيسة', '2016-02-29', null);
+-- 0042: the portal now needs a session token; for the legacy tests the raw code doubles as the token
+insert into public.child_sessions (person_id, token_hash, expires_at)
+select id, encode(digest(national_id, 'sha256'), 'hex'), now() + interval '1 day' from public.persons;
+
 insert into public.enrollments (id, person_id, church_id, service_id, class_id, points, created_at) values
   ('50000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 50, '2024-01-01'),
   ('50000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 0, '2024-01-01'),

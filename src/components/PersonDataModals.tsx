@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import QRCode from 'qrcode';
 import {
   X, User, Phone, MapPin, StickyNote, IdCard, CalendarDays, Star,
@@ -21,6 +22,8 @@ import { uploadPhoto } from '@/lib/upload';
 import { useCodeGenerator } from '@/lib/customization-context';
 import type { CodeContext } from '@/lib/code-templates';
 import QrScanner from '@/components/store/QrScanner';
+import ResetPasswordSection from '@/components/ResetPasswordSection';
+import { changeServantCode, resetServantPassword, servantAccountMessage } from '@/lib/servant-account';
 import {
   GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH,
   type Gender, type EnrollmentWithPerson, type Enrollment,
@@ -215,6 +218,9 @@ export function EditPersonModal({
 }) {
   const supabase = createClient();
   const person = enrollment.person;
+  // 0042: a servant's mirror row → code/password changes go through the
+  // service-role API (auth account must follow the code)
+  const isServant = enrollment.kind === 'servant' && !!enrollment.servant_id;
 
   const [name, setName] = useState(person.name);
   const [gender, setGender] = useState<Gender | ''>(person.gender ?? '');
@@ -267,6 +273,12 @@ export function EditPersonModal({
       }
     }
 
+    // servant: the login name must follow the code → API first (rolls nothing back on failure)
+    if (codeChanged && isServant) {
+      const r = await changeServantCode(enrollment.servant_id!, newCode);
+      if (!r.ok) { setBusy(false); return setError(servantAccountMessage(r.error)); }
+    }
+
     const { error: err } = await supabase
       .from('persons')
       .update({
@@ -277,7 +289,7 @@ export function EditPersonModal({
         address: address.trim() || null,
         notes: notes.trim() || null,
         image_url,
-        ...(codeChanged ? { national_id: newCode } : {}),
+        ...(codeChanged && !isServant ? { national_id: newCode } : {}),
       })
       .eq('id', person.id);
 
@@ -408,6 +420,27 @@ export function EditPersonModal({
           التعديل يسري على بيانات الشخص في كل تسجيلاته (كل الكنائس والخدمات والفصول)
         </p>
 
+        {/* 0042: password reset — child portal password / servant login password */}
+        <ResetPasswordSection
+          idPrefix="edit-person-pw"
+          title={isServant ? 'إعادة تعيين كلمة مرور الخادم' : 'إعادة تعيين كلمة مرور البوابة'}
+          hint={isServant
+            ? 'كلمة الدخول للتطبيق بحساب هذا الخادم — تُغلق جلساته الحالية'
+            : 'يدخل المخدوم إلى البوابة بكوده وهذه الكلمة — تُغلق جلساته الحالية'}
+          onReset={async (pw) => {
+            if (isServant) {
+              const r = await resetServantPassword(enrollment.servant_id!, pw);
+              return r.ok ? null : servantAccountMessage(r.error);
+            }
+            const { error: e } = await supabase.rpc('admin_set_child_password', { p_person: person.id, p_password: pw });
+            if (!e) return null;
+            const m = e.message ?? '';
+            return m.includes('weak_password') ? 'كلمة المرور قصيرة — 6 أحرف على الأقل'
+              : m.includes('forbidden') || m.includes('42501') ? 'ليس لديك صلاحية على هذا المخدوم'
+              : 'تعذر تعيين كلمة المرور، حاول مجددًا';
+          }}
+        />
+
         {error && (
           <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>
         )}
@@ -442,19 +475,21 @@ export function EditPersonModal({
 // The chosen code is only staged into the parent form here; it is
 // persisted when the user saves the edit form (after a final confirm).
 // =====================================================================
-function EditCodeModal({
-  personId, currentCode, initialCode, scope, onConfirm, onClose,
+export function EditCodeModal({
+  personId, currentCode, initialCode, scope, codeKind = 'person', onConfirm, onClose,
 }: {
   personId: string;
   currentCode: string;
   initialCode: string;
   /** enrollment scope → church / service / class abbreviations in the owner's code design */
   scope?: CodeContext;
+  /** which template of نظام الأكواد the generator follows (servants have their own, 0040) */
+  codeKind?: 'person' | 'servant';
   onConfirm: (code: string) => void;
   onClose: () => void;
 }) {
   const supabase = createClient();
-  const genPersonCode = useCodeGenerator('person');
+  const genPersonCode = useCodeGenerator(codeKind);
   const [value, setValue] = useState(initialCode);
   const [scanning, setScanning] = useState(false);
   const [qrUrl, setQrUrl] = useState('');
@@ -645,6 +680,22 @@ export function DeletePersonModal({
   const churchName = scopeName(enrollment.church_id, churches, 'الكنيسة');
   const serviceName = scopeName(enrollment.service_id, services, 'الخدمة');
   const className = scopeName(enrollment.class_id, classes, 'الفصل');
+
+  // 0042: a servant's mirror row follows his servant enrollment — it is
+  // managed from «إدارة الخدام», never deleted here.
+  if (enrollment.kind === 'servant') {
+    return (
+      <ModalFrame title="حذف خادم" icon={<Trash2 className="h-5 w-5 text-red-600" />} onClose={onClose}>
+        <div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-700">
+          هذا صف خادم مرتبط بحسابه — يُدار (تعديل النطاق أو الإيقاف أو الحذف) من «إدارة الخدام» في الإعدادات، ويختفي من هنا تلقائيًا.
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="btn-secondary flex-1">إغلاق</button>
+          <Link href="/servants" className="btn-primary flex-1 text-center">إدارة الخدام</Link>
+        </div>
+      </ModalFrame>
+    );
+  }
 
   // Option 1: remove THIS enrollment only (class + service + church binding).
   // FK cascade wipes the enrollment's attendance & points logs.

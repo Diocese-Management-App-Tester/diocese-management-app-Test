@@ -1,46 +1,123 @@
 'use client';
 
-import { useState } from 'react';
+// ---------- Unified login (دخول الخادم / دخول المخدوم) ----------
+// One page, two entries. Both use the CODE (national id / QR) as the login
+// name — scanned with the camera / picked from the gallery or typed — plus a
+// password, a «تذكرني» switch and a signup link.
+//   * servant → Supabase Auth (email = code@diocese.app)
+//   * child   → child_login RPC (migration 0042) → session token
+
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { LogIn, Loader2, User, Lock, QrCode } from 'lucide-react';
+import {
+  LogIn, Loader2, User, Lock, QrCode, Keyboard, Eye, EyeOff, UserPlus, Users, GraduationCap,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { userIdToEmail, codeToUserId } from '@/lib/types';
+import { childLogin, fetchChildProfile, setChildToken, childErrorMessage, getChildToken } from '@/lib/child-portal';
+import QrScanner from '@/components/store/QrScanner';
+import { SERVANT_NO_REMEMBER_KEY, SERVANT_TAB_ALIVE_KEY } from '@/lib/session';
+
+type LoginKind = 'servant' | 'child';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
+  );
+}
+
+function LoginInner() {
   const router = useRouter();
+  const params = useSearchParams();
   const supabase = createClient();
-  const [userId, setUserId] = useState('');
+
+  const [kind, setKind] = useState<LoginKind>(params.get('as') === 'child' ? 'child' : 'servant');
+  const [code, setCode] = useState(params.get('code') ?? '');
   const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [scan, setScan] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // a child that is already signed in goes straight to the portal
+  useEffect(() => {
+    if (kind === 'child' && getChildToken()) router.replace('/child');
+  }, [kind, router]);
+
+  const switchKind = (k: LoginKind) => {
+    setKind(k);
+    setError('');
+    setScan(false);
+    const url = new URL(window.location.href);
+    if (k === 'child') url.searchParams.set('as', 'child');
+    else url.searchParams.delete('as');
+    window.history.replaceState(null, '', url.toString());
+  };
+
+  const onScanned = useCallback((value: string) => {
+    setCode(value.trim());
+    setScan(false);
+    setError('');
+    // focus the password box so the flow continues without a tap
+    setTimeout(() => document.getElementById('login-password')?.focus(), 50);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    const clean = code.trim();
+    if (!clean) { setError('أدخل الكود أو امسحه'); return; }
+    if (!password) { setError('أدخل كلمة المرور'); return; }
     setLoading(true);
 
-    const { error: err } = await supabase.auth.signInWithPassword({
-      // 0037: the login name IS the servant's code (national id / QR)
-      email: userIdToEmail(codeToUserId(userId)),
-      password,
-    });
-
-    if (err) {
-      setError('بيانات الدخول غير صحيحة، تأكد من الكود وكلمة المرور');
-      setLoading(false);
+    if (kind === 'servant') {
+      const { error: err } = await supabase.auth.signInWithPassword({
+        // 0037: the login name IS the servant's code (national id / QR)
+        email: userIdToEmail(codeToUserId(clean)),
+        password,
+      });
+      if (err) {
+        setError('بيانات الدخول غير صحيحة، تأكد من الكود وكلمة المرور');
+        setLoading(false);
+        return;
+      }
+      try {
+        if (remember) {
+          window.localStorage.removeItem(SERVANT_NO_REMEMBER_KEY);
+        } else {
+          window.localStorage.setItem(SERVANT_NO_REMEMBER_KEY, '1');
+          window.sessionStorage.setItem(SERVANT_TAB_ALIVE_KEY, '1');
+        }
+      } catch { /* private mode */ }
+      router.replace('/');
+      router.refresh();
       return;
     }
-    router.replace('/');
-    router.refresh();
+
+    // child
+    try {
+      const r = await childLogin(supabase, clean, password, remember);
+      await fetchChildProfile(supabase, r.token);
+      setChildToken(r.token, remember);
+      router.replace('/child');
+    } catch (err) {
+      setError(childErrorMessage(err, 'تعذّر تسجيل الدخول، حاول مجدداً'));
+      setLoading(false);
+    }
   };
 
+  const isChild = kind === 'child';
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center px-6">
+    <main className="flex min-h-screen flex-col items-center justify-center px-6 py-8">
       <section id="login-card" className="w-full max-w-sm">
-        <div className="mb-8 text-center">
+        <div className="mb-6 text-center">
           <div className="mx-auto mb-4 h-28 w-28 overflow-hidden rounded-3xl shadow-lg ring-2 ring-gold-300/50">
             <Image
               src={dioceseLogo(192)}
@@ -55,24 +132,73 @@ export default function LoginPage() {
           <p className="text-sm text-slate-500 mt-1">سجّل دخولك للمتابعة</p>
         </div>
 
+        {/* servant / child switch */}
+        <div id="login-kind-switch" role="tablist" className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+          <button
+            id="login-as-servant"
+            type="button"
+            role="tab"
+            aria-selected={!isChild}
+            onClick={() => switchKind('servant')}
+            className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-extrabold transition ${
+              !isChild ? 'bg-white text-primary-700 shadow' : 'text-slate-500'
+            }`}
+          >
+            <Users className="h-4 w-4" /> دخول الخادم
+          </button>
+          <button
+            id="login-as-child"
+            type="button"
+            role="tab"
+            aria-selected={isChild}
+            onClick={() => switchKind('child')}
+            className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-extrabold transition ${
+              isChild ? 'bg-white text-gold-700 shadow' : 'text-slate-500'
+            }`}
+          >
+            <GraduationCap className="h-4 w-4" /> دخول المخدوم
+          </button>
+        </div>
+
         <form onSubmit={handleLogin} className="card space-y-4">
           <div>
-            <label htmlFor="login-user-id" className="mb-1.5 block text-sm font-bold">
-              الكود (اسم الدخول)
-            </label>
-            <div className="relative">
-              <User className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <input
-                id="login-user-id"
-                className="input-field pr-9"
-                placeholder="الكود / الرقم القومي"
-                dir="ltr"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
-                required
-                autoComplete="username"
-              />
+            <div className="mb-1.5 flex items-center justify-between">
+              <label htmlFor="login-user-id" className="block text-sm font-bold">
+                الكود {isChild ? '(كود الكارت)' : '(اسم الدخول)'}
+              </label>
+              <button
+                id="login-toggle-scan"
+                type="button"
+                onClick={() => setScan((s) => !s)}
+                className="flex items-center gap-1 text-xs font-bold text-primary-600 hover:underline"
+              >
+                {scan ? <Keyboard className="h-3.5 w-3.5" /> : <QrCode className="h-3.5 w-3.5" />}
+                {scan ? 'إدخال يدوي' : 'مسح الكود'}
+              </button>
             </div>
+            {scan ? (
+              <QrScanner
+                idPrefix="login"
+                autoStart
+                hint="وجّه الكاميرا نحو كود الكارت أو اختر صورته من المعرض"
+                onCode={onScanned}
+              />
+            ) : (
+              <div className="relative">
+                <User className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <input
+                  id="login-user-id"
+                  className="input-field pr-9"
+                  placeholder="الكود / الرقم القومي"
+                  dir="ltr"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                  autoComplete="username"
+                  inputMode="text"
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -83,8 +209,8 @@ export default function LoginPage() {
               <Lock className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <input
                 id="login-password"
-                type="password"
-                className="input-field pr-9"
+                type={showPw ? 'text' : 'password'}
+                className="input-field pr-9 pl-10"
                 placeholder="••••••••"
                 dir="ltr"
                 value={password}
@@ -92,46 +218,58 @@ export default function LoginPage() {
                 required
                 autoComplete="current-password"
               />
+              <button
+                type="button"
+                aria-label={showPw ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                onClick={() => setShowPw((s) => !s)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
           </div>
 
+          <label htmlFor="login-remember" className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-600">
+            <input
+              id="login-remember"
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300 accent-primary-600"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            تذكرني على هذا الجهاز
+          </label>
+
           {error && (
-            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
+            <p id="login-error" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
               {error}
             </p>
           )}
 
-          <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2">
+          <button
+            id="login-submit"
+            type="submit"
+            disabled={loading}
+            className={`w-full flex items-center justify-center gap-2 ${isChild ? 'btn-primary !bg-gradient-to-br !from-gold-500 !to-gold-700' : 'btn-primary'}`}
+          >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
             تسجيل الدخول
           </button>
+
+          <Link
+            id="login-signup-link"
+            href={isChild ? '/child/signup' : '/signup'}
+            className="btn-secondary w-full flex items-center justify-center gap-2"
+          >
+            <UserPlus className="h-5 w-5" />
+            {isChild ? 'إنشاء حساب مخدوم' : 'إنشاء حساب خادم'}
+          </Link>
         </form>
 
-        {/* Child portal entry — scan the card QR instead of a password */}
-        <div className="my-5 flex items-center gap-3 text-xs font-bold text-slate-400">
-          <span className="h-px flex-1 bg-slate-200" />
-          أو
-          <span className="h-px flex-1 bg-slate-200" />
-        </div>
-        <Link
-          id="child-login-btn"
-          href="/child/login"
-          className="card flex items-center gap-3 !py-3.5 hover:bg-gold-50 transition active:scale-[0.98]"
-        >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-gold-400 to-gold-600 text-white shadow">
-            <QrCode className="h-6 w-6" />
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="block font-extrabold">دخول المخدوم</span>
-            <span className="block text-xs text-slate-400">امسح كود الكارت أو اختر صورته من المعرض</span>
-          </span>
-        </Link>
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          خادم جديد؟{' '}
-          <Link href="/signup" className="font-bold text-primary-600 hover:underline">
-            إنشاء حساب
-          </Link>
+        <p className="mt-5 text-center text-xs text-slate-400">
+          {isChild
+            ? 'المخدوم يدخل بكود الكارت وكلمة المرور التي ضبطها الخادم أو اختارها عند التسجيل.'
+            : 'الخادم يدخل بكوده وكلمة المرور؛ الحساب الجديد يحتاج موافقة المسؤول.'}
         </p>
       </section>
     </main>

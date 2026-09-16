@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
 import { SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
+import ResetPasswordSection from '@/components/ResetPasswordSection';
 
 export default function EditProfileModal({ onClose }: { onClose: () => void }) {
   const { profile, person, refresh } = useAuth();
@@ -144,6 +145,23 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
             <input type="file" accept="image/*" className="hidden"
               onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
           </label>
+
+          {/* 0042: change MY login password (Supabase Auth, current session) */}
+          <ResetPasswordSection
+            idPrefix="my-pw"
+            title="تغيير كلمة المرور"
+            hint="كلمة دخولك للتطبيق — 6 أحرف على الأقل"
+            onReset={async (pw) => {
+              const { error: e } = await supabase.auth.updateUser({ password: pw });
+              if (!e) return null;
+              const m = (e.message ?? '').toLowerCase();
+              return m.includes('same') || m.includes('different')
+                ? 'اختر كلمة مرور مختلفة عن الحالية'
+                : m.includes('weak') || m.includes('at least')
+                ? 'كلمة المرور ضعيفة — 6 أحرف على الأقل'
+                : 'تعذر تغيير كلمة المرور، حاول مجددًا';
+            }}
+          />
 
           {error && (
             <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>
