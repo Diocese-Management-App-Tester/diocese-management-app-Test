@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Users, Search, Plus, Phone, MapPin, Star, CalendarCheck, X, Loader2,
+  Users, Search, Plus, Phone, MapPin, Star, CalendarCheck, X, Loader2, GraduationCap,
   SlidersHorizontal, ChevronDown, School, Check, Minus,
   MessageSquare, Inbox, PenSquare, ArrowUpDown, ArrowUp, ArrowDown,
   Eye, Pencil, Trash2, Database, Printer, IdCard, CalendarDays, UserCheck, UserX, CircleDashed,
@@ -39,7 +39,7 @@ import AwardModal from '@/components/achievements/AwardModal';
 import { useDebouncedRealtime, scopeFilter } from '@/lib/realtime';
 import { sendMessage as sendChatMessage, chatErrorMessage } from '@/lib/chat';
 import {
-  fetchEnrollmentsPage, fetchMyGroupIds, fetchMyGroupEnrollments, cachedLookup, ALL, PAGE_SIZE,
+  fetchEnrollmentsPage, fetchMyGroupIds, fetchMyGroupEnrollments, cachedLookup, ALL, PAGE_SIZE, type EnrollmentKind,
 } from '@/lib/queries';
 import { useNavLabel } from '@/lib/customization-context';
 
@@ -151,6 +151,8 @@ export default function ChildrenPage() {
   // every job / badge / filter / sort works exactly the same.
   const shepherdsModuleOn = moduleVisible('shepherds');
   const [myGroupOnly, setMyGroupOnly] = useState(false);
+  // 0042: المخدومين | الخدام — servants are shown as classes too (mirror enrollments)
+  const [kind, setKind] = useState<EnrollmentKind>('child');
   const [myGroupIds, setMyGroupIds] = useState<Set<string> | null>(null);
   useEffect(() => {
     if (!shepherdsModuleOn && myGroupOnly) setMyGroupOnly(false);
@@ -278,7 +280,7 @@ export default function ChildrenPage() {
       // «مجموعتي» — the whole group at once (small, bounded set), no paging
       if (myGroupOnly) {
         const ids = myGroupIds ?? (profileId ? await fetchMyGroupIds(supabase, profileId) : new Set<string>());
-        const rows = await fetchMyGroupEnrollments(supabase, ids, scope, searchQ);
+        const rows = await fetchMyGroupEnrollments(supabase, ids, scope, searchQ, kind);
         if (seq !== loadSeq.current) return;
         setEnrollments(rows);
         setHasMore(false);
@@ -286,7 +288,7 @@ export default function ChildrenPage() {
       }
       const results = await Promise.all(
         Array.from({ length: pages }, (_, i) =>
-          fetchEnrollmentsPage(supabase, scope, { page: i, search: searchQ })
+          fetchEnrollmentsPage(supabase, scope, { page: i, search: searchQ, kind })
         )
       );
       if (seq !== loadSeq.current) return; // a newer load superseded this one
@@ -297,7 +299,7 @@ export default function ChildrenPage() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [supabase, churchFilter, serviceFilter, classFilter, searchQ, myGroupOnly, myGroupIds, profileId]);
+  }, [supabase, churchFilter, serviceFilter, classFilter, searchQ, myGroupOnly, myGroupIds, profileId, kind]);
 
   // Full refresh used by realtime + after mutations
   const load = useCallback(async () => {
@@ -324,7 +326,7 @@ export default function ChildrenPage() {
       const { rows, hasMore: more } = await fetchEnrollmentsPage(
         supabase,
         { church: churchFilter, service: serviceFilter, class: classFilter },
-        { page: nextPage, search: searchQ }
+        { page: nextPage, search: searchQ, kind }
       );
       pagesRef.current = nextPage + 1;
       setEnrollments((prev) => {
@@ -1042,10 +1044,31 @@ export default function ChildrenPage() {
             </span>
           )}
         </h2>
-        <button id="add-child-btn" onClick={() => router.push('/children/add')} className="btn-primary !py-2 !px-3 flex items-center gap-1 text-sm">
-          <Plus className="h-4 w-4" />
-          إضافة
-        </button>
+        {/* 0042: المخدومين | الخدام switch (servants shown as classes with every job) */}
+        <div id="children-kind-switch" role="tablist" className="grid grid-cols-2 gap-0.5 rounded-xl bg-indigo-50 p-0.5">
+          <button
+            id="kind-child"
+            role="tab"
+            aria-selected={kind === 'child'}
+            onClick={() => setKind('child')}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-extrabold transition ${
+              kind === 'child' ? 'bg-white text-primary-700 shadow' : 'text-slate-500'
+            }`}
+          >
+            <GraduationCap className="h-3.5 w-3.5" /> المخدومين
+          </button>
+          <button
+            id="kind-servant"
+            role="tab"
+            aria-selected={kind === 'servant'}
+            onClick={() => setKind('servant')}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-extrabold transition ${
+              kind === 'servant' ? 'bg-white text-emerald-700 shadow' : 'text-slate-500'
+            }`}
+          >
+            <Users className="h-3.5 w-3.5" /> الخدام
+          </button>
+        </div>
       </section>
 
       {/* ---------- FROZEN control zone (sticky below the app header) ----------
@@ -1756,8 +1779,21 @@ export default function ChildrenPage() {
           ) : (
             <>
               <Users className="mx-auto mb-3 h-10 w-10" />
-              <p className="font-bold">لا يوجد مخدومين</p>
-              <p className="text-sm mt-1">جرّب تغيير الفلاتر أو اضغط &quot;إضافة&quot; لتسجيل مخدوم</p>
+              <p className="font-bold">{kind === 'servant' ? 'لا يوجد خدام في هذا النطاق' : 'لا يوجد مخدومين'}</p>
+              <p className="text-sm mt-1">
+                {kind === 'servant'
+                  ? 'يظهر هنا الخادم المعتمد الذي له كنيسة وخدمة وفصل محددة'
+                  : 'جرّب تغيير الفلاتر أو أضف مخدومًا من «إدارة المخدومين» في الإعدادات'}
+              </p>
+              {kind === 'child' && (
+                <button
+                  id="go-manage-children"
+                  onClick={() => router.push('/children/manage')}
+                  className="btn-primary mt-4 inline-flex items-center gap-1 !py-2 !px-4 text-sm"
+                >
+                  <Plus className="h-4 w-4" /> إدارة المخدومين
+                </button>
+              )}
             </>
           )}
         </div>

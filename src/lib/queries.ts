@@ -9,8 +9,11 @@ export const ALL = 'all';
  * Columns the list screens (and their view/edit modals) actually use.
  * Audit columns (created_by / edited_*) are excluded — ~30% smaller rows.
  */
+/** enrollments.kind (migration 0042): children by default; 'servant' = mirror rows of servant accounts. */
+export type EnrollmentKind = 'child' | 'servant' | 'all';
+
 export const ENROLLMENT_LIST_SELECT =
-  'id, person_id, church_id, service_id, class_id, attendance_count, points, created_at, ' +
+  'id, person_id, church_id, service_id, class_id, attendance_count, points, created_at, kind, servant_id, ' +
   'person:persons(id, national_id, name, birthdate, gender, phone, address, notes, image_url)';
 
 export interface ScopeSelection {
@@ -33,17 +36,19 @@ export const PAGE_SIZE = 200;
 export async function fetchEnrollmentsPage(
   supabase: SupabaseClient,
   scope: ScopeSelection,
-  opts: { page?: number; pageSize?: number; search?: string } = {}
+  opts: { page?: number; pageSize?: number; search?: string; kind?: EnrollmentKind } = {}
 ): Promise<{ rows: EnrollmentWithPerson[]; hasMore: boolean }> {
   const page = opts.page ?? 0;
   const size = opts.pageSize ?? PAGE_SIZE;
   const search = (opts.search ?? '').trim();
+  const kind = opts.kind ?? 'child';
 
   const select = search
     ? ENROLLMENT_LIST_SELECT.replace('person:persons(', 'person:persons!inner(')
     : ENROLLMENT_LIST_SELECT;
 
   let q = supabase.from('enrollments').select(select);
+  if (kind !== 'all') q = q.eq('kind', kind);
   if (scope.church && scope.church !== ALL) q = q.eq('church_id', scope.church);
   if (scope.service && scope.service !== ALL) q = q.eq('service_id', scope.service);
   if (scope.class && scope.class !== ALL) q = q.eq('class_id', scope.class);
@@ -99,7 +104,8 @@ export async function fetchMyGroupEnrollments(
   supabase: SupabaseClient,
   groupIds: Set<string>,
   scope: ScopeSelection,
-  search = ''
+  search = '',
+  kind: EnrollmentKind = 'child'
 ): Promise<EnrollmentWithPerson[]> {
   const ids = Array.from(groupIds);
   if (ids.length === 0) return [];
@@ -110,6 +116,7 @@ export async function fetchMyGroupEnrollments(
   const out: EnrollmentWithPerson[] = [];
   for (let i = 0; i < ids.length; i += 100) {
     let q = supabase.from('enrollments').select(select).in('id', ids.slice(i, i + 100));
+    if (kind !== 'all') q = q.eq('kind', kind);
     if (scope.church && scope.church !== ALL) q = q.eq('church_id', scope.church);
     if (scope.service && scope.service !== ALL) q = q.eq('service_id', scope.service);
     if (scope.class && scope.class !== ALL) q = q.eq('class_id', scope.class);
@@ -133,14 +140,15 @@ export async function fetchMyGroupEnrollments(
 export async function fetchAllEnrollments(
   supabase: SupabaseClient,
   scope: ScopeSelection,
-  maxRows = 5000
+  maxRows = 5000,
+  kind: EnrollmentKind = 'child'
 ): Promise<EnrollmentWithPerson[]> {
   const out: EnrollmentWithPerson[] = [];
   let page = 0;
   // 1000 is PostgREST's default max-rows; stay under it.
   const size = 1000;
   while (out.length < maxRows) {
-    const { rows, hasMore } = await fetchEnrollmentsPage(supabase, scope, { page, pageSize: size });
+    const { rows, hasMore } = await fetchEnrollmentsPage(supabase, scope, { page, pageSize: size, kind });
     out.push(...rows);
     if (!hasMore) break;
     page++;

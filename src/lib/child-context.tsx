@@ -10,6 +10,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import {
   clearChildToken, fetchChildProfile, getChildToken, setChildToken,
+  childLogin, childLogout, childSessionTouch,
   childErrorMessage, fetchChildExams, fetchChildOnlineClasses, type ChildProfile, type ChildExam, type ChildOnlineClass,
 } from '@/lib/child-portal';
 import { fetchChildChatOverview, type ChildChatOverview } from '@/lib/chat';
@@ -26,8 +27,8 @@ interface ChildState {
   error: string | null;
   /** (re)load profile for the current token */
   refresh: () => Promise<void>;
-  /** validate a scanned code, store it and load the profile; returns error text or null */
-  login: (code: string) => Promise<string | null>;
+  /** code + password → session token (migration 0042); returns error text or null */
+  login: (code: string, password: string, remember?: boolean) => Promise<string | null>;
   logout: () => void;
   /**
    * Modules data shared by every child page (fetched ONCE here, not by each
@@ -96,9 +97,13 @@ export function ChildProvider({ children }: { children: ReactNode }) {
         setProfile(p);
         setError(null);
       } catch (e) {
+        const raw = ((e as { message?: string } | null)?.message ?? '');
         const msg = childErrorMessage(e);
-        // an unknown / deleted code should log the child out
-        if (msg.includes('غير مسجل') || msg.includes('غير صالح')) {
+        // an expired session / unknown or deleted code should log the child out
+        if (
+          raw.includes('session_expired') || raw.includes('unknown_code') || raw.includes('invalid_code') ||
+          msg.includes('غير مسجل') || msg.includes('غير صالح')
+        ) {
           clearChildToken();
           setToken(null);
           setProfile(null);
@@ -109,25 +114,55 @@ export function ChildProvider({ children }: { children: ReactNode }) {
     [supabase]
   );
 
-  // boot: read token from storage
+  // boot: read token from storage, validate/extend the session, then load
   useEffect(() => {
     const t = getChildToken();
     setToken(t);
-    if (t) load(t).finally(() => setLoading(false));
-    else setLoading(false);
-  }, [load]);
+    if (!t) { setLoading(false); return; }
+    (async () => {
+      try {
+        await childSessionTouch(supabase, t);
+      } catch (e) {
+        const raw = ((e as { message?: string } | null)?.message ?? '');
+        if (raw.includes('session_expired') || raw.includes('invalid_code')) {
+          clearChildToken();
+          setToken(null);
+          setProfile(null);
+          setError(childErrorMessage(e));
+          setLoading(false);
+          return;
+        }
+        // network hiccup → still try the profile (offline cache friendly)
+      }
+      await load(t);
+      setLoading(false);
+    })();
+  }, [load, supabase]);
+
+  // keep a «remember me» session alive when the tab comes back
+  useEffect(() => {
+    if (!token) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') childSessionTouch(supabase, token).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [token, supabase]);
 
   const refresh = useCallback(async () => {
     if (token) await load(token);
   }, [token, load]);
 
   const login = useCallback(
-    async (code: string): Promise<string | null> => {
+    async (code: string, password: string, remember = false): Promise<string | null> => {
       const clean = code.trim();
+      if (!clean) return 'أدخل الكود';
+      if (!password) return 'أدخل كلمة المرور';
       try {
-        const p = await fetchChildProfile(supabase, clean);
-        setChildToken(clean);
-        setToken(clean);
+        const r = await childLogin(supabase, clean, password, remember);
+        const p = await fetchChildProfile(supabase, r.token);
+        setChildToken(r.token, remember);
+        setToken(r.token);
         setProfile(p);
         setError(null);
         return null;
@@ -139,11 +174,13 @@ export function ChildProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    const t = getChildToken();
+    if (t) childLogout(supabase, t).catch(() => {});
     clearChildToken();
     setToken(null);
     setProfile(null);
     setError(null);
-  }, []);
+  }, [supabase]);
 
   // Realtime: counters / photo / data change for this person's enrollments
   // (anon can subscribe; RLS on realtime may hide payloads — we only use it

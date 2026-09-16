@@ -23,6 +23,10 @@ insert into public.profiles (id, full_name, user_id, phone, role, status, church
   ('00000000-0000-0000-0000-000000000003', 'خادم ب', 'servant_b', '0102', 'class_servant', 'approved',
      '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002');
 insert into public.persons (id, national_id, name) values ('40000000-0000-0000-0000-000000000001', '29901010000001', 'مينا');
+-- 0042: the portal now needs a session token; for the legacy tests the raw code doubles as the token
+insert into public.child_sessions (person_id, token_hash, expires_at)
+select id, encode(digest(national_id, 'sha256'), 'hex'), now() + interval '1 day' from public.persons;
+
 insert into public.enrollments (id, person_id, church_id, service_id, class_id, points) values
   ('50000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001',
    '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 50);

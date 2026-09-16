@@ -205,6 +205,10 @@ export interface Enrollment {
   created_by: string | null;
   edited_at: string;
   edited_by: string | null;
+  /** migration 0042: 'child' (default) or 'servant' (mirror of a servant account) */
+  kind?: 'child' | 'servant';
+  /** the servant_enrollments.id this mirror row belongs to (kind = 'servant') */
+  servant_id?: string | null;
 }
 
 // Enrollment joined with its person (the shape most pages work with)
@@ -219,7 +223,40 @@ export interface AddPersonResult {
   national_id: string;
   person_created: boolean;
   already_enrolled: boolean;
+  /** migration 0042: true when the child has a portal password */
+  has_password?: boolean;
 }
+
+// ---------- Child accounts (migration 0042) ----------
+export type ChildJoinRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface ChildJoinRequest {
+  id: string;
+  code: string;
+  name: string;
+  gender: 'male' | 'female' | null;
+  birthdate: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  image_url: string | null;
+  church_id: string;
+  service_id: string;
+  class_id: string;
+  status: ChildJoinRequestStatus;
+  decision_note: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  person_id: string | null;
+  enrollment_id: string | null;
+  created_at: string;
+}
+
+export const CHILD_JOIN_REQUEST_STATUS_LABELS: Record<ChildJoinRequestStatus, string> = {
+  pending: 'قيد المراجعة',
+  approved: 'مقبول',
+  rejected: 'مرفوض',
+};
 
 // Egypt phone: displayed prefix +2 followed by exactly 11 digits (e.g. 01xxxxxxxxx)
 export const PHONE_PREFIX = '+2';

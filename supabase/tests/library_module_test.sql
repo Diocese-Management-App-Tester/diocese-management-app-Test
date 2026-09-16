@@ -28,7 +28,11 @@ insert into public.servant_enrollments (id, full_name, user_id, phone, role, sta
      '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', null);
 insert into public.persons (id, national_id, name) values
   ('40000000-0000-0000-0000-000000000001', '1001', 'John'),    -- class A
-  ('40000000-0000-0000-0000-000000000002', '1002', 'Peter');   -- class B
+  ('40000000-0000-0000-0000-000000000002', '1002', 'Peter');
+-- 0042: the portal now needs a session token; for the legacy tests the raw code doubles as the token
+insert into public.child_sessions (person_id, token_hash, expires_at)
+select id, encode(digest(national_id, 'sha256'), 'hex'), now() + interval '1 day' from public.persons;
+   -- class B
 insert into public.enrollments (id, person_id, church_id, service_id, class_id) values
   ('50000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001'),
   ('50000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002');

@@ -6,7 +6,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   Settings, Church, Layers, School, LogOut, ChevronLeft, User, Phone, ShieldCheck,
-  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown,
+  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown, GraduationCap,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import EditProfileModal from '@/components/EditProfileModal';
@@ -34,6 +34,28 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.status]);
   useDebouncedRealtime(supabase, 'settings-dcr-badge', [{ table: 'data_change_requests' }], loadPending, { enabled: !!profile });
+
+  // Pending child signups (0042) — badge on «إدارة المخدومين»
+  const [pendingChildren, setPendingChildren] = useState<number | null>(null);
+  const loadPendingChildren = async () => {
+    const { data } = await supabase.rpc('pending_child_join_requests_count');
+    setPendingChildren(typeof data === 'number' ? data : 0);
+  };
+  useEffect(() => {
+    if (profile?.status === 'approved') loadPendingChildren();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.status]);
+  useDebouncedRealtime(supabase, 'settings-cjr-badge', [{ table: 'child_join_requests' }], loadPendingChildren, { enabled: !!profile });
+
+  const childrenManageLink = (
+    <SettingsLink
+      href="/children/manage"
+      icon={<GraduationCap className="h-5 w-5 text-gold-600" />}
+      label="إدارة المخدومين"
+      desc="إضافة فردية وجماعية · طلبات التسجيل · دعوة بالـ QR"
+      badge={pendingChildren ?? undefined}
+    />
+  );
 
   const { visibleModules, loading: modulesLoading } = useModules();
   const { label } = useCustomization();
@@ -88,6 +110,7 @@ export default function SettingsPage() {
         <section id="management-links" className="mb-5">
           <h3 className="mb-2 text-sm font-extrabold text-slate-500">الإدارة</h3>
           <div className="card !p-0 divide-y divide-indigo-50 overflow-hidden">
+            {childrenManageLink}
             <SettingsLink
               href="/servants"
               icon={<Users className="h-5 w-5 text-emerald-600" />}
@@ -133,6 +156,7 @@ export default function SettingsPage() {
           <div className="card !p-0 divide-y divide-indigo-50 overflow-hidden">
             {/* Class servants have no management section — give them the
                 events link here so the hierarchy order still holds. */}
+            {!isManager && childrenManageLink}
             {!isManager && (
               <SettingsLink
                 href="/settings/events"
