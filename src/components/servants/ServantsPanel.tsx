@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  Users, ArrowRight, Loader2, X, Pencil, Save, Upload, User,
+  Loader2, X, Pencil, Save, Upload, User, UserPlus,
   Phone, ShieldCheck, PauseCircle, PlayCircle, Trash2, KeyRound, IdCard, Search, Check,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -23,7 +23,7 @@ import { ROLE_LABELS, STATUS_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX
 
 type Servant = ServantEnrollment & { person: Person | null };
 
-export default function ServantsPanel() {
+export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
   const { profile } = useAuth();
   const { profiles: permissionProfiles, grants, reload: reloadPermissions } = usePermissions();
   const supabase = createClient();
@@ -117,10 +117,18 @@ export default function ServantsPanel() {
 
   return (
     <>
-      <div className="relative mb-3">
-        <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        <input id="servants-search" className="input-field pr-9" placeholder="بحث بالاسم أو الكود أو الهاتف"
-          value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="mb-3 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input id="servants-search" className="input-field pr-9" placeholder="بحث بالاسم أو الكود أو الهاتف"
+            value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        {onAdd && (
+          <button id="servants-add-btn" type="button" onClick={onAdd}
+            className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-sm font-extrabold text-white shadow transition hover:bg-violet-700 active:scale-95">
+            <UserPlus className="h-4 w-4" /> إضافة
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -201,7 +209,14 @@ export default function ServantsPanel() {
             );
           })}
           {filtered.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">{q ? 'لا نتائج' : 'لا يوجد خدام بعد'}</li>
+            <li className="card py-12 text-center text-slate-400 font-bold">
+              {q ? 'لا نتائج' : 'لا يوجد خدام بعد'}
+              {!q && onAdd && (
+                <button type="button" onClick={onAdd} className="mx-auto mt-3 flex items-center gap-1.5 rounded-xl bg-violet-50 px-4 py-2 text-sm font-extrabold text-violet-700">
+                  <UserPlus className="h-4 w-4" /> أضف خادمًا الآن
+                </button>
+              )}
+            </li>
           )}
         </ul>
       )}
