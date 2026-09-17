@@ -1,8 +1,8 @@
 'use client';
 
 // ---------- إدارة المخدومين — one module page with 4 tabs (migrations 0042 + 0043) ----------
-//   المخدومين         → ManagePeoplePanel  (edit · delete · stop — children AND servants,
-//                        organized by church / service / class; stop a whole scope)
+//   المخدومين         → ManagePeoplePanel  (edit · move · stop · delete children,
+//                        grouped church → service → class; stop a whole scope)
 //   إضافة             → AddChildrenPanel   (single / bulk — moved here from /children/add)
 //   الطلبات           → ChildRequestsPanel (child signups awaiting approval, badge = count)
 //   دعوة مخدوم (QR)   → ChildInvitePanel   (scoped invite link + QR → /child/signup)
@@ -13,7 +13,7 @@
 import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight, GraduationCap, UserCheck, UserPlus, QrCode, Loader2, Users, UserCog } from 'lucide-react';
+import { ArrowRight, GraduationCap, UserCheck, UserPlus, QrCode, Loader2, UserCog } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -24,7 +24,7 @@ import ChildInvitePanel from '@/components/children/ChildInvitePanel';
 import ManagePeoplePanel from '@/components/children/ManagePeoplePanel';
 
 type Tab = 'people' | 'add' | 'requests' | 'invite';
-const TABS: { key: Tab; label: string; icon: typeof Users; color: string }[] = [
+const TABS: { key: Tab; label: string; icon: typeof UserCog; color: string }[] = [
   { key: 'people', label: 'المخدومين', icon: UserCog, color: 'text-amber-600' },
   { key: 'add', label: 'إضافة', icon: UserPlus, color: 'text-violet-600' },
   { key: 'requests', label: 'الطلبات', icon: UserCheck, color: 'text-red-600' },
@@ -61,19 +61,14 @@ function ChildrenManageModule() {
 
   return (
     <>
-      <section className="mb-4 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Link href="/settings" aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
-            <ArrowRight className="h-5 w-5" />
-          </Link>
-          <h2 className="flex items-center gap-2 text-lg font-extrabold">
-            <GraduationCap className="h-5 w-5 text-gold-600" />
-            إدارة المخدومين
-          </h2>
-        </div>
-        <Link id="manage-to-children" href="/children" className="btn-secondary !py-2 !px-3 flex items-center gap-1 text-sm">
-          <Users className="h-4 w-4" /> المخدومين
+      <section className="mb-4 flex items-center gap-2">
+        <Link href="/settings" aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
+          <ArrowRight className="h-5 w-5" />
         </Link>
+        <h2 className="flex items-center gap-2 text-lg font-extrabold">
+          <GraduationCap className="h-5 w-5 text-gold-600" />
+          إدارة المخدومين
+        </h2>
       </section>
 
       <div id="children-manage-tabs" className="mb-4 grid grid-cols-4 gap-1 rounded-2xl bg-indigo-50 p-1">

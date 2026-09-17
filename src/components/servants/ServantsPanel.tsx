@@ -1,29 +1,35 @@
 'use client';
 
-// ---------- إدارة الخدام — servant enrollments (architecture 0037) ----------
+// ---------- إدارة الخدام → الخدام — servant enrollments (architecture 0037) ----------
 // One card per servant enrollment (person + role + scope). Managers edit the
 // person data (mirrored into the enrollment by DB triggers), the role /
-// scope, suspend / delete, and connect the servant to PERMISSION PROFILES
-// (`permissions` rows) within their own level.
+// scope (church → service → class), suspend / delete, and connect the
+// servant to PERMISSION PROFILES (`permissions` rows) within their level.
+//
+// Twin of إدارة المخدومين → المخدومين (ManagePeoplePanel) — SAME shared
+// pieces (ScopeTree.tsx): search · كنيسة → خدمة → فصل filters · الكل / يعمل /
+// موقوف tabs · nested church → service → class grouping with ⏸ إيقاف الكل /
+// ▶ تفعيل الكل per node · «إيقاف / تفعيل نطاق كامل» card.
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
 import {
-  Loader2, X, Pencil, Save, Upload, User, UserPlus,
-  Phone, ShieldCheck, PauseCircle, PlayCircle, Trash2, KeyRound, IdCard, Search, Check,
+  Loader2, X, Pencil, Save, Upload, IdCard, Phone, ShieldCheck, PauseCircle, PlayCircle, Trash2, KeyRound, Check,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { usePermissions } from '@/lib/permissions-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
+import { ALL } from '@/lib/queries';
 import ResetPasswordSection from '@/components/ResetPasswordSection';
 import { EditCodeModal } from '@/components/PersonDataModals';
 import { changeServantCode, resetServantPassword, servantAccountMessage } from '@/lib/servant-account';
-import ScopeOrganizer, { organize, type OrganizeBy, type OrganizeDir } from '@/components/ScopeOrganizer';
+import {
+  ScopeFilters, ScopeTreeView, PersonCard, BulkScopeStatusCard, PanelNotice, buildScopeTree,
+  type StatusFilter, type ScopeSelection, type ScopeNode,
+} from '@/components/ScopeTree';
 import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, PermissionProfile } from '@/lib/types';
-import { ROLE_LABELS, STATUS_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, DEFAULT_PASSWORD, type Gender } from '@/lib/types';
+import { ROLE_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
 
 export type Servant = ServantEnrollment & { person: Person | null };
 
@@ -37,21 +43,24 @@ export const canManageServant = (profile: ServantEnrollment | null | undefined, 
   return false;
 };
 
-export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
+export default function ServantsPanel() {
   const { profile } = useAuth();
   const { profiles: permissionProfiles, grants, reload: reloadPermissions } = usePermissions();
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
   const [servants, setServants] = useState<Servant[]>([]);
   const [churches, setChurches] = useState<Church[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
   const [editing, setEditing] = useState<Servant | null>(null);
   const [permsFor, setPermsFor] = useState<Servant | null>(null);
-  const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
-  // 0043: organize by church / service / class
-  const [orgBy, setOrgBy] = useState<OrganizeBy>('class');
-  const [orgDir, setOrgDir] = useState<OrganizeDir>('asc');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+
+  // filters — same as إدارة المخدومين
+  const [scope, setScope] = useState<ScopeSelection>({ church: ALL, service: ALL, class: ALL });
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [q, setQ] = useState('');
 
   const isManager = profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
 
@@ -59,7 +68,7 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
 
   const load = useCallback(async () => {
     const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
-      supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').neq('status', 'pending').order('full_name'),
+      supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').in('status', ['approved', 'suspended']).order('full_name'),
       supabase.from('churches').select('*').order('name'),
       supabase.from('services').select('*').order('name'),
       supabase.from('classes').select('*').order('name'),
@@ -77,9 +86,7 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
 
   useDebouncedRealtime(supabase, 'servants-page', [{ table: SERVANTS_TABLE }, { table: 'persons' }], load, { enabled: !!profile });
 
-  const churchName = (id: string | null) => churches.find((c) => c.id === id)?.name;
-  const serviceName = (id: string | null) => services.find((s) => s.id === id)?.name;
-  const className = (id: string | null) => classes.find((c) => c.id === id)?.name;
+  const lookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
 
   // permission profiles per servant (from the grants the caller may see)
   const profilesOf = useMemo(() => {
@@ -93,161 +100,165 @@ export default function ServantsPanel({ onAdd }: { onAdd?: () => void }) {
     return out;
   }, [grants, permissionProfiles]);
 
-  const filtered = useMemo(() => {
+  // scope + search (status kept separate so the tab counters stay right)
+  const scoped = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return servants;
     return servants.filter((s) =>
-      s.full_name.toLowerCase().includes(t)
-      || (s.person?.national_id ?? s.user_id).toLowerCase().includes(t)
-      || (s.person?.phone ?? s.phone ?? '').includes(t)
+      (scope.church === ALL || s.church_id === scope.church)
+      && (scope.service === ALL || s.service_id === scope.service)
+      && (scope.class === ALL || s.class_id === scope.class)
+      && (!t
+        || s.full_name.toLowerCase().includes(t)
+        || (s.person?.national_id ?? s.user_id).toLowerCase().includes(t)
+        || (s.person?.phone ?? s.phone ?? '').includes(t))
     );
-  }, [servants, q]);
+  }, [servants, q, scope]);
 
-  const groups = useMemo(
-    () => organize(filtered, orgBy, orgDir, { churches, services, classes }, (s) => s.full_name),
-    [filtered, orgBy, orgDir, churches, services, classes]
+  const counts = useMemo(() => {
+    const stopped = scoped.filter((s) => s.status === 'suspended').length;
+    return { all: scoped.length, active: scoped.length - stopped, stopped };
+  }, [scoped]);
+
+  const visible = useMemo(
+    () => statusFilter === 'all' ? scoped : scoped.filter((s) => (statusFilter === 'stopped') === (s.status === 'suspended')),
+    [scoped, statusFilter]
   );
 
+  const tree = useMemo(() => buildScopeTree(visible, lookups, (s) => s.full_name), [visible, lookups]);
+
+  const flash = (tone: 'ok' | 'err', text: string) => {
+    setNotice({ tone, text });
+    setTimeout(() => setNotice(null), 4000);
+  };
+
+  // ---------- per-row ----------
   const toggleSuspend = async (p: ServantEnrollment) => {
     const next = p.status === 'suspended' ? 'approved' : 'suspended';
-    await supabase.from(SERVANTS_TABLE).update({ status: next }).eq('id', p.id);
-    load();
+    if (next === 'suspended' && !confirm(`إيقاف الخادم «${p.full_name}»؟\n\nلن يستطيع الدخول إلى التطبيق حتى تعيد تفعيله. بياناته وصلاحياته تبقى كما هي.`)) return;
+    setBusy(p.id);
+    const { error } = await supabase.from(SERVANTS_TABLE).update({ status: next }).eq('id', p.id);
+    setBusy(null);
+    if (error) return flash('err', 'تعذر تغيير حالة الخادم — تأكد من صلاحياتك');
+    setServants((ss) => ss.map((s) => (s.id === p.id ? { ...s, status: next } : s)));
+    flash('ok', next === 'suspended' ? `تم إيقاف ${p.full_name}` : `تم تفعيل ${p.full_name}`);
   };
 
   const remove = async (p: ServantEnrollment) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الخادم "${p.full_name}"؟ لا يمكن التراجع.`)) return;
-    await supabase.from(SERVANTS_TABLE).delete().eq('id', p.id);
+    if (!window.confirm(`هل أنت متأكد من حذف الخادم «${p.full_name}» وحسابه؟ لا يمكن التراجع.`)) return;
+    setBusy(p.id);
+    const { error } = await supabase.from(SERVANTS_TABLE).delete().eq('id', p.id);
+    setBusy(null);
+    if (error) return flash('err', 'تعذر حذف الخادم — تأكد من صلاحياتك');
+    flash('ok', `تم حذف ${p.full_name}`);
+    load();
+  };
+
+  // ---------- node (scope) — RPC set_enrollments_status(kind = servant) ----------
+  const setNodeStatus = async (n: ScopeNode<Servant>, status: 'active' | 'stopped') => {
+    if (!n.scope.church) return;
+    const verb = status === 'stopped' ? 'إيقاف' : 'تفعيل';
+    if (!confirm(`${verb} كل الخدام في «${n.name}» (${n.rows.length})؟`)) return;
+    setBusy(`node:${n.key}`);
+    const { data, error } = await supabase.rpc('set_enrollments_status', {
+      p_status: status, p_church: n.scope.church, p_service: n.scope.service, p_class: n.scope.class, p_kind: 'servant',
+    });
+    setBusy(null);
+    if (error) return flash('err', 'تعذر تنفيذ العملية — تأكد من صلاحياتك على هذا النطاق وتحديث قاعدة البيانات (0043)');
+    const r = (data ?? {}) as { servants?: number };
+    flash('ok', `تم ${verb} ${r.servants ?? 0} — ${n.name}`);
     load();
   };
 
   if (!isManager) {
     return (
-      <>
-        <div className="card py-12 text-center text-slate-400 font-bold">
-          هذه الصفحة متاحة للمديرين فقط
-        </div>
-      </>
+      <div className="card py-12 text-center text-slate-400 font-bold">
+        هذه الصفحة متاحة للمديرين فقط
+      </div>
     );
   }
 
   return (
     <>
-      <div className="mb-3 flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input id="servants-search" className="input-field pr-9" placeholder="بحث بالاسم أو الكود أو الهاتف"
-            value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-        {onAdd && (
-          <button id="servants-add-btn" type="button" onClick={onAdd}
-            className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-sm font-extrabold text-white shadow transition hover:bg-violet-700 active:scale-95">
-            <UserPlus className="h-4 w-4" /> إضافة
-          </button>
-        )}
-      </div>
+      <ScopeFilters
+        idPrefix="servants"
+        search={q} onSearch={setQ} placeholder="بحث بالاسم أو الكود أو الهاتف..."
+        scope={scope} onScope={setScope}
+        status={statusFilter} onStatus={setStatusFilter}
+        lookups={lookups} counts={counts}
+      />
 
-      <ScopeOrganizer idPrefix="servants-organize" by={orgBy} dir={orgDir} onBy={setOrgBy} onDir={setOrgDir} total={filtered.length} />
+      <BulkScopeStatusCard kind="servant" lookups={lookups} initial={scope} stoppedCount={counts.stopped}
+        onDone={(msg, ok) => { flash(ok ? 'ok' : 'err', msg); if (ok) load(); }} />
+
+      <PanelNotice notice={notice} />
 
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
-      ) : (
-        <div className="space-y-4">
-          {groups.map((g) => (
-            <section key={g.key} id={`servants-group-${g.key}`}>
-              {g.title && (
-                <h3 className="sticky top-[71px] z-10 mb-2 flex items-center justify-between rounded-xl bg-emerald-50/95 px-3 py-1.5 text-xs font-extrabold text-emerald-800 backdrop-blur">
-                  <span className="truncate">{g.title}</span>
-                  <span className="badge bg-white text-emerald-700">{g.rows.length}</span>
-                </h3>
-              )}
-              <ul className="space-y-3">
-                {g.rows.map((p) => {
-                  const pps = profilesOf.get(p.id) ?? [];
-                  const photo = p.person?.image_url ?? p.photo_url;
-                  return (
-                    <li key={p.id} className={`card ${p.status === 'suspended' ? 'opacity-60' : ''}`}>
-                      <div className="flex items-start gap-3">
-                        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-emerald-50 ring-2 ring-emerald-100 flex items-center justify-center">
-                          {photo ? (
-                            <Image src={photo} alt={p.full_name} fill sizes="48px" className="object-cover" />
-                          ) : (
-                            <User className="h-6 w-6 text-emerald-400" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-extrabold truncate">{p.full_name}</p>
-                          <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                            <span className="badge bg-primary-100 text-primary-700">
-                              <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
-                            </span>
-                            {p.status !== 'approved' && (
-                              <span className="badge bg-amber-100 text-amber-700">{STATUS_LABELS[p.status]}</span>
-                            )}
-                            <span className="flex items-center gap-1" dir="ltr">
-                              <IdCard className="h-3 w-3" /> {p.person?.national_id ?? p.user_id}
-                            </span>
-                            <span className="flex items-center gap-1" dir="ltr">
-                              <Phone className="h-3 w-3" /> {p.person?.phone ?? p.phone}
-                            </span>
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {[churchName(p.church_id), serviceName(p.service_id), className(p.class_id)]
-                              .filter(Boolean).join(' ← ') || 'بدون نطاق محدد'}
-                          </p>
-                          {p.role !== 'owner' && (
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                              <KeyRound className="h-3 w-3 text-slate-400" />
-                              {pps.length === 0 ? (
-                                <span className="text-[11px] font-bold text-slate-400">بدون ملف صلاحيات</span>
-                              ) : pps.map((pp) => (
-                                <span key={pp.id} className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ backgroundColor: pp.color }}>
-                                  {pp.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {canManage(p) && (
-                        <div className="mt-3 grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
-                          <button onClick={() => setEditing(p)}
-                            className="flex items-center justify-center gap-1.5 rounded-xl bg-primary-50 py-2 text-xs font-bold text-primary-600 hover:bg-primary-100 transition">
-                            <Pencil className="h-3.5 w-3.5" /> تعديل
-                          </button>
-                          <button onClick={() => setPermsFor(p)}
-                            className="flex items-center justify-center gap-1.5 rounded-xl bg-violet-50 py-2 text-xs font-bold text-violet-600 hover:bg-violet-100 transition">
-                            <KeyRound className="h-3.5 w-3.5" /> الصلاحيات
-                          </button>
-                          <button onClick={() => toggleSuspend(p)}
-                            className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold transition ${
-                              p.status === 'suspended' ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}>
-                            {p.status === 'suspended'
-                              ? (<><PlayCircle className="h-3.5 w-3.5" /> تفعيل</>)
-                              : (<><PauseCircle className="h-3.5 w-3.5" /> إيقاف</>)}
-                          </button>
-                          <button onClick={() => remove(p)}
-                            className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2 text-xs font-bold text-red-600 hover:bg-red-100 transition">
-                            <Trash2 className="h-3.5 w-3.5" /> حذف
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))}
-          {filtered.length === 0 && (
-            <div className="card py-12 text-center text-slate-400 font-bold">
-              {q ? 'لا نتائج' : 'لا يوجد خدام بعد'}
-              {!q && onAdd && (
-                <button type="button" onClick={onAdd} className="mx-auto mt-3 flex items-center gap-1.5 rounded-xl bg-violet-50 px-4 py-2 text-sm font-extrabold text-violet-700">
-                  <UserPlus className="h-4 w-4" /> أضف خادمًا الآن
-                </button>
-              )}
-            </div>
-          )}
+      ) : visible.length === 0 ? (
+        <div className="card py-12 text-center text-slate-400 font-bold">
+          {q ? 'لا نتائج' : statusFilter === 'stopped' ? 'لا يوجد خدام موقوفون في هذا النطاق' : 'لا يوجد خدام في هذا النطاق'}
         </div>
+      ) : (
+        <ScopeTreeView
+          nodes={tree}
+          kind="servant"
+          idPrefix="servants"
+          nodeAction={(n) => n.scope.church && n.rows.some(canManage) ? {
+            allStopped: n.rows.every((r) => r.status === 'suspended'),
+            busy: busy === `node:${n.key}`,
+            onToggle: () => setNodeStatus(n, n.rows.every((r) => r.status === 'suspended') ? 'active' : 'stopped'),
+          } : null}
+          renderRow={(p) => {
+            const pps = profilesOf.get(p.id) ?? [];
+            const stopped = p.status === 'suspended';
+            const rowBusy = busy === p.id;
+            const manageable = canManage(p);
+            return (
+              <PersonCard
+                key={p.id}
+                id={`servant-row-${p.id}`}
+                kind="servant"
+                name={p.full_name}
+                photo={p.person?.image_url ?? p.photo_url}
+                stopped={stopped}
+                badges={
+                  <span className="badge bg-primary-100 text-primary-700">
+                    <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
+                  </span>
+                }
+                meta={
+                  <>
+                    <span className="flex items-center gap-1" dir="ltr"><IdCard className="h-3 w-3" /> {p.person?.national_id ?? p.user_id}</span>
+                    {(p.person?.phone ?? p.phone) && (
+                      <span className="flex items-center gap-1" dir="ltr"><Phone className="h-3 w-3" /> {p.person?.phone ?? p.phone}</span>
+                    )}
+                  </>
+                }
+                extra={p.role !== 'owner' ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    <KeyRound className="h-3 w-3 text-slate-400" />
+                    {pps.length === 0 ? (
+                      <span className="text-[11px] font-bold text-slate-400">بدون ملف صلاحيات</span>
+                    ) : pps.map((pp) => (
+                      <span key={pp.id} className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ backgroundColor: pp.color }}>
+                        {pp.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : undefined}
+                actions={manageable ? [
+                  { id: `edit-${p.id}`, tone: 'primary', icon: <Pencil className="h-3.5 w-3.5" />, label: 'تعديل', onClick: () => setEditing(p), disabled: rowBusy },
+                  { id: `perms-${p.id}`, tone: 'violet', icon: <KeyRound className="h-3.5 w-3.5" />, label: 'الصلاحيات', onClick: () => setPermsFor(p), disabled: rowBusy },
+                  { id: `stop-${p.id}`, tone: stopped ? 'emerald' : 'amber', busy: rowBusy,
+                    icon: stopped ? <PlayCircle className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />,
+                    label: stopped ? 'تفعيل' : 'إيقاف', onClick: () => toggleSuspend(p) },
+                  { id: `delete-${p.id}`, tone: 'red', icon: <Trash2 className="h-3.5 w-3.5" />, label: 'حذف', onClick: () => remove(p), disabled: rowBusy },
+                ] : undefined}
+                note={!manageable ? (p.id === profile?.id ? 'هذا حسابك — عدّله من الإعدادات ← تعديل بياناتي' : 'خارج نطاق إدارتك') : undefined}
+              />
+            );
+          }}
+        />
       )}
 
       {editing && profile && (

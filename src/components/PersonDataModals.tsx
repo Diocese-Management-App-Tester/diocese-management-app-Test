@@ -2,7 +2,9 @@
 
 // ---------- Person data modals (البيانات job on the children page) ----------
 // ViewPersonModal   — عرض البيانات: full person data + QR + all enrollments
-// EditPersonModal   — تعديل البيانات: edits the persons table (identity data)
+// EditPersonModal   — تعديل المخدوم: persons table (identity data) + moves
+//                     THIS enrollment to another church / service / class —
+//                     same form as إدارة الخدام → تعديل
 // DeletePersonModal — حذف الطفل: choose between removing THIS enrollment only
 //                     (from class/service/church) or deleting the person
 //                     COMPLETELY from the database (cascade via RPC).
@@ -37,18 +39,6 @@ const scopeName = (
   list: { id: string; name: string }[],
   fallback: string
 ) => list.find((x) => x.id === id)?.name ?? fallback;
-
-/** Normalize a raw phone into +2XXXXXXXXXXX or null; undefined = invalid */
-const normalizePhone = (raw: string): string | null | undefined => {
-  const digits = raw.replace(/\D/g, '');
-  if (!digits) return null;
-  let local = digits;
-  if (local.startsWith('20') && local.length === 13) local = local.slice(2);
-  else if (local.startsWith('2') && local.length === 12) local = local.slice(1);
-  if (local.length === PHONE_LOCAL_LENGTH - 1 && local.startsWith('1')) local = `0${local}`;
-  if (local.length !== PHONE_LOCAL_LENGTH) return undefined;
-  return `${PHONE_PREFIX}${local}`;
-};
 
 export function ModalFrame({
   title, icon, onClose, children,
@@ -207,36 +197,56 @@ export function ViewPersonModal({
 }
 
 // =====================================================================
-// 2. EDIT — تعديل البيانات (persons table)
+// 2. EDIT — تعديل البيانات (persons table + THIS enrollment's scope)
+// Same form as EditServantModal (إدارة الخدام → تعديل): code (confirmed
+// edit) · name · gender · phone (+2) · birthdate · address · notes ·
+// الكنيسة → الخدمة → الفصل · photo · reset password.
+// Changing the scope MOVES this enrollment (attendance + points follow);
+// the person data applies to all his enrollments.
 // =====================================================================
 export function EditPersonModal({
-  enrollment, onSaved, onClose,
+  enrollment, churches = [], services = [], classes = [], onSaved, onClose,
 }: {
   enrollment: EnrollmentWithPerson;
+  churches?: Church[];
+  services?: Service[];
+  classes?: ClassRoom[];
   onSaved: () => void;
   onClose: () => void;
 }) {
   const supabase = createClient();
   const person = enrollment.person;
   // 0042: a servant's mirror row → code/password changes go through the
-  // service-role API (auth account must follow the code)
+  // service-role API (auth account must follow the code); his scope is
+  // managed from إدارة الخدام, not here.
   const isServant = enrollment.kind === 'servant' && !!enrollment.servant_id;
+  const canMove = !isServant && churches.length > 0;
 
   const [name, setName] = useState(person.name);
   const [gender, setGender] = useState<Gender | ''>(person.gender ?? '');
   const [birthdate, setBirthdate] = useState(person.birthdate ?? '');
-  const [phone, setPhone] = useState(person.phone ?? '');
+  const [phoneLocal, setPhoneLocal] = useState(
+    (person.phone ?? '').replace(/^\+2/, '').replace(/\D/g, '').slice(-PHONE_LOCAL_LENGTH)
+  );
   const [address, setAddress] = useState(person.address ?? '');
   const [notes, setNotes] = useState(person.notes ?? '');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  // ---- scope of THIS enrollment (church → service → class) ----
+  const [churchId, setChurchId] = useState(enrollment.church_id);
+  const [serviceId, setServiceId] = useState(enrollment.service_id);
+  const [classId, setClassId] = useState(enrollment.class_id);
+  const scopedServices = services.filter((s) => !churchId || s.church_id === churchId);
+  const scopedClasses = classes.filter((c) => (!churchId || c.church_id === churchId) && (!serviceId || c.service_id === serviceId));
+  const scopeChanged = churchId !== enrollment.church_id || serviceId !== enrollment.service_id || classId !== enrollment.class_id;
+
   // ---- Code (national id / QR) — shown disabled, edited only through
   //      a confirmed flow: confirm → modal (generate / scan) → confirm ----
   const [code, setCode] = useState(person.national_id);
   const [codeModal, setCodeModal] = useState(false);
-  const codeChanged = code !== person.national_id;
+  const codeChanged = code.trim() !== person.national_id;
 
   const startCodeEdit = () => {
     const ok = confirm(
@@ -245,12 +255,18 @@ export function EditPersonModal({
     if (ok) setCodeModal(true);
   };
 
-  const save = async () => {
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
     if (!name.trim()) return setError('الاسم مطلوب');
-    const normPhone = normalizePhone(phone);
-    if (normPhone === undefined) return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا (01xxxxxxxxx)`);
+    if (phoneLocal && phoneLocal.length !== PHONE_LOCAL_LENGTH) {
+      return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا بعد ${PHONE_PREFIX}`);
+    }
     const newCode = code.trim();
     if (!newCode) return setError('الكود (الرقم القومي) مطلوب');
+    if (canMove && scopeChanged && (!churchId || !serviceId || !classId)) {
+      return setError('اختر الكنيسة والخدمة والفصل الجديد');
+    }
 
     // Final confirmation before persisting a changed code
     if (codeChanged) {
@@ -259,9 +275,16 @@ export function EditPersonModal({
       );
       if (!ok) return;
     }
+    if (canMove && scopeChanged) {
+      const from = [scopeName(enrollment.church_id, churches, 'الكنيسة'), scopeName(enrollment.service_id, services, 'الخدمة'), scopeName(enrollment.class_id, classes, 'الفصل')].join(' ← ');
+      const to = [scopeName(churchId, churches, 'الكنيسة'), scopeName(serviceId, services, 'الخدمة'), scopeName(classId, classes, 'الفصل')].join(' ← ');
+      const ok = confirm(
+        `نقل «${person.name}»\n\nمن: ${from}\nإلى: ${to}\n\nينتقل معه حضوره ونقاطه في هذا التسجيل.\n\nهل أنت متأكد؟`
+      );
+      if (!ok) return;
+    }
 
     setBusy(true);
-    setError('');
 
     let image_url = person.image_url;
     if (photoFile) {
@@ -279,13 +302,14 @@ export function EditPersonModal({
       if (!r.ok) { setBusy(false); return setError(servantAccountMessage(r.error)); }
     }
 
+    // 1) person data (all enrollments)
     const { error: err } = await supabase
       .from('persons')
       .update({
         name: name.trim(),
         gender: gender || null,
         birthdate: birthdate || null,
-        phone: normPhone,
+        phone: phoneLocal ? `${PHONE_PREFIX}${phoneLocal}` : null,
         address: address.trim() || null,
         notes: notes.trim() || null,
         image_url,
@@ -293,87 +317,39 @@ export function EditPersonModal({
       })
       .eq('id', person.id);
 
-    setBusy(false);
     if (err) {
+      setBusy(false);
       if (codeChanged && (err.code === '23505' || /duplicate|unique/i.test(err.message ?? ''))) {
         return setError('هذا الكود مستخدم بالفعل لشخص آخر — اختر كودًا مختلفًا');
       }
       return setError('تعذر حفظ التعديلات، حاول مجددًا');
     }
+
+    // 2) move THIS enrollment (scope) — attendance + points follow
+    if (canMove && scopeChanged) {
+      const { error: me } = await supabase
+        .from('enrollments')
+        .update({ church_id: churchId, service_id: serviceId, class_id: classId })
+        .eq('id', enrollment.id);
+      if (me) {
+        setBusy(false);
+        if (me.code === '23505' || /duplicate|unique/i.test(me.message ?? '')) {
+          return setError('هذا المخدوم مسجَّل بالفعل في الفصل المختار — احذف أحد التسجيلين بدلًا من النقل');
+        }
+        return setError('تم حفظ البيانات لكن تعذر النقل — تأكد من صلاحياتك على الفصل الجديد');
+      }
+    }
+
+    setBusy(false);
     onSaved();
     onClose();
   };
 
   return (
-    <ModalFrame title="تعديل البيانات" icon={<Save className="h-5 w-5 text-amber-600" />} onClose={onClose}>
-      <div className="space-y-3">
+    <ModalFrame title={isServant ? 'تعديل الخادم' : 'تعديل المخدوم'} icon={<Pencil className="h-5 w-5 text-amber-600" />} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        {/* code (national id / QR) — disabled + confirmed edit */}
         <div>
-          <label className="mb-1 block text-xs font-bold text-slate-500">الاسم *</label>
-          <input id="edit-person-name" className="input-field" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">النوع</label>
-            <select
-              id="edit-person-gender"
-              className="input-field appearance-none"
-              value={gender}
-              onChange={(e) => setGender(e.target.value as Gender | '')}
-            >
-              <option value="">—</option>
-              {(Object.keys(GENDER_LABELS) as Gender[]).map((g) => (
-                <option key={g} value={g}>{GENDER_LABELS[g]}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">تاريخ الميلاد</label>
-            <input
-              id="edit-person-birthdate"
-              type="date"
-              className="input-field"
-              value={birthdate}
-              onChange={(e) => setBirthdate(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-bold text-slate-500">رقم الهاتف</label>
-          <input
-            id="edit-person-phone"
-            className="input-field"
-            dir="ltr"
-            placeholder="01xxxxxxxxx"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-bold text-slate-500">العنوان</label>
-          <input id="edit-person-address" className="input-field" value={address} onChange={(e) => setAddress(e.target.value)} />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-bold text-slate-500">ملاحظات</label>
-          <textarea id="edit-person-notes" className="input-field" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </div>
-
-        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-primary-300 bg-primary-50/50 px-4 py-3 text-sm font-bold text-primary-600">
-          <Upload className="h-4 w-4" />
-          {photoFile ? photoFile.name : person.image_url ? 'تغيير الصورة' : 'إضافة صورة (اختياري)'}
-          <input type="file" accept="image/*" className="hidden"
-            onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
-        </label>
-
-        {/* Code (national id / QR) — disabled field + confirmed edit button */}
-        <div>
-          <label className="mb-1 flex items-center gap-1 text-xs font-bold text-slate-500">
-            <IdCard className="h-3.5 w-3.5 text-primary-500" />
-            الكود (الرقم القومي / QR)
-          </label>
           <div className="flex gap-2">
             <input
               id="edit-person-code"
@@ -382,6 +358,7 @@ export function EditPersonModal({
               value={code}
               disabled
               readOnly
+              aria-label="الكود"
             />
             <button
               id="edit-person-code-edit"
@@ -397,27 +374,86 @@ export function EditPersonModal({
           </div>
           {codeChanged ? (
             <p className="mt-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
-              <span>
-                سيتغير الكود من <span dir="ltr">{person.national_id}</span> إلى <span dir="ltr">{code}</span> عند الحفظ
-              </span>
-              <button
-                id="edit-person-code-revert"
-                type="button"
-                onClick={() => setCode(person.national_id)}
-                className="shrink-0 rounded-lg bg-white px-2 py-1 text-amber-700 hover:bg-amber-100"
-              >
-                تراجع
-              </button>
+              <span>سيتغير الكود من <span dir="ltr">{person.national_id}</span> إلى <span dir="ltr">{code}</span> عند الحفظ</span>
+              <button id="edit-person-code-revert" type="button" onClick={() => setCode(person.national_id)}
+                className="shrink-0 rounded-lg bg-white px-2 py-1 text-amber-700 hover:bg-amber-100">تراجع</button>
             </p>
           ) : (
-            <p className="mt-1 text-[11px] text-slate-400">
-              الكود معطّل للحماية — اضغط زر التعديل لتغييره (توليد أو مسح كود)
-            </p>
+            <p className="mt-1 text-[11px] text-slate-400"><IdCard className="inline h-3 w-3" /> الكود = الرقم القومي / QR — اضغط زر التعديل لتغييره (توليد أو مسح كود)</p>
           )}
         </div>
 
+        <input id="edit-person-name" className="input-field" placeholder="الاسم الكامل *" value={name}
+          onChange={(e) => setName(e.target.value)} required />
+
+        <div className="grid grid-cols-2 gap-2">
+          <button id="edit-person-gender-male" type="button" aria-pressed={gender === 'male'} onClick={() => setGender(gender === 'male' ? '' : 'male')}
+            className={`rounded-xl py-2 text-sm font-extrabold transition ${gender === 'male' ? 'bg-primary-600 text-white' : 'bg-primary-50 text-primary-600'}`}>
+            {GENDER_LABELS.male}
+          </button>
+          <button id="edit-person-gender-female" type="button" aria-pressed={gender === 'female'} onClick={() => setGender(gender === 'female' ? '' : 'female')}
+            className={`rounded-xl py-2 text-sm font-extrabold transition ${gender === 'female' ? 'bg-pink-500 text-white' : 'bg-pink-50 text-pink-500'}`}>
+            {GENDER_LABELS.female}
+          </button>
+        </div>
+
+        <div className="flex items-stretch overflow-hidden rounded-xl border border-indigo-100 bg-white focus-within:ring-2 focus-within:ring-primary-300" dir="ltr">
+          <span className="flex items-center bg-indigo-50 px-3 text-sm font-extrabold text-primary-700">{PHONE_PREFIX}</span>
+          <input id="edit-person-phone" type="tel" inputMode="numeric" className="w-full px-3 py-2.5 text-sm font-bold outline-none" placeholder="01xxxxxxxxx"
+            value={phoneLocal} maxLength={PHONE_LOCAL_LENGTH}
+            onChange={(e) => setPhoneLocal(e.target.value.replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH))} />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-bold text-slate-500">تاريخ الميلاد</label>
+          <input id="edit-person-birthdate" type="date" className="input-field" value={birthdate} onChange={(e) => setBirthdate(e.target.value)} dir="ltr" />
+        </div>
+        <input id="edit-person-address" className="input-field" placeholder="العنوان" value={address} onChange={(e) => setAddress(e.target.value)} />
+        <textarea id="edit-person-notes" className="input-field min-h-[60px]" placeholder="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} />
+
+        {/* scope of THIS enrollment — الكنيسة → الخدمة → الفصل */}
+        {canMove && (
+          <>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">الكنيسة</label>
+              <select id="edit-person-church" className="input-field" value={churchId}
+                onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}>
+                {churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">الخدمة</label>
+              <select id="edit-person-service" className="input-field" value={serviceId}
+                onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}>
+                <option value="">اختر الخدمة *</option>
+                {scopedServices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">الفصل</label>
+              <select id="edit-person-class" className="input-field" value={classId} onChange={(e) => setClassId(e.target.value)}>
+                <option value="">اختر الفصل *</option>
+                {scopedClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            {scopeChanged && (
+              <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                سيُنقل هذا التسجيل إلى النطاق الجديد عند الحفظ — ينتقل معه الحضور والنقاط.
+              </p>
+            )}
+          </>
+        )}
+
+        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-primary-300 bg-primary-50/50 px-4 py-3 text-sm font-bold text-primary-600">
+          <Upload className="h-4 w-4" />
+          {photoFile ? photoFile.name : person.image_url ? 'تغيير الصورة' : 'إضافة صورة (اختياري)'}
+          <input type="file" accept="image/*" className="hidden"
+            onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)} />
+        </label>
+
         <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-          التعديل يسري على بيانات الشخص في كل تسجيلاته (كل الكنائس والخدمات والفصول)
+          تعديل البيانات الشخصية يسري على كل تسجيلات الشخص (كل الكنائس والخدمات والفصول)
         </p>
 
         {/* 0042: password reset — child portal password / servant login password */}
@@ -447,21 +483,22 @@ export function EditPersonModal({
 
         <button
           id="edit-person-save"
-          onClick={save}
+          type="submit"
           disabled={busy}
           className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
           {busy ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
         </button>
-      </div>
+      </form>
 
       {codeModal && (
         <EditCodeModal
           personId={person.id}
           currentCode={person.national_id}
           initialCode={code}
-          scope={{ churchId: enrollment.church_id, serviceId: enrollment.service_id, classId: enrollment.class_id }}
+          codeKind={isServant ? 'servant' : 'person'}
+          scope={{ churchId: churchId || enrollment.church_id, serviceId: serviceId || enrollment.service_id, classId: classId || enrollment.class_id }}
           onConfirm={(c) => { setCode(c); setCodeModal(false); }}
           onClose={() => setCodeModal(false)}
         />
