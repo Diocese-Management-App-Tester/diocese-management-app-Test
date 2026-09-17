@@ -107,7 +107,7 @@ function ServantsModule() {
         })}
       </div>
 
-      {tab === 'servants' && <ServantsPanel onAdd={() => setTab('add')} />}
+      {tab === 'servants' && <ServantsPanel />}
       {tab === 'add' && <AddServantsPanel />}
       {tab === 'approvals' && <ApprovalsPanel />}
       {tab === 'invite' && <InvitePanel />}
