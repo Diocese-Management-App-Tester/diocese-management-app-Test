@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/notifications/dispatch", "schedule": "0 3 * * *" }
+    { "path": "/api/notifications/dispatch", "schedule": "0 3 * * *" },
+    { "path": "/api/backup/cron", "schedule": "0 * * * *" }
   ]
 }
