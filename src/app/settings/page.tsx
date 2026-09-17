@@ -6,7 +6,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   Settings, Church, Layers, School, LogOut, ChevronLeft, User, Phone, ShieldCheck,
-  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown, GraduationCap,
+  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown, GraduationCap, DatabaseBackup,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import EditProfileModal from '@/components/EditProfileModal';
@@ -184,6 +184,15 @@ export default function SettingsPage() {
               label="إدارة نتائج الافتقاد"
               desc="نتائج افتقاد المخدومين (سيأتي، مريض، لم يرد...) — اسم ولون وأيقونة"
             />
+            {/* Backup & restore (0044) — owner only, right under the activity links */}
+            {isOwner && (
+              <SettingsLink
+                href="/settings/backup"
+                icon={<DatabaseBackup className="h-5 w-5 text-primary-600" />}
+                label="النسخ الاحتياطي والاسترجاع"
+                desc="نسخة كاملة أو جداول محددة تُحمَّل على الجهاز · استرجاع دمجًا أو استبدالاً · نسخ مجدولة"
+              />
+            )}
           </div>
         </section>
       )}

@@ -147,7 +147,19 @@ Besides the signup wizard, a manager can now **add servants himself** from **إ�
 - **A superior resets without the old password** — **إدارة الخدام → تعديل** / **إدارة المخدومين → المخدومين → تعديل** → «إعادة تعيين كلمة المرور» (new only: generate · **الافتراضية 000000** · typed). `POST /api/servants/account` now **refuses self** (`canManage` returns false for `actor.id === target.id`), so only owner / church manager / service manager within scope can do it. Children: `admin_set_child_password` as before; `child_change_password` accepts `000000` as the old one while no password was ever set.
 - `lookup_enrollments_by_national_id` (scanner) now returns `kind`, `servant_id`, `status`.
 
+### Backup & Restore — النسخ الاحتياطي والاسترجاع — migration 0044
+`supabase/migrations/0044_backup_restore.sql` · test `supabase/tests/backup_restore_test.sql` · **الإعدادات → النشاط → النسخ الاحتياطي والاسترجاع** (`/settings/backup`, **owner only**).
+
+**Backup (نسخة احتياطية)** — the button asks **what to back up**: `TableSelector` lists **every public table of the database** (read live from `pg_class` by `backup_tables()`, so new tables are picked up automatically) grouped in Arabic — الهيكل · الأشخاص والتسجيلات · الخدام والصلاحيات · الحضور والنقاط والافتقاد · الرسائل والإشعارات · الوحدات · الكروت · الإعدادات — with row counts, per-group toggles and **«الكل»** (default). **حسابات دخول الخدام** (`auth.users` of the servants: id · e-mail · **bcrypt hash** · metadata, via `backup_dump_auth_users()`) is a pseudo-row so passwords survive a restore. Rows are pulled page by page (`backup_dump_table(t, offset, limit)`, PK order) and the result is **one JSON file downloaded to the device** (`dma-backup_manual_<date>.json`, format `dma-backup` v1: `tables{name:{columns,rows}}`, `auth_users`, `counts`). A row is written to `backup_runs`.
+
+**Restore (استرجاع)** — pick the file from the device → parsed & validated → asks **what to restore** (the tables IN the file, «الكل» default; tables unknown to the DB are flagged and skipped) and the **mode**: **دمج** (upsert by primary key, nothing deleted) or **استبدال** (additionally deletes the rows the backup does not contain — type «استبدال» to confirm). Engine (`src/lib/backup.ts → restoreBackup`): `backup_restore_begin(mode, tables, meta)` creates a staging job (tables re-ordered **parents first** from the FK graph, `backup_topo_order`) → chunks of 500 rows are staged (`backup_restore_stage`) → replace mode runs `backup_restore_delete_missing` **children first** → `backup_restore_apply_chunk` upserts each chunk with the **user triggers disabled** (counters / mirrors / guards do not fire on restored history) using only the columns that exist both in the file and in the table → `backup_restore_finish`. Login accounts go through **`POST /api/backup/auth-restore`** (service role: `auth.admin.createUser({ id, email, password_hash })` / `updateUserById`). Progress bar per phase; result per table (upserted / deleted).
+
+**Scheduled backups (نسخ مجدولة)** — `backup_schedules`: name · **يوميًا / أسبوعيًا (يوم) / شهريًا (يوم الشهر)** · hour (Africa/Cairo) · الكل or a selection (+ login accounts) · keep last N. `next_run_at` is computed by trigger (`backup_next_run`). **`GET /api/backup/cron`** (Vercel Cron **hourly**, `vercel.json`; `CRON_SECRET` optional) runs `backup_schedules_due()`, exports with the service role, stores the file in the **private bucket `backups/<schedule>/<file>.json`**, prunes to `keep_last`, stamps the schedule (`backup_schedule_ran`). **تشغيل الآن** = `POST /api/backup/cron {schedule_id}`. The history (**السجل**, `backup_runs`, realtime) lists manual / scheduled / restore runs with status, counts, size; scheduled files have a **⬇ download-to-device** button (`GET /api/backup/file?run=<id>`) and can be deleted (`DELETE`).
+
+Server helpers live in `src/lib/server/backup-admin.ts` (`requireOwner`, `runSchedule`, `restoreAuthUsers`). Everything needs `SUPABASE_SERVICE_ROLE_KEY` only for the scheduled/auth parts — the manual backup & table restore run entirely from the browser through the owner-checked security-definer RPCs (`backup_allowed()` = owner or service role).
+
 ## Currently Completed Features
+- ✅ **النسخ الاحتياطي والاسترجاع (0044)**: owner-only page under الإعدادات → النشاط — backup asks what to back up (every DB table grouped in Arabic + servants' login accounts, «الكل» default) and downloads ONE JSON to the device; restore from a device file asks what to restore + دمج / استبدال, FK-ordered staged upsert with triggers off; scheduled backups (daily / weekly / monthly, Cairo hour, keep last N) run by Vercel Cron into the private `backups` bucket and are downloadable from the history
 - ✅ PWA: manifest (RTL/Arabic), service worker, installable, app icons — **name / icon / diocese name & logo configurable through Vercel env vars** (see Setup Guide § 4)
 - ✅ Multi-tenant Postgres schema with **full RLS** (`supabase/migrations/0001_schema.sql`)
 - ✅ Realtime enabled on all tables (dashboard, lists, approvals auto-update)
@@ -261,7 +273,7 @@ Besides the signup wizard, a manager can now **add servants himself** from **إ�
 
 ## Data Models & Storage
 - **Tables**: `churches`, `services`, `classes`, `profiles`, `children`, `attendance` — all with RLS + realtime
-- **Storage**: `church-logos` public bucket
+- **Storage**: `church-logos` public bucket · `photos` public bucket · `backups` **private** bucket (scheduled backup files, 0044)
 - **Helper functions**: `my_role()`, `my_church()`, `can_access()` etc. (security-definer, no RLS recursion)
 - **Triggers**: attendance insert/delete auto-updates child's `attendance_count` and `points`; profile guard prevents self-approval
 
