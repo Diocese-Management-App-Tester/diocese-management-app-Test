@@ -1,5 +1,6 @@
 // /api/backup/cron — run the DUE scheduled backups (migration 0044).
-//   GET   — Vercel Cron (hourly, see vercel.json). When CRON_SECRET is set the
+//   GET   — Vercel Cron (DAILY — the Hobby plan refuses to deploy crons that
+//           run more often; see vercel.json). When CRON_SECRET is set the
 //           request must carry `Authorization: Bearer <secret>` (Vercel adds it).
 //   POST  — the owner, from /settings/backup, «تشغيل الآن» for ONE schedule
 //           ({ schedule_id }) or every due one ({}).

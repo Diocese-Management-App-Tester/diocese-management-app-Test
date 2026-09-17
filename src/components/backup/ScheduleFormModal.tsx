@@ -139,7 +139,7 @@ export default function ScheduleFormModal({
           </div>
 
           <p className="rounded-2xl bg-slate-50 px-4 py-3 text-[11px] text-slate-500">
-            تُنفَّذ النسخ المجدولة على الخادم وتُحفظ في مخزن خاص بالتطبيق؛ تجدها في «السجل» وتحمّلها على جهازك بضغطة. يلزم تفعيل الـ Cron على Vercel (موجود في vercel.json).
+            تُنفَّذ النسخ المجدولة على الخادم وتُحفظ في مخزن خاص بالتطبيق؛ تجدها في «السجل» وتحمّلها على جهازك بضغطة. يفحص الخادم النسخ المستحقة مرة يوميًا (Vercel Cron ~4:30 ص بتوقيت القاهرة)، فالنسخة المستحقة تُنفَّذ في أول فحص بعد موعدها.
           </p>
           {error && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-bold text-red-600">{error}</p>}
         </div>
