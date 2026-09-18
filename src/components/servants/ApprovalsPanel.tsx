@@ -2,8 +2,9 @@
 
 // ---------- طلبات انضمام الخدام — approvals (architecture 0037) ----------
 // A pending request is a `servant_enrollments` row (status = pending) bound
-// to a person. The approver sets role + scope and may attach permission
-// profiles right away.
+// to a person. The approver sets role + PLACES (0045: one or many, through
+// ScopePicker → RPC set_servant_scopes) and may attach permission profiles
+// right away.
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
@@ -16,10 +17,25 @@ import { usePermissions } from '@/lib/permissions-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
-import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person } from '@/lib/types';
-import { ROLE_LABELS, SERVANTS_TABLE, GENDER_LABELS } from '@/lib/types';
+import ScopePicker, { scopeLabel, clampScope, type ScopeDepth } from '@/components/ScopePicker';
+import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, ScopeRef, ServantScope } from '@/lib/types';
+import { ROLE_LABELS, SERVANTS_TABLE, SERVANT_SCOPES_TABLE, GENDER_LABELS, allScopesOf } from '@/lib/types';
 
-type Request = ServantEnrollment & { person: Person | null };
+type Request = ServantEnrollment & { person: Person | null; extra_scopes?: ServantScope[] };
+
+/** How deep a place goes for a role. */
+export const roleDepth = (r: AppRole): ScopeDepth => r === 'church_manager' ? 'church' : r === 'service_manager' ? 'service' : 'class';
+
+/** Churches / services the approver may grant (mirror of SQL scope_grantable). */
+export function grantableLocks(approver: ServantEnrollment, approverScopes: ScopeRef[]) {
+  if (approver.role === 'owner') return { allowedChurches: undefined as string[] | undefined, lockService: null as string | null };
+  const churches = Array.from(new Set(approverScopes.map((s) => s.church_id)));
+  // a service manager bound to exactly one service (and nothing wider) is locked to it
+  const wholeChurch = approverScopes.some((s) => !s.service_id);
+  const services = Array.from(new Set(approverScopes.map((s) => s.service_id).filter(Boolean))) as string[];
+  const lockService = approver.role === 'service_manager' && !wholeChurch && services.length === 1 ? services[0] : null;
+  return { allowedChurches: churches.length ? churches : [approver.church_id ?? ''], lockService };
+}
 
 export default function ApprovalsPanel() {
   const { profile } = useAuth();
@@ -44,7 +60,15 @@ export default function ApprovalsPanel() {
       supabase.from('services').select('*').order('name'),
       supabase.from('classes').select('*').order('name'),
     ]);
-    setPending((p ?? []) as Request[]);
+    const reqs = (p ?? []) as Request[];
+    // 0045: the other places each request asked for
+    if (reqs.length) {
+      const { data: xs } = await supabase.from(SERVANT_SCOPES_TABLE).select('*').in('servant_id', reqs.map((r) => r.id));
+      const by = new Map<string, ServantScope[]>();
+      for (const x of (xs ?? []) as ServantScope[]) by.set(x.servant_id, [...(by.get(x.servant_id) ?? []), x]);
+      reqs.forEach((r) => { r.extra_scopes = by.get(r.id) ?? []; });
+    }
+    setPending(reqs);
     setChurches(ch ?? []);
     setServices(sv ?? []);
     setClasses(cl ?? []);
@@ -55,7 +79,7 @@ export default function ApprovalsPanel() {
     if (profile?.status === 'approved') load();
   }, [profile?.status, load]);
 
-  useDebouncedRealtime(supabase, 'approvals-page', [{ table: SERVANTS_TABLE }], load, { enabled: !!profile });
+  useDebouncedRealtime(supabase, 'approvals-page', [{ table: SERVANTS_TABLE }, { table: SERVANT_SCOPES_TABLE }], load, { enabled: !!profile });
 
   const isManager =
     profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
@@ -129,14 +153,20 @@ function ApprovalCard({
 }) {
   const supabase = createClient();
   const { profiles: permissionProfiles } = usePermissions();
+  const { scopes: approverScopes } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const [role, setRole] = useState<AppRole>('class_servant');
-  const [churchId, setChurchId] = useState(request.church_id ?? approver.church_id ?? '');
-  const [serviceId, setServiceId] = useState(request.service_id ?? approver.service_id ?? '');
-  const [classId, setClassId] = useState(request.class_id ?? '');
+  // 0045: the places — what the servant asked for (primary + extras), or the approver's own place
+  const requested = useMemo(() => allScopesOf(request, request.extra_scopes ?? []), [request]);
+  const [scopes, setScopes] = useState<ScopeRef[]>(
+    requested.length ? requested : approver.church_id ? [{ church_id: approver.church_id, service_id: approver.service_id, class_id: null }] : []
+  );
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
+  const lookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
+  const depth = roleDepth(role);
+  const locks = grantableLocks(approver, approverScopes);
 
   const grantableRoles: AppRole[] =
     approver.role === 'owner'
@@ -145,30 +175,48 @@ function ApprovalCard({
       ? ['service_manager', 'class_servant']
       : ['class_servant'];
 
-  const scopedServices = services.filter((s) => !churchId || s.church_id === churchId);
-  const scopedClasses = classes.filter((c) => !serviceId || c.service_id === serviceId);
-
-  const needService = role === 'service_manager' || role === 'class_servant';
-  const needClass = role === 'class_servant';
+  // the role decides the depth — clamp + dedupe the places when it changes
+  const onRole = (r: AppRole) => {
+    setRole(r);
+    const d = roleDepth(r);
+    const seen = new Set<string>();
+    setScopes((list) => list.map((s) => clampScope(s, d)).filter((s) => {
+      const k = `${s.church_id}|${s.service_id ?? ''}|${s.class_id ?? ''}`;
+      if (seen.has(k)) return false; seen.add(k); return true;
+    }));
+  };
 
   const approve = async () => {
     setError('');
-    if (!churchId) return setError('اختر الكنيسة');
+    if (scopes.length === 0) return setError('اختر مكان الخدمة (الكنيسة على الأقل)');
 
     setBusy(true);
+    const primary = clampScope(scopes[0], depth);
     const { error: err } = await supabase
       .from(SERVANTS_TABLE)
       .update({
         status: 'approved',
         role,
-        church_id: churchId,
-        service_id: needService ? (serviceId || null) : null,
-        class_id: needClass ? (classId || null) : null,
+        church_id: primary.church_id,
+        service_id: primary.service_id,
+        class_id: primary.class_id,
         approved_by: approver.id,
         approved_at: new Date().toISOString(),
       })
       .eq('id', request.id);
     if (err) { setBusy(false); return setError('تعذر الاعتماد، حاول مجدداً'); }
+
+    // 0045: every place (replaces the requested list; the primary is scopes[0])
+    const { error: se } = await supabase.rpc('set_servant_scopes', {
+      p_servant: request.id,
+      p_scopes: scopes.map((s) => clampScope(s, depth)),
+    });
+    if (se) {
+      setBusy(false);
+      return setError(se.message?.includes('scope_not_allowed')
+        ? 'أحد الأماكن خارج نطاق إدارتك — تم الاعتماد بالمكان الأساسي فقط'
+        : 'تم الاعتماد لكن تعذر حفظ باقي الأماكن (حدّث قاعدة البيانات 0045)');
+    }
 
     if (selectedProfiles.length) {
       await supabase.from('permissions').insert(
@@ -217,57 +265,36 @@ function ApprovalCard({
             <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400"><MapPin className="h-3 w-3" /> {person.address}</p>
           )}
           {person?.notes && <p className="mt-0.5 text-xs text-slate-400">📝 {person.notes}</p>}
-          {(request.church_id || request.service_id || request.class_id) && (
-            <p className="mt-1.5 inline-block rounded-lg bg-primary-50 px-2 py-1 text-xs font-bold text-primary-600">
-              طلب الانضمام إلى: {churches.find((c) => c.id === request.church_id)?.name ?? '—'}
-              {request.service_id ? ` ← ${services.find((s) => s.id === request.service_id)?.name ?? ''}` : ''}
-              {request.class_id ? ` ← ${classes.find((c) => c.id === request.class_id)?.name ?? ''}` : ''}
-            </p>
+          {requested.length > 0 && (
+            <div className="mt-1.5 rounded-lg bg-primary-50 px-2 py-1 text-xs font-bold text-primary-600">
+              <p>طلب الانضمام إلى{requested.length > 1 ? ` (${requested.length} أماكن)` : ''}:</p>
+              <ul className="mt-0.5 space-y-0.5">
+                {requested.map((s, i) => <li key={i}>• {scopeLabel(s, lookups)}</li>)}
+              </ul>
+            </div>
           )}
         </div>
       </div>
 
       <div className="mb-3 space-y-2">
-        <select className="input-field" value={role} onChange={(e) => setRole(e.target.value as AppRole)}>
+        <select className="input-field" value={role} onChange={(e) => onRole(e.target.value as AppRole)}>
           {grantableRoles.map((r) => (
             <option key={r} value={r}>{ROLE_LABELS[r]}</option>
           ))}
         </select>
 
-        <select
-          className="input-field"
-          value={churchId}
-          onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}
-          disabled={approver.role !== 'owner'}
-        >
-          <option value="">اختر الكنيسة</option>
-          {churches.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-
-        {needService && (
-          <select
-            className="input-field"
-            value={serviceId}
-            onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}
-            disabled={approver.role === 'service_manager'}
-          >
-            <option value="">كل الخدمات (بدون تحديد)</option>
-            {scopedServices.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        )}
-
-        {needClass && (
-          <select className="input-field" value={classId} onChange={(e) => setClassId(e.target.value)}>
-            <option value="">كل الفصول (بدون تحديد)</option>
-            {scopedClasses.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        )}
+        {/* 0045: one or many places (the first is the primary) */}
+        <ScopePicker
+          idPrefix={`approve-${request.id}`}
+          title="أماكن الخدمة"
+          value={scopes}
+          onChange={setScopes}
+          lookups={lookups}
+          depth={depth}
+          allowedChurches={locks.allowedChurches}
+          lockService={locks.lockService}
+          emptyText="اختر مكان الخدمة"
+        />
 
         {/* permission profiles (0037) */}
         {permissionProfiles.length > 0 && (

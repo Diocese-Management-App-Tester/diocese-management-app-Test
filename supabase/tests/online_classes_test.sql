@@ -301,7 +301,8 @@ do $$ begin
 end $$;
 reset role;
 select pg_temp.as_user('00000000-0000-0000-0000-000000000002');
-insert into public.online_class_messages (class_id, sender_profile_id, body) values ('60000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'أهلاً بكم');
+-- (+1s: the child's message was sent in the same transaction → same now(); keep the order deterministic)
+insert into public.online_class_messages (class_id, sender_profile_id, body, created_at) values ('60000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'أهلاً بكم', now() + interval '1 second');
 do $$
 declare l jsonb;
 begin

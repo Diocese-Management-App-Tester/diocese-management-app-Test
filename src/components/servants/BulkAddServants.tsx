@@ -321,7 +321,7 @@ export default function BulkAddServants({
         <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600">
           <MapPin className="h-4 w-4 text-primary-500" /> الدور ومكان الخدمة <span className="text-xs font-normal text-slate-400">(لكل الصفوف)</span>
         </p>
-        <RoleScopeFields scope={scope} approver={approver} churches={churches} idPrefix="bulk-srv" />
+        <RoleScopeFields scope={scope} approver={approver} churches={churches} services={services} classes={classes} idPrefix="bulk-srv" extraLabel="أماكن إضافية لكل الصفوف" />
       </div>
 
       {rows.length === 0 && (

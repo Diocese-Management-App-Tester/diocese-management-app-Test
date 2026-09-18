@@ -65,7 +65,7 @@ const SCOPE_LABEL: Record<'church' | 'service' | 'class', string> = {
 
 export default function StatsPage() {
   const pageName = useNavLabel('stats');
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const { now } = useAppDate();
   const supabase = createClient();
   const approved = profile?.status === 'approved';
@@ -221,7 +221,7 @@ export default function StatsPage() {
     [
       { table: 'attendance_log' },
       { table: 'points_log' },
-      { table: 'enrollments', filter: scopeFilter(profile) },
+      { table: 'enrollments', filter: scopeFilter(profile, scopes) },
     ],
     loadAll,
     { enabled: approved, delayMs: 2000 }

@@ -126,13 +126,31 @@ export function useDebouncedRealtime(
  * server only pushes changes he can actually see. Returns undefined for the
  * owner (sees everything) or when the column is not scoped.
  */
-export function scopeFilter(profile: {
-  role: string;
-  church_id: string | null;
-  service_id: string | null;
-  class_id: string | null;
-} | null): string | undefined {
+export function scopeFilter(
+  profile: {
+    role: string;
+    church_id: string | null;
+    service_id: string | null;
+    class_id: string | null;
+  } | null,
+  /**
+   * 0045: every place of the caller (useAuth().scopes). A servant bound to
+   * SEVERAL places cannot be expressed as one `col=eq.` filter — the caller
+   * then gets the unfiltered stream (RLS still decides what he receives);
+   * with one common church / service we narrow to that column instead.
+   */
+  scopes?: { church_id: string; service_id: string | null; class_id: string | null }[],
+): string | undefined {
   if (!profile || profile.role === 'owner') return undefined;
+  if (scopes && scopes.length > 1) {
+    const classes = new Set(scopes.map((s) => s.class_id ?? ''));
+    if (classes.size === 1 && !classes.has('')) return `class_id=eq.${scopes[0].class_id}`;
+    const services = new Set(scopes.map((s) => s.service_id ?? ''));
+    if (services.size === 1 && !services.has('')) return `service_id=eq.${scopes[0].service_id}`;
+    const churches = new Set(scopes.map((s) => s.church_id));
+    if (churches.size === 1) return `church_id=eq.${scopes[0].church_id}`;
+    return undefined;
+  }
   if (profile.class_id) return `class_id=eq.${profile.class_id}`;
   if (profile.service_id) return `service_id=eq.${profile.service_id}`;
   if (profile.church_id) return `church_id=eq.${profile.church_id}`;

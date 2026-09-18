@@ -124,7 +124,7 @@ export function WeeklyStreakWidget({ title, size }: WidgetProps) {
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 export function LeaderboardWidget({ title, size }: WidgetProps) {
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const [supabase] = useState(() => createClient());
   const [rows, setRows] = useState<LeaderRow[] | null>(null);
   const limit = size === 'half' ? 5 : 6;
@@ -133,7 +133,7 @@ export function LeaderboardWidget({ title, size }: WidgetProps) {
     try { setRows(await fetchLeaderboard(supabase, 'points', limit, {})); } catch { setRows([]); }
   }, [supabase, limit]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments', filter: scopeFilter(profile) }], load, { delayMs: 2500 });
+  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments', filter: scopeFilter(profile, scopes) }], load, { delayMs: 2500 });
 
   return (
     <WidgetCard id="w-leaderboard" icon={Trophy} title={title} tone="amber" href="/stats" flush>
@@ -165,7 +165,7 @@ interface AbsentRow { enrollment_id: string; name: string; phone: string | null;
 type FollowState = { ev: AppEvent; date: string; total: number; called: number; rows: AbsentRow[] } | 'none' | null;
 
 export function FollowUpWidget({ title, size }: WidgetProps) {
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const { now } = useAppDate();
   const { label } = useCustomization();
   const [supabase] = useState(() => createClient());
@@ -205,7 +205,7 @@ export function FollowUpWidget({ title, size }: WidgetProps) {
     });
   }, [supabase, now, shown]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }, { table: 'contact_log' }, { table: 'enrollments', filter: scopeFilter(profile) }], load, { delayMs: 2500 });
+  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }, { table: 'contact_log' }, { table: 'enrollments', filter: scopeFilter(profile, scopes) }], load, { delayMs: 2500 });
 
   const s = state && state !== 'none' ? state : null;
   const pending = s ? s.total - s.called : 0;

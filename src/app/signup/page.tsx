@@ -4,8 +4,11 @@
 // The servant is a PERSON first (same identity table as the children), then
 // a *servant enrollment* bound to church → service → class.
 //
-//   Step 1  مكان الخدمة   church → service → class (pre-filled & locked from
-//                         the invite link; every level optional)
+//   Step 1  مكان الخدمة   ONE OR MORE places church → service → class (0045:
+//                         `ScopePicker` — the servant may pick every class he
+//                         serves in, even across churches; the first one is
+//                         the primary place). The invite link pre-fills the
+//                         first place and locks the church / service.
 //   Step 2  الكود         typed or scanned QR — looked up in `persons` and,
 //                         when known, the data is pre-filled
 //   Step 3  البيانات      name · gender · phone · birthdate · address · notes
@@ -27,11 +30,12 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import QrScanner from '@/components/store/QrScanner';
 import PhotoCropModal from '@/components/PhotoCropModal';
+import ScopePicker, { scopeLabel } from '@/components/ScopePicker';
 import { generateCode as renderCode, normalizeCodes, type CodesConfig } from '@/lib/code-templates';
 import { uploadPhoto } from '@/lib/upload';
 import {
   userIdToEmail, codeToUserId, PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
-  type Gender, type Church, type Service, type ClassRoom, type SignupCodeLookup, type ServantSignupResult,
+  type Gender, type Church, type Service, type ClassRoom, type SignupCodeLookup, type ServantSignupResult, type ScopeRef,
 } from '@/lib/types';
 
 const MONTHS_AR = [
@@ -80,10 +84,14 @@ function SignupWizard() {
 
   const [step, setStep] = useState<Step>(1);
 
-  // ---- Step 1: scope ----
-  const [churchId, setChurchId] = useState(inviteChurch);
-  const [serviceId, setServiceId] = useState(inviteService);
-  const [classId, setClassId] = useState(inviteClass);
+  // ---- Step 1: places (0045 — several) ----
+  const [scopes, setScopes] = useState<ScopeRef[]>(
+    inviteChurch ? [{ church_id: inviteChurch, service_id: inviteService || null, class_id: inviteClass || null }] : []
+  );
+  // the primary place (first) — used for the code generator + the summary
+  const churchId = scopes[0]?.church_id ?? '';
+  const serviceId = scopes[0]?.service_id ?? '';
+  const classId = scopes[0]?.class_id ?? '';
   const [churches, setChurches] = useState<Church[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
@@ -108,8 +116,7 @@ function SignupWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const scopedServices = services.filter((s) => !churchId || s.church_id === churchId);
-  const scopedClasses = classes.filter((c) => (!serviceId || c.service_id === serviceId) && (!churchId || c.church_id === churchId));
+  const lookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
   const churchName = churches.find((c) => c.id === churchId)?.name;
   const serviceName = services.find((s) => s.id === serviceId)?.name;
   const className = classes.find((c) => c.id === classId)?.name;
@@ -189,10 +196,8 @@ function SignupWizard() {
   const next = () => {
     setError('');
     if (step === 1) {
-      // every level optional — the approver can set it — but a chosen child
-      // level must have its parent
-      if (serviceId && !churchId) return setError('اختر الكنيسة أولاً');
-      if (classId && !serviceId) return setError('اختر الخدمة أولاً');
+      // places are optional — the approver can set them — the picker itself
+      // guarantees a consistent church → service → class chain
       setStep(2);
     } else if (step === 2) {
       if (!code.trim()) return setError('اكتب الكود أو امسحه بالكاميرا أو ولّد كودًا');
@@ -250,6 +255,8 @@ function SignupWizard() {
       p_service: serviceId || null,
       p_class: classId || null,
       p_image_url: imageUrl,
+      // 0045: every place (the first = primary)
+      p_scopes: scopes.length ? scopes : null,
     });
 
     if (rpcErr) {
@@ -268,9 +275,6 @@ function SignupWizard() {
     // Hard navigation so AuthProvider re-initializes with the fresh enrollment
     window.location.href = '/';
   };
-
-  const selectCls = (locked: boolean) =>
-    `input-field ${locked ? 'bg-primary-50 text-primary-800 font-bold pointer-events-none' : ''}`;
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4 py-8">
@@ -322,38 +326,24 @@ function SignupWizard() {
                 <MapPin className="h-4 w-4 text-primary-500" /> مكان الخدمة
                 <span className="text-xs font-normal text-slate-400">(يمكن للمسؤول تعديله عند القبول)</span>
               </p>
+              <p className="rounded-xl bg-primary-50 px-3 py-2 text-xs font-bold text-primary-700">
+                تخدم في أكثر من فصل أو خدمة أو كنيسة؟ أضف كل أماكن خدمتك هنا — المكان الأول هو الأساسي.
+              </p>
               {structureLoading ? (
                 <div className="flex justify-center py-6"><Loader2 className="h-6 w-6 animate-spin text-primary-500" /></div>
               ) : (
-                <>
-                  <div>
-                    <label htmlFor="su-church" className="mb-1 block text-xs font-bold text-slate-500">الكنيسة</label>
-                    <select id="su-church" className={selectCls(churchLocked)} value={churchId}
-                      onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}
-                      tabIndex={churchLocked ? -1 : 0}>
-                      <option value="">اختر الكنيسة</option>
-                      {churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="su-service" className="mb-1 block text-xs font-bold text-slate-500">الخدمة</label>
-                    <select id="su-service" className={selectCls(serviceLocked)} value={serviceId}
-                      onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}
-                      disabled={!churchId} tabIndex={serviceLocked ? -1 : 0}>
-                      <option value="">{churchId ? 'اختر الخدمة' : 'اختر الكنيسة أولاً'}</option>
-                      {scopedServices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="su-class" className="mb-1 block text-xs font-bold text-slate-500">الفصل</label>
-                    <select id="su-class" className={selectCls(classLocked)} value={classId}
-                      onChange={(e) => setClassId(e.target.value)}
-                      disabled={!serviceId} tabIndex={classLocked ? -1 : 0}>
-                      <option value="">{serviceId ? 'اختر الفصل' : 'اختر الخدمة أولاً'}</option>
-                      {scopedClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                </>
+                <ScopePicker
+                  idPrefix="su"
+                  title={null}
+                  value={scopes}
+                  onChange={setScopes}
+                  lookups={lookups}
+                  depth="class"
+                  lockChurch={churchLocked ? inviteChurch : null}
+                  lockService={serviceLocked ? inviteService : null}
+                  emptyText="لم تختر مكاناً بعد — يمكنك المتابعة وسيحدده المسؤول"
+                  addLabel={scopes.length ? 'إضافة مكان خدمة آخر' : 'اختيار مكان الخدمة'}
+                />
               )}
             </section>
           )}
@@ -524,7 +514,16 @@ function SignupWizard() {
               <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
                 <p>الاسم: <b className="text-slate-700">{name}</b></p>
                 <p dir="ltr" className="text-right">اسم الدخول: <b className="text-slate-700">{codeToUserId(code)}</b></p>
-                <p>مكان الخدمة: <b className="text-slate-700">{[churchName, serviceName, className].filter(Boolean).join(' ← ') || 'يحدده المسؤول'}</b></p>
+                {scopes.length <= 1 ? (
+                  <p>مكان الخدمة: <b className="text-slate-700">{[churchName, serviceName, className].filter(Boolean).join(' ← ') || 'يحدده المسؤول'}</b></p>
+                ) : (
+                  <div>
+                    <p>أماكن الخدمة ({scopes.length}):</p>
+                    <ul className="mt-0.5 list-inside list-disc">
+                      {scopes.map((s, i) => <li key={i}><b className="text-slate-700">{scopeLabel(s, lookups)}</b>{i === 0 ? ' (الأساسي)' : ''}</li>)}
+                    </ul>
+                  </div>
+                )}
               </div>
               <div>
                 <label htmlFor="su-password" className="mb-1 block text-xs font-bold text-slate-500">كلمة المرور *</label>

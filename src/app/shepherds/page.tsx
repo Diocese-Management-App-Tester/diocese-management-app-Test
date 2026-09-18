@@ -37,7 +37,7 @@ type Tab = 'mine' | 'pick';
 
 export default function ShepherdsPage() {
   const pageName = useNavLabel('shepherds');
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const [supabase] = useState(() => createClient());
   const isManager = !!profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
 
@@ -140,7 +140,7 @@ export default function ShepherdsPage() {
   }, [tab, profile?.status, loadPool]);
 
   // Realtime — any claim / release by anyone
-  const rtFilter = scopeFilter(profile);
+  const rtFilter = scopeFilter(profile, scopes);
   useDebouncedRealtime(
     supabase, 'shepherd-groups',
     [{ table: 'shepherd_groups', filter: rtFilter }],

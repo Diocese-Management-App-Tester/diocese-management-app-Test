@@ -292,7 +292,8 @@ do $$ declare j jsonb; n int; begin
   if (j->'progress'->0->>'current')::int <> 1 or (j->'progress'->0->>'target')::int <> 4 then raise exception 'progress values wrong: %', j->'progress'->0; end if;
   select count(*) into n from public.child_portal_points('29901010000002') where source = 'achievement';
   if n <> 2 then raise exception 'child points should show 2 achievement rows, got %', n; end if;
-  if (select reason from public.child_portal_points('29901010000002') where source = 'achievement' order by created_at desc limit 1) not like 'إنجاز%المواظب%' then raise exception 'achievement reason label wrong'; end if;
+  -- (rows awarded in the same transaction share created_at → check the label, not the tie order)
+  if not exists (select 1 from public.child_portal_points('29901010000002') where source = 'achievement' and reason like 'إنجاز%المواظب%') then raise exception 'achievement reason label wrong'; end if;
 end $$;
 reset role;
 delete from public.module_access where module_key = 'achievements';
