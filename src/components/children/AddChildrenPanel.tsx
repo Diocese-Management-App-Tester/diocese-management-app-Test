@@ -11,9 +11,10 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import QRCode from 'qrcode';
 import {
   UserPlus, Users, X, Check, Loader2, QrCode, Camera, Wand2, ScanLine,
-  FileSpreadsheet, ClipboardPaste, Upload, Trash2, Star, IdCard, UserCheck, KeyRound,
+  FileSpreadsheet, ClipboardPaste, Upload, Trash2, Star, IdCard, UserCheck, KeyRound, Pencil, SkipForward,
 } from 'lucide-react';
 import PhotoCropModal from '@/components/PhotoCropModal';
+import BulkRowEditModal from '@/components/BulkRowEditModal';
 import QrScanner from '@/components/store/QrScanner';
 import { useCodeGenerator } from '@/lib/customization-context';
 import { monotonicClock } from '@/lib/code-templates';
@@ -22,7 +23,8 @@ import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
 import {
   normalizePhone, parseFullDate, parseSplitDate, parseGender, parsePastedTable, readSpreadsheet,
-  toLatinDigits, type DateOrder,
+  toLatinDigits, phoneToLocalDigits, findRepeatedCodes,
+  type DateOrder, type BulkRowEdits, type BulkRowStatus,
 } from '@/lib/bulk-import';
 import {
   PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
@@ -842,7 +844,8 @@ interface BulkRow {
   key: number;
   cells: string[];
   genderOverride?: Gender | null;   // per-row manual gender (wins over everything)
-  status: 'pending' | 'ok' | 'error';
+  edits?: BulkRowEdits;             // manual corrections from the edit modal (win over cells)
+  status: BulkRowStatus;            // skipped = not imported (duplicate code …) — reported at the end
   message?: string;
 }
 
@@ -862,7 +865,8 @@ function BulkAddTab({
   const [pasteText, setPasteText] = useState('');
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
-  const [done, setDone] = useState<{ ok: number; fail: number } | null>(null);
+  const [done, setDone] = useState<{ ok: number; fail: number; skipped: number } | null>(null);
+  const [editingKey, setEditingKey] = useState<number | null>(null);      // row open in the edit modal
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   // ---- Import options ----
@@ -935,6 +939,7 @@ function BulkAddTab({
   const hasPointsCol = col('points') !== -1;
 
   // ---------- Resolve each row into final values (live preview) ----------
+  // Manual edits (row.edits) win over the parsed cells for every field.
   interface Resolved {
     row: BulkRow;
     name: string;
@@ -942,31 +947,38 @@ function BulkAddTab({
     code: string;
     birthdate: string | null;
     birthdateRaw: string;
-    phone: string | null | undefined;   // undefined = invalid
+    phone: string | null | undefined;   // undefined = invalid (→ imported WITHOUT phone, flagged)
+    phoneRaw: string;
     points: number;
     address: string;
     notes: string;
+    duplicateInBatch: boolean;          // same code appeared in an earlier row → skipped
   }
 
   const resolved: Resolved[] = useMemo(() => {
     const fallbackPoints = Math.max(0, Math.floor(Number(defaultPoints) || 0));
-    return dataRows.map((row) => {
-      // gender: per-row override > cell value > global default
+    const list = dataRows.map((row) => {
+      const ed = row.edits ?? {};
+
+      // gender: edit > per-row override > cell value > global default
       let gender: Gender | null = null;
-      if (row.genderOverride !== undefined) gender = row.genderOverride;
+      if (ed.gender !== undefined) gender = ed.gender;
+      else if (row.genderOverride !== undefined) gender = row.genderOverride;
       else {
         gender = hasGenderData ? parseGender(cellOf(row, 'gender')) : null;
         if (!gender && defaultGender) gender = defaultGender;
       }
 
-      // code: cell value; else auto-generated when enabled
-      let code = cellOf(row, 'code');
+      // code: edit > cell value; else auto-generated when enabled
+      let code = (ed.code !== undefined ? ed.code : cellOf(row, 'code')).trim();
       if (!code && autoCodes) code = 'AUTO';   // placeholder — real code generated at import
 
       // birthdate
       let birthdate: string | null = null;
       let birthdateRaw = '';
-      if (hasFullDate) {
+      if (ed.birthdate !== undefined) {
+        birthdate = ed.birthdate;
+      } else if (hasFullDate) {
         birthdateRaw = cellOf(row, 'birthdate');
         birthdate = parseFullDate(birthdateRaw, dateOrder);
       } else if (hasSplitDate) {
@@ -978,23 +990,33 @@ function BulkAddTab({
       }
 
       const rowPoints = hasPointsCol ? cellOf(row, 'points') : '';
-      const points = rowPoints !== '' && !Number.isNaN(Number(rowPoints))
-        ? Math.max(0, Math.floor(Number(rowPoints)))
-        : fallbackPoints;
+      const points = ed.points !== undefined
+        ? ed.points
+        : rowPoints !== '' && !Number.isNaN(Number(rowPoints))
+          ? Math.max(0, Math.floor(Number(rowPoints)))
+          : fallbackPoints;
+
+      const phoneRaw = ed.phone !== undefined ? ed.phone : cellOf(row, 'phone');
 
       return {
         row,
-        name: cellOf(row, 'name'),
+        name: (ed.name !== undefined ? ed.name : cellOf(row, 'name')).trim(),
         gender,
         code,
         birthdate,
         birthdateRaw,
-        phone: normalizePhone(cellOf(row, 'phone')),
+        phone: normalizePhone(phoneRaw),
+        phoneRaw,
         points,
-        address: cellOf(row, 'address'),
-        notes: cellOf(row, 'notes'),
+        address: ed.address !== undefined ? ed.address : cellOf(row, 'address'),
+        notes: ed.notes !== undefined ? ed.notes : cellOf(row, 'notes'),
+        duplicateInBatch: false,
       };
     });
+    // a code repeated inside the file: the first row keeps it, the rest are skipped
+    const repeats = findRepeatedCodes(list.map((r) => (r.row.status === 'ok' ? null : r.code)));
+    repeats.forEach((i) => { list[i].duplicateInBatch = true; });
+    return list;
   }, [dataRows, cellOf, hasGenderData, defaultGender, autoCodes, hasFullDate, hasSplitDate, dateOrder, hasPointsCol, defaultPoints]);
 
   // Cycle a row's gender: null → boy → girl → null
@@ -1011,13 +1033,27 @@ function BulkAddTab({
       })
     );
 
-  const removeRow = (key: number) => setRows((rs) => rs.filter((r) => r.key !== key));
+  const removeRow = (key: number) => { setRows((rs) => rs.filter((r) => r.key !== key)); setEditingKey(null); };
+
+  // Save the edit-modal patch on a row (also clears an old error so it can be retried)
+  const saveEdits = (key: number, edits: BulkRowEdits) => {
+    setRows((rs) => rs.map((r) => (r.key === key
+      ? { ...r, edits: { ...(r.edits ?? {}), ...edits }, genderOverride: undefined, status: r.status === 'ok' ? 'ok' : 'pending', message: undefined }
+      : r)));
+    setEditingKey(null);
+  };
+  const editing = editingKey === null ? null : resolved.find((r) => r.row.key === editingKey) ?? null;
+  const editingIndex = editing ? resolved.indexOf(editing) + 1 : 0;
 
   const nameCol = col('name');
-  const invalidPhones = resolved.filter((r) => r.phone === undefined).length;
-  const unparsedDates = resolved.filter((r) => r.birthdateRaw && !r.birthdate).length;
+  const invalidPhones = resolved.filter((r) => r.phone === undefined && r.row.status !== 'ok').length;
+  const unparsedDates = resolved.filter((r) => r.birthdateRaw && !r.birthdate && r.row.status !== 'ok').length;
+  const duplicateCodes = resolved.filter((r) => r.duplicateInBatch && r.row.status !== 'ok').length;
 
   // ---------- Import ----------
+  // Never stops on a bad row: invalid phone / date → the row is imported
+  // WITHOUT that value; a duplicated code (in the file or already in the
+  // class) → the row is SKIPPED. Everything is reported at the end.
   const doImport = async () => {
     setError('');
     const cls = scope.selectedClass;
@@ -1026,7 +1062,8 @@ function BulkAddTab({
     if (!resolved.length) { setError('لا توجد صفوف للاستيراد'); return; }
 
     setImporting(true);
-    let ok = 0, fail = 0;
+    setDone(null);
+    let ok = 0, fail = 0, skipped = 0;
     // monotonic clock → timestamp-based codes never collide inside one import
     const tick = monotonicClock();
     const generateCode = () => genPersonCode({ churchId: cls.church_id, serviceId: cls.service_id, classId: cls.id, now: tick() });
@@ -1037,10 +1074,13 @@ function BulkAddTab({
       const setStatus = (status: BulkRow['status'], message?: string) =>
         setRows((rs) => rs.map((x) => (x.key === r.row.key ? { ...x, status, message } : x)));
 
-      if (!r.name) { setStatus('error', 'الاسم مفقود'); fail++; continue; }
-      if (r.phone === undefined) { setStatus('error', 'رقم هاتف غير صالح'); fail++; continue; }
+      if (!r.name) { setStatus('skipped', 'الاسم مفقود'); skipped++; continue; }
+      if (r.duplicateInBatch) { setStatus('skipped', `الكود ${r.code} مكرر في الملف`); skipped++; continue; }
 
       const codeVal = r.code === 'AUTO' ? generateCode() : r.code;
+      // a bad phone never blocks the child — he is saved without it
+      const phoneDropped = r.phone === undefined;
+      const dateDropped = !!r.birthdateRaw && !r.birthdate;
 
       // Person-centric flow: upsert the person by national id, then
       // register him as an enrollment in this church/service/class.
@@ -1052,7 +1092,7 @@ function BulkAddTab({
         p_national_id: codeVal || null,
         p_gender: r.gender,
         p_birthdate: r.birthdate,
-        p_phone: r.phone,
+        p_phone: phoneDropped ? null : r.phone,
         p_address: r.address || null,
         p_notes: r.notes || null,
         p_points: r.points,
@@ -1060,26 +1100,32 @@ function BulkAddTab({
       });
       const result = data as AddPersonResult | null;
       if (err) {
-        setStatus('error', 'فشل الحفظ');
+        const m = (err.message ?? '').toLowerCase();
+        setStatus('error', m.includes('no_access') || m.includes('not_approved') ? 'خارج صلاحياتك' : 'فشل الحفظ');
         fail++;
       } else if (result?.already_enrolled) {
-        setStatus('error', 'مسجّل بالفعل في الفصل');
-        fail++;
+        setStatus('skipped', `الكود ${result.national_id} مسجّل بالفعل في الفصل`);
+        skipped++;
       } else {
-        setStatus('ok');
+        const notes: string[] = [];
+        if (phoneDropped) notes.push('حُفظ بدون هاتف (رقم غير صالح)');
+        if (dateDropped) notes.push('حُفظ بدون تاريخ ميلاد (صيغة غير مفهومة)');
+        if (!result?.person_created) notes.push('شخص موجود — تم تسجيله في الفصل');
+        setStatus('ok', notes.join(' · ') || undefined);
         ok++;
       }
     }
     setImporting(false);
-    setDone({ ok, fail });
+    setDone({ ok, fail, skipped });
   };
 
   const reset = () => {
-    setRows([]); setMapping([]); setDone(null); setError('');
+    setRows([]); setMapping([]); setDone(null); setError(''); setEditingKey(null);
     setDefaultGender(''); setAutoCodes(false); setDateOrder('auto'); setDefaultPoints('0');
   };
 
   const pendingCount = resolved.filter((r) => r.row.status !== 'ok').length;
+  const willImportCount = resolved.filter((r) => r.row.status !== 'ok' && r.name && !r.duplicateInBatch).length;
 
   return (
     <div className="space-y-4 pb-6">
@@ -1304,7 +1350,7 @@ function BulkAddTab({
                 )}
                 {unparsedDates > 0 && (
                   <p className="mt-1 text-[11px] font-bold text-amber-600">
-                    ⚠ {unparsedDates} تاريخ لم يُفهم — راجع الصيغة أو ستُحفظ بدون تاريخ
+                    ⚠ {unparsedDates} تاريخ لم يُفهم — عدّله من المعاينة أو سيُحفظ المخدوم بدون تاريخ
                   </p>
                 )}
               </div>
@@ -1351,7 +1397,7 @@ function BulkAddTab({
           {/* ---------- Resolved preview ---------- */}
           <div className="card space-y-2">
             <h3 className="text-sm font-extrabold text-slate-700">٣· المعاينة النهائية</h3>
-            <p className="text-[11px] font-bold text-slate-400">اضغط على النوع لتغييره لكل صف على حدة</p>
+            <p className="text-[11px] font-bold text-slate-400">اضغط على الاسم أو زر التعديل لتصحيح أي بيان قبل الاستيراد — وعلى النوع لتبديله</p>
             <div className="overflow-x-auto -mx-4 px-4">
               <table className="w-full min-w-max text-xs">
                 <thead>
@@ -1362,7 +1408,7 @@ function BulkAddTab({
                     <th className="p-1.5">الميلاد</th>
                     <th className="p-1.5">الهاتف</th>
                     <th className="p-1.5">نقاط</th>
-                    <th className="p-1.5 w-8" />
+                    <th className="p-1.5 w-16" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1372,11 +1418,19 @@ function BulkAddTab({
                       className={
                         r.row.status === 'ok' ? 'bg-emerald-50'
                         : r.row.status === 'error' ? 'bg-red-50'
+                        : r.row.status === 'skipped' || r.duplicateInBatch ? 'bg-amber-50'
                         : ''
                       }
                     >
                       <td className="max-w-[120px] truncate border-t border-indigo-50 p-1.5 font-extrabold text-slate-700">
-                        {r.name || <span className="text-red-500">؟</span>}
+                        {r.row.status === 'ok' ? (
+                          r.name
+                        ) : (
+                          <button type="button" onClick={() => setEditingKey(r.row.key)} className="max-w-full truncate text-right hover:text-primary-600" title="تعديل الصف">
+                            {r.name || <span className="text-red-500">؟ بلا اسم</span>}
+                            {r.row.edits && <span className="mr-1 text-[10px] text-primary-500">✎</span>}
+                          </button>
+                        )}
                       </td>
                       <td className="border-t border-indigo-50 p-1">
                         <button
@@ -1394,17 +1448,18 @@ function BulkAddTab({
                       </td>
                       <td className="border-t border-indigo-50 p-1.5 font-bold text-slate-500" dir="ltr">
                         {r.code === 'AUTO' ? <span className="text-primary-500">تلقائي ✨</span> : r.code || '—'}
+                        {r.duplicateInBatch && r.row.status !== 'ok' && <span className="ml-1 text-amber-600" title="كود مكرر في الملف — لن يُستورد">⚠ مكرر</span>}
                       </td>
                       <td className="border-t border-indigo-50 p-1.5 font-bold" dir="ltr">
                         {r.birthdate ? (
                           <span className="text-slate-600">{r.birthdate.split('-').reverse().join('/')}</span>
                         ) : r.birthdateRaw ? (
-                          <span className="text-amber-500" title={r.birthdateRaw}>⚠ {r.birthdateRaw}</span>
+                          <button type="button" onClick={() => setEditingKey(r.row.key)} className="text-amber-500 underline decoration-dotted" title={`${r.birthdateRaw} — اضغط للتعديل`}>⚠ {r.birthdateRaw}</button>
                         ) : '—'}
                       </td>
                       <td className="border-t border-indigo-50 p-1.5 font-bold" dir="ltr">
                         {r.phone === undefined ? (
-                          <span className="text-red-500">✗ غير صالح</span>
+                          <button type="button" onClick={() => setEditingKey(r.row.key)} className="text-amber-500 underline decoration-dotted" title={`${r.phoneRaw} — اضغط للتعديل`}>⚠ {r.phoneRaw}</button>
                         ) : r.phone ? (
                           <span className="text-slate-600">{r.phone}</span>
                         ) : '—'}
@@ -1412,18 +1467,30 @@ function BulkAddTab({
                       <td className="border-t border-indigo-50 p-1.5 font-extrabold text-gold-600">{r.points}</td>
                       <td className="border-t border-indigo-50 p-1">
                         {r.row.status === 'ok' ? (
-                          <Check className="h-4 w-4 text-emerald-500" />
+                          <span title={r.row.message}><Check className="h-4 w-4 text-emerald-500" /></span>
                         ) : r.row.status === 'error' ? (
                           <span title={r.row.message}><X className="h-4 w-4 text-red-500" /></span>
+                        ) : r.row.status === 'skipped' ? (
+                          <span title={r.row.message}><SkipForward className="h-4 w-4 text-amber-500" /></span>
                         ) : (
-                          <button
-                            type="button"
-                            aria-label="حذف الصف"
-                            onClick={() => removeRow(r.row.key)}
-                            className="text-slate-300 hover:text-red-400"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              aria-label="تعديل الصف"
+                              onClick={() => setEditingKey(r.row.key)}
+                              className="text-slate-300 hover:text-primary-500"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="حذف الصف"
+                              onClick={() => removeRow(r.row.key)}
+                              className="text-slate-300 hover:text-red-400"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -1436,30 +1503,63 @@ function BulkAddTab({
                 يتم عرض أول 100 صف — سيتم استيراد الكل ({resolved.length})
               </p>
             )}
-
-            {dataRows.some((r) => r.status === 'error') && (
-              <ul className="space-y-1 rounded-xl bg-red-50 p-2 text-[11px] font-bold text-red-600">
-                {resolved.map((r, i) =>
-                  r.row.status === 'error' ? (
-                    <li key={r.row.key}>صف {i + 1}: {r.row.message} — {r.name}</li>
-                  ) : null
-                )}
-              </ul>
-            )}
           </div>
 
           {error && (
             <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>
           )}
+
+          {/* ---------- Result summary (after the import) ---------- */}
           {done && (
-            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
-              ✓ تم استيراد {done.ok} مخدومًا{done.fail > 0 ? ` — فشل ${done.fail}` : ''}
-            </p>
+            <div className="space-y-2">
+              <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
+                ✓ تم استيراد {done.ok} مخدومًا
+                {done.skipped > 0 ? ` · لم يُضف ${done.skipped}` : ''}
+                {done.fail > 0 ? ` · فشل ${done.fail}` : ''}
+              </p>
+              {resolved.some((r) => r.row.status === 'skipped') && (
+                <div className="rounded-xl bg-amber-50 p-2 text-[11px] font-bold text-amber-700">
+                  <p className="mb-1 flex items-center gap-1"><SkipForward className="h-3.5 w-3.5" /> لم تُضف (مكررة أو ناقصة):</p>
+                  <ul className="space-y-0.5">
+                    {resolved.map((r, i) => r.row.status === 'skipped' ? (
+                      <li key={r.row.key}>صف {i + 1}: {r.name || 'بلا اسم'} — {r.row.message}</li>
+                    ) : null)}
+                  </ul>
+                </div>
+              )}
+              {resolved.some((r) => r.row.status === 'error') && (
+                <div className="rounded-xl bg-red-50 p-2 text-[11px] font-bold text-red-600">
+                  <p className="mb-1">فشل الحفظ (عدّل الصف وأعد المحاولة):</p>
+                  <ul className="space-y-0.5">
+                    {resolved.map((r, i) => r.row.status === 'error' ? (
+                      <li key={r.row.key}>صف {i + 1}: {r.name} — {r.row.message}</li>
+                    ) : null)}
+                  </ul>
+                </div>
+              )}
+              {resolved.some((r) => r.row.status === 'ok' && r.row.message) && (
+                <div className="rounded-xl bg-slate-50 p-2 text-[11px] font-bold text-slate-600">
+                  <p className="mb-1">أُضيفوا مع ملاحظة:</p>
+                  <ul className="space-y-0.5">
+                    {resolved.map((r, i) => r.row.status === 'ok' && r.row.message ? (
+                      <li key={r.row.key}>صف {i + 1}: {r.name} — {r.row.message}</li>
+                    ) : null)}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
-          {invalidPhones > 0 && !done && (
-            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">
-              ⚠ {invalidPhones} رقم هاتف غير صالح (يجب {PHONE_LOCAL_LENGTH} رقمًا) — هذه الصفوف لن تُستورد
-            </p>
+
+          {/* ---------- Pre-import warnings (nothing blocks; everything can be edited) ---------- */}
+          {!done && (invalidPhones > 0 || duplicateCodes > 0) && (
+            <div className="space-y-1 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-600">
+              {invalidPhones > 0 && (
+                <p>⚠ {invalidPhones} رقم هاتف غير صالح (يجب {PHONE_LOCAL_LENGTH} رقمًا) — اضغط عليه لتصحيحه، أو سيُحفظ المخدوم بدون هاتف</p>
+              )}
+              {duplicateCodes > 0 && (
+                <p>⚠ {duplicateCodes} كود مكرر في الملف — سيُستورد الأول فقط ويُتجاوز الباقي (عدّل الكود لإضافته)</p>
+              )}
+            </div>
           )}
 
           <button
@@ -1470,9 +1570,34 @@ function BulkAddTab({
             className="btn-primary w-full flex items-center justify-center gap-2"
           >
             {importing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-            استيراد {pendingCount} مخدومًا
+            استيراد {willImportCount} مخدومًا{willImportCount !== pendingCount ? ` (من ${pendingCount})` : ''}
           </button>
         </>
+      )}
+
+      {/* Row edit modal */}
+      {editing && (
+        <BulkRowEditModal
+          title="تعديل بيانات المخدوم"
+          rowNumber={editingIndex}
+          codeLabel="الرقم القومي / الكود"
+          showPoints
+          values={{
+            name: editing.name,
+            gender: editing.gender,
+            code: editing.code,
+            birthdate: editing.birthdate,
+            birthdateRaw: editing.birthdateRaw,
+            phoneLocal: phoneToLocalDigits(editing.phoneRaw),
+            phoneRaw: editing.phoneRaw,
+            address: editing.address,
+            notes: editing.notes,
+            points: editing.points,
+          }}
+          onSave={(edits) => saveEdits(editing.row.key, edits)}
+          onClose={() => setEditingKey(null)}
+          onRemove={() => removeRow(editing.row.key)}
+        />
       )}
 
       {/* Paste modal */}

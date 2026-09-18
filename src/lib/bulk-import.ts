@@ -131,6 +131,50 @@ export const readSpreadsheet = async (file: File): Promise<string[][]> => {
     .map((r) => (r as unknown[]).map((c) => String(c ?? '')));
 };
 
+// ---------- Per-row edits (المعاينة → تعديل صف) ----------
+// The manager may correct ANY value of a row before the import. Edits are
+// stored next to the raw cells and win over the parsed cell value.
+export interface BulkRowEdits {
+  name?: string;
+  gender?: Gender | null;        // null = no gender
+  code?: string;                 // '' = none (→ auto when enabled)
+  password?: string;             // servants only — '' = none (→ auto when enabled)
+  birthdate?: string | null;     // YYYY-MM-DD or null (cleared)
+  phone?: string;                // raw digits, normalized at resolve time ('' = none)
+  address?: string;
+  notes?: string;
+  points?: number;               // children only
+}
+
+/** Row status during / after a bulk import */
+export type BulkRowStatus = 'pending' | 'ok' | 'skipped' | 'error';
+
+/** Local 11-digit part of a phone for an edit field (valid → +2XXXXXXXXXXX → XXXXXXXXXXX; else the raw digits) */
+export const phoneToLocalDigits = (raw: string): string => {
+  const norm = normalizePhone(raw);
+  if (norm) return norm.slice(PHONE_PREFIX.length);
+  return toLatinDigits(raw).replace(/\D/g, '');
+};
+
+/**
+ * Find codes repeated inside one batch. `keyOf` normalizes the code the way
+ * the database compares it (trim for children, code_to_user_id for servants).
+ * Returns the set of row indexes that are a LATER occurrence of a code —
+ * the first occurrence is kept, the repeats are skipped.
+ */
+export const findRepeatedCodes = (codes: (string | null | undefined)[], keyOf: (c: string) => string = (c) => c.trim()): Set<number> => {
+  const seen = new Set<string>();
+  const repeats = new Set<number>();
+  codes.forEach((c, i) => {
+    if (!c || c === 'AUTO') return;
+    const k = keyOf(c);
+    if (!k) return;
+    if (seen.has(k)) repeats.add(i);
+    else seen.add(k);
+  });
+  return repeats;
+};
+
 /** Random readable password (no ambiguous chars) — default 8 */
 export const generatePassword = (length = 8): string => {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
