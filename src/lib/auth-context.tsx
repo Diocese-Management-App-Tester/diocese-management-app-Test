@@ -9,8 +9,8 @@ import {
   type ReactNode,
 } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { ServantEnrollment, Church, Service, Person } from '@/lib/types';
-import { SERVANTS_TABLE } from '@/lib/types';
+import type { ServantEnrollment, Church, Service, Person, ScopeRef } from '@/lib/types';
+import { SERVANTS_TABLE, SERVANT_SCOPES_TABLE, allScopesOf } from '@/lib/types';
 import type { User } from '@supabase/supabase-js';
 import { servantSessionStale, clearServantRememberFlags } from '@/lib/session';
 
@@ -20,6 +20,13 @@ interface AuthState {
   profile: ServantEnrollment | null;
   /** the servant's identity row in `persons` (code = national_id) */
   person: Person | null;
+  /**
+   * 0045: EVERY place the servant serves in — primary scope first, then the
+   * `servant_scopes` rows. Empty for the owner / a servant without a scope.
+   */
+  scopes: ScopeRef[];
+  /** true when the servant serves in more than one place */
+  multiScope: boolean;
   church: Church | null;
   service: Service | null;
   loading: boolean;
@@ -31,6 +38,8 @@ const AuthContext = createContext<AuthState>({
   user: null,
   profile: null,
   person: null,
+  scopes: [],
+  multiScope: false,
   church: null,
   service: null,
   loading: true,
@@ -42,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ServantEnrollment | null>(null);
   const [person, setPerson] = useState<Person | null>(null);
+  const [scopes, setScopes] = useState<ScopeRef[]>([]);
   const [church, setChurch] = useState<Church | null>(null);
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +73,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const prof = (p ?? null) as ServantEnrollment | null;
       setProfile(prof);
+
+      // 0045: the extra places (table may not exist before the migration → ignore)
+      if (prof) {
+        const { data: extra } = await supabase
+          .from(SERVANT_SCOPES_TABLE)
+          .select('church_id, service_id, class_id')
+          .eq('servant_id', uid);
+        setScopes(allScopesOf(prof, (extra ?? []) as ScopeRef[]));
+      } else {
+        setScopes([]);
+      }
 
       if (prof?.person_id) {
         const { data: per } = await supabase.from('persons').select('*').eq('id', prof.person_id).maybeSingle();
@@ -104,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setProfile(null);
       setPerson(null);
+      setScopes([]);
       setChurch(null);
       setService(null);
       setLoading(false);
@@ -118,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     else {
       setProfile(null);
       setPerson(null);
+      setScopes([]);
       setChurch(null);
       setService(null);
     }
@@ -146,6 +169,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { event: 'UPDATE', schema: 'public', table: SERVANTS_TABLE, filter: `id=eq.${user.id}` },
         () => loadProfile(user.id)
       )
+      // 0045: a manager added / removed one of my places
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: SERVANT_SCOPES_TABLE, filter: `servant_id=eq.${user.id}` },
+        () => loadProfile(user.id)
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -159,7 +188,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [supabase]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, person, church, service, loading, refresh, signOut }}>
+    <AuthContext.Provider value={{ user, profile, person, scopes, multiScope: scopes.length > 1, church, service, loading, refresh, signOut }}>
       {children}
     </AuthContext.Provider>
   );

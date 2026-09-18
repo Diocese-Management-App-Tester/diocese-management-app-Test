@@ -77,12 +77,22 @@ function sanitize(raw: unknown): { ok: true; item: AddServantInput } | { ok: fal
   const gender = r.gender === 'male' || r.gender === 'female' ? r.gender : null;
   const birthdate = typeof r.birthdate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.birthdate) ? r.birthdate : null;
   const profiles = Array.isArray(r.profile_ids) ? (r.profile_ids.map(uuid).filter(Boolean) as string[]) : [];
+  // 0045: every place (primary first). Rows without a church are dropped; max 50.
+  const scopes = Array.isArray(r.scopes)
+    ? (r.scopes as unknown[]).slice(0, 50).flatMap((x) => {
+        if (!x || typeof x !== 'object') return [];
+        const o = x as Record<string, unknown>;
+        const c = uuid(o.church_id);
+        return c ? [{ church_id: c, service_id: uuid(o.service_id), class_id: uuid(o.class_id) }] : [];
+      })
+    : [];
   return {
     ok: true,
     item: {
       code, full_name, password, role, church_id,
       service_id: uuid(r.service_id),
       class_id: uuid(r.class_id),
+      scopes: scopes.length ? scopes : undefined,
       gender, birthdate,
       phone: str(r.phone, 20),
       address: str(r.address),
@@ -161,6 +171,8 @@ export async function POST(req: NextRequest) {
       p_notes: it.notes,
       p_image_url: it.image_url,
       p_profiles: it.profile_ids,
+      // 0045: the places (null → the RPC falls back to p_church/p_service/p_class)
+      p_scopes: it.scopes && it.scopes.length ? it.scopes : null,
     });
 
     if (rpcErr) {

@@ -160,7 +160,32 @@ Besides the signup wizard, a manager can now **add servants himself** from **إ�
 
 Server helpers live in `src/lib/server/backup-admin.ts` (`requireOwner`, `runSchedule`, `restoreAuthUsers`). Everything needs `SUPABASE_SERVICE_ROLE_KEY` only for the scheduled/auth parts — the manual backup & table restore run entirely from the browser through the owner-checked security-definer RPCs (`backup_allowed()` = owner or service role).
 
+### One person → many places — نطاقات متعددة للخادم · فصول متعددة للمخدوم — migration 0045
+`supabase/migrations/0045_multi_scope_servants.sql` · test `supabase/tests/multi_scope_test.sql`
+
+**The servant or the child is ONE person** (one `persons` row, one code / QR) and can now be bound to **several churches / services / classes at once** — easily, from every screen that assigns a place.
+
+**Servants — `servant_scopes` (نطاقات الخادم الإضافية)**
+```
+servant_enrollments  role · status · church_id · service_id · class_id   ← the PRIMARY place (unchanged)
+servant_scopes       servant_id → servant_enrollments · church_id · service_id · class_id   ← the OTHER places
+```
+- The **role is one** per servant and applies to every place. A place goes as deep as the role: church manager → church · service manager → church → service · class servant → church → service → class (or a whole service / church when the class is left empty).
+- **`my_scopes()`** = primary ∪ extras of the caller. **`can_access` / `scope_overlaps` / `scope_contains` / `enrollment_visible`** are true when **ANY** of the caller's places matches (`enrollment_visible` keeps its 7-argument signature — the ~30 policies and ~15 RPCs that inline it need no change — and falls back to `extra_scope_visible()` only when the primary check fails). The **churches / services / classes / servant_enrollments / persons** policies read `my_scopes()`; **`can_manage_servant`** / **`servant_in_my_scope(id)`** consider every place of the manager AND of the servant.
+- **Mirror rows** (`enrollments.kind = 'servant'`, 0042): now **one row per class he serves in** (`sync_servant_mirrors(servant)`, fired from both tables) — so on the children page's «الخدام» switch he appears in each of his classes. `uq_enrollments_servant` (one mirror per servant) is gone.
+- **`set_servant_scopes(servant, [{church_id, service_id, class_id}, …])`** — the ONE write path: the first place becomes the primary (columns), the rest → `servant_scopes`. Owner: replaces everything. Church / service manager: replaces the servant's places **inside his own area** and keeps the ones outside untouched; a place he may not grant (`scope_grantable`) → `scope_not_allowed`.
+- **`servant_signup(…, p_scopes)`** and **`admin_add_servant(…, p_scopes)`** accept the whole list (the legacy single `p_church/p_service/p_class` still works). `set_enrollments_status(kind = servant)` on a scope also suspends servants whose **extra** place lies inside it.
+- Housekeeping: the ambiguous 12-argument overload of `add_person_and_enroll` (left by 0042) is dropped.
+
+**UI — `src/components/ScopePicker.tsx`** — one component everywhere: the list of chosen places (★ primary, ✕ remove, «اجعله الأساسي»), and an «إضافة مكان آخر» chooser church → service → class (`depth` by role, `requireLeaf` for children, `lockChurch` / `lockService` / `allowedChurches` mirror the SQL grant rules). `useAuth()` exposes **`scopes`** (all places of the signed-in servant) and **`multiScope`**; `scopeFilter(profile, scopes)` (realtime) narrows to the common church / service or drops the filter for a servant in several places.
+- **`/signup` step 1 «مكان الخدمة»** — the servant adds **every class he serves in** (even in other churches); the invite link pre-fills the first one and locks its church / service. Step 4 lists them all.
+- **إدارة الخدام → الطلبات** — the card lists the requested places; the approver edits the list (role decides the depth) → approve updates the row and calls `set_servant_scopes`.
+- **إدارة الخدام → الخدام → تعديل** — «أماكن الخدمة» picker replaces the three selects (saved through `set_servant_scopes`). A multi-place servant appears **under each of his classes** in the tree with a **«N أماكن»** badge; the كنيسة → خدمة → فصل filters match ANY of his places.
+- **إدارة الخدام → إضافة (فردي / جماعي)** — «أماكن خدمة إضافية» under the role / place selects → `AddServantInput.scopes` → `POST /api/servants/create` → `admin_add_servant(p_scopes)`. In bulk the extra places apply to every row.
+- **Children** — **إدارة المخدومين → المخدومين** gets a **«الفصول»** action (`src/components/children/PersonClassesModal.tsx`): every class the child is in (across churches), **add him to several more at once** (`add_person_and_enroll` per class — same person by code, own attendance / points per class) or **remove one** (never the last — use «حذف»). Cards show a **«N فصول»** badge. The single **إضافة** form has **«فصول إضافية»** to enroll a new child in several classes in one go. Servant mirror rows are listed read-only there.
+
 ## Currently Completed Features
+- ✅ **شخص واحد في أماكن متعددة (0045)**: الخادم يخدم في عدة كنائس / خدمات / فصول (`servant_scopes` + `my_scopes()` + `set_servant_scopes`) — يختارها في التسجيل ويعدّلها المدير من الطلبات / تعديل / إضافة عبر `ScopePicker`; المخدوم يُسجَّل في عدة فصول من «الفصول» أو من نموذج الإضافة
 - ✅ **النسخ الاحتياطي والاسترجاع (0044)**: owner-only page under الإعدادات → النشاط — backup asks what to back up (every DB table grouped in Arabic + servants' login accounts, «الكل» default) and downloads ONE JSON to the device; restore from a device file asks what to restore + دمج / استبدال, FK-ordered staged upsert with triggers off; scheduled backups (daily / weekly / monthly, Cairo hour, keep last N) run by Vercel Cron into the private `backups` bucket and are downloadable from the history
 - ✅ PWA: manifest (RTL/Arabic), service worker, installable, app icons — **name / icon / diocese name & logo configurable through Vercel env vars** (see Setup Guide § 4)
 - ✅ Multi-tenant Postgres schema with **full RLS** (`supabase/migrations/0001_schema.sql`)

@@ -88,7 +88,7 @@ export function VerseWidget({ title }: WidgetProps) {
 // Today pulse — attendance ring
 // =====================================================================
 export function TodayPulseWidget({ title, size }: WidgetProps) {
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const { now } = useAppDate();
   const [supabase] = useState(() => createClient());
   const today = cairoToday(now());
@@ -101,7 +101,7 @@ export function TodayPulseWidget({ title, size }: WidgetProps) {
     } catch { setD({ attendees: 0, persons: 0, points: 0 }); }
   }, [supabase, today]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-pulse', [{ table: 'attendance_log' }, { table: 'points_log' }, { table: 'enrollments', filter: scopeFilter(profile) }], load, { delayMs: 1500 });
+  useDebouncedRealtime(supabase, 'w-pulse', [{ table: 'attendance_log' }, { table: 'points_log' }, { table: 'enrollments', filter: scopeFilter(profile, scopes) }], load, { delayMs: 1500 });
 
   const pct = d && d.persons > 0 ? Math.min(100, Math.round((d.attendees / d.persons) * 100)) : 0;
   const r = 40, c = 2 * Math.PI * r;
@@ -148,7 +148,7 @@ function Pill({ label, value, tone, signed }: { label: string; value: number; to
 interface Counts { persons: number; enrollments: number; todayAttendance: number; pendingServants: number; churches: number; services: number; classes: number }
 
 export function CountersWidget() {
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const { now } = useAppDate();
   const [supabase] = useState(() => createClient());
   const [counts, setCounts] = useState<Counts | null>(null);
@@ -161,7 +161,7 @@ export function CountersWidget() {
     setCounts({ persons: n('persons'), enrollments: n('enrollments'), todayAttendance: n('today_attendance'), pendingServants: n('pending_servants'), churches: n('churches'), services: n('services'), classes: n('classes') });
   }, [supabase, now]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'enrollments', filter: scopeFilter(profile) }, { table: 'attendance_log' }, { table: 'servant_enrollments' }], load, { delayMs: 2000 });
+  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'enrollments', filter: scopeFilter(profile, scopes) }, { table: 'attendance_log' }, { table: 'servant_enrollments' }], load, { delayMs: 2000 });
 
   const c = counts;
   return (

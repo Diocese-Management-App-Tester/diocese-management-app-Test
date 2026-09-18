@@ -9,16 +9,18 @@
 //   * ScopeFilters: search · كنيسة → خدمة → فصل · الكل / يعمل / موقوف
 //   * the list is ALWAYS grouped church → service → class (nested sticky
 //     headers, each with a count and ⏸ إيقاف الكل / ▶ تفعيل الكل for that node)
-//   * per child: تعديل (data + scope move) · إيقاف/تفعيل · حذف
+//   * per child: تعديل (data + scope move) · الفصول (0045: add him to MORE
+//     classes / remove one — PersonClassesModal) · إيقاف/تفعيل · حذف
 //   * «إيقاف / تفعيل نطاق كامل» card → RPC set_enrollments_status
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Pencil, Trash2, PauseCircle, PlayCircle, IdCard, Phone } from 'lucide-react';
+import { Loader2, Pencil, Trash2, PauseCircle, PlayCircle, IdCard, Phone, School } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
 import { EditPersonModal, DeletePersonModal } from '@/components/PersonDataModals';
+import PersonClassesModal from '@/components/children/PersonClassesModal';
 import {
   ScopeFilters, ScopeTreeView, PersonCard, BulkScopeStatusCard, PanelNotice, buildScopeTree,
   type StatusFilter, type ScopeSelection, type ScopeNode,
@@ -51,6 +53,7 @@ export default function ManagePeoplePanel() {
   // modals
   const [editChild, setEditChild] = useState<EnrollmentWithPerson | null>(null);
   const [deleteChild, setDeleteChild] = useState<EnrollmentWithPerson | null>(null);
+  const [classesOf, setClassesOf] = useState<EnrollmentWithPerson | null>(null);
 
   const loadLookups = useCallback(async (force = false) => {
     const [chs, svs, cls] = await Promise.all([
@@ -106,6 +109,13 @@ export default function ManagePeoplePanel() {
   );
 
   const tree = useMemo(() => buildScopeTree(visible, lookups, (e) => e.person.name), [visible, lookups]);
+
+  // 0045: how many classes each person is in (within what the caller sees)
+  const classCount = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.person_id, (m.get(r.person_id) ?? 0) + 1);
+    return m;
+  }, [rows]);
 
   const flash = (tone: 'ok' | 'err', text: string) => {
     setNotice({ tone, text });
@@ -183,6 +193,9 @@ export default function ManagePeoplePanel() {
                   name={e.person.name}
                   photo={e.person.image_url}
                   stopped={stopped}
+                  badges={(classCount.get(e.person_id) ?? 1) > 1 ? (
+                    <span className="badge bg-amber-100 text-amber-700"><School className="h-3 w-3" /> {classCount.get(e.person_id)} فصول</span>
+                  ) : undefined}
                   meta={
                     <>
                       <span className="flex items-center gap-1" dir="ltr"><IdCard className="h-3 w-3" /> {e.person.national_id}</span>
@@ -191,6 +204,7 @@ export default function ManagePeoplePanel() {
                   }
                   actions={[
                     { id: `edit-${e.id}`, tone: 'primary', icon: <Pencil className="h-3.5 w-3.5" />, label: 'تعديل', onClick: () => setEditChild(e), disabled: rowBusy },
+                    { id: `classes-${e.id}`, tone: 'violet', icon: <School className="h-3.5 w-3.5" />, label: 'الفصول', onClick: () => setClassesOf(e), disabled: rowBusy },
                     { id: `stop-${e.id}`, tone: stopped ? 'emerald' : 'amber', busy: rowBusy,
                       icon: stopped ? <PlayCircle className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />,
                       label: stopped ? 'تفعيل' : 'إيقاف', onClick: () => toggleChild(e) },
@@ -215,6 +229,10 @@ export default function ManagePeoplePanel() {
       {deleteChild && (
         <DeletePersonModal enrollment={deleteChild} churches={churches} services={services} classes={classes}
           onDeleted={load} onClose={() => setDeleteChild(null)} />
+      )}
+      {classesOf && (
+        <PersonClassesModal person={classesOf.person} churches={churches} services={services} classes={classes}
+          onChanged={load} onClose={() => setClassesOf(null)} />
       )}
     </>
   );

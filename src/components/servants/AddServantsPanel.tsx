@@ -259,7 +259,7 @@ function SingleAddServant({
         <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600">
           <MapPin className="h-4 w-4 text-primary-500" /> ١ · الدور ومكان الخدمة
         </p>
-        <RoleScopeFields scope={scope} approver={approver} churches={churches} idPrefix="add" />
+        <RoleScopeFields scope={scope} approver={approver} churches={churches} services={services} classes={classes} idPrefix="add" />
       </div>
 
       {/* 2 — code */}

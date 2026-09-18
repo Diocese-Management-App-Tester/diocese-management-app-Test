@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-  Loader2, X, Pencil, Save, Upload, IdCard, Phone, ShieldCheck, PauseCircle, PlayCircle, Trash2, KeyRound, Check,
+  Loader2, X, Pencil, Save, Upload, IdCard, Phone, ShieldCheck, PauseCircle, PlayCircle, Trash2, KeyRound, Check, MapPin,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { usePermissions } from '@/lib/permissions-context';
@@ -23,28 +23,45 @@ import { uploadPhoto } from '@/lib/upload';
 import { ALL } from '@/lib/queries';
 import ResetPasswordSection from '@/components/ResetPasswordSection';
 import { EditCodeModal } from '@/components/PersonDataModals';
+import ScopePicker, { scopeLabel, clampScope } from '@/components/ScopePicker';
+import { roleDepth, grantableLocks } from '@/components/servants/ApprovalsPanel';
 import { changeServantCode, resetServantPassword, servantAccountMessage } from '@/lib/servant-account';
 import {
   ScopeFilters, ScopeTreeView, PersonCard, BulkScopeStatusCard, PanelNotice, buildScopeTree,
   type StatusFilter, type ScopeSelection, type ScopeNode,
 } from '@/components/ScopeTree';
-import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, PermissionProfile } from '@/lib/types';
-import { ROLE_LABELS, SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender } from '@/lib/types';
+import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person, PermissionProfile, ScopeRef, ServantScope } from '@/lib/types';
+import { ROLE_LABELS, SERVANTS_TABLE, SERVANT_SCOPES_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, allScopesOf, type Gender } from '@/lib/types';
 
-export type Servant = ServantEnrollment & { person: Person | null };
+/** 0045: `extra_scopes` = his other places (servant_scopes rows) */
+export type Servant = ServantEnrollment & { person: Person | null; extra_scopes?: ServantScope[] };
 
-/** Who may edit / suspend / delete this servant (mirror of the RLS + can_manage_servant). */
-export const canManageServant = (profile: ServantEnrollment | null | undefined, p: ServantEnrollment): boolean => {
+/**
+ * Who may edit / suspend / delete this servant (mirror of the RLS +
+ * can_manage_servant, 0045: ANY place of the servant inside ANY place of
+ * the manager). `myScopes` = useAuth().scopes (falls back to the primary).
+ */
+export const canManageServant = (
+  profile: ServantEnrollment | null | undefined,
+  p: ServantEnrollment & { extra_scopes?: ScopeRef[] },
+  myScopes?: ScopeRef[],
+): boolean => {
   if (!profile || p.id === profile.id) return false;
   if (profile.role === 'owner') return true;
-  if (profile.role === 'church_manager') return p.church_id === profile.church_id && p.role !== 'owner';
-  if (profile.role === 'service_manager')
-    return p.role === 'class_servant' && (p.service_id === profile.service_id || (profile.service_id === null && p.church_id === profile.church_id));
+  const mine = myScopes?.length ? myScopes : allScopesOf(profile);
+  const theirs = allScopesOf(p, p.extra_scopes ?? []);
+  if (profile.role === 'church_manager') {
+    return p.role !== 'owner' && theirs.some((t) => mine.some((m) => m.church_id === t.church_id));
+  }
+  if (profile.role === 'service_manager') {
+    return p.role === 'class_servant'
+      && theirs.some((t) => mine.some((m) => (m.service_id === null && m.church_id === t.church_id) || (!!t.service_id && t.service_id === m.service_id)));
+  }
   return false;
 };
 
 export default function ServantsPanel() {
-  const { profile } = useAuth();
+  const { profile, scopes: myScopes } = useAuth();
   const { profiles: permissionProfiles, grants, reload: reloadPermissions } = usePermissions();
   const [supabase] = useState(() => createClient());
   const [servants, setServants] = useState<Servant[]>([]);
@@ -64,16 +81,20 @@ export default function ServantsPanel() {
 
   const isManager = profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
 
-  const canManage = (p: ServantEnrollment) => canManageServant(profile, p);
+  const canManage = (p: Servant) => canManageServant(profile, p, myScopes);
 
   const load = useCallback(async () => {
-    const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
+    const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }, { data: xs }] = await Promise.all([
       supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').in('status', ['approved', 'suspended']).order('full_name'),
       supabase.from('churches').select('*').order('name'),
       supabase.from('services').select('*').order('name'),
       supabase.from('classes').select('*').order('name'),
+      supabase.from(SERVANT_SCOPES_TABLE).select('*'),
     ]);
-    setServants((pr ?? []) as Servant[]);
+    // 0045: attach the extra places
+    const by = new Map<string, ServantScope[]>();
+    for (const x of (xs ?? []) as ServantScope[]) by.set(x.servant_id, [...(by.get(x.servant_id) ?? []), x]);
+    setServants(((pr ?? []) as Servant[]).map((s) => ({ ...s, extra_scopes: by.get(s.id) ?? [] })));
     setChurches(ch ?? []);
     setServices(sv ?? []);
     setClasses(cl ?? []);
@@ -84,7 +105,7 @@ export default function ServantsPanel() {
     if (profile?.status === 'approved') load();
   }, [profile?.status, load]);
 
-  useDebouncedRealtime(supabase, 'servants-page', [{ table: SERVANTS_TABLE }, { table: 'persons' }], load, { enabled: !!profile });
+  useDebouncedRealtime(supabase, 'servants-page', [{ table: SERVANTS_TABLE }, { table: 'persons' }, { table: SERVANT_SCOPES_TABLE }], load, { enabled: !!profile });
 
   const lookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
 
@@ -101,12 +122,15 @@ export default function ServantsPanel() {
   }, [grants, permissionProfiles]);
 
   // scope + search (status kept separate so the tab counters stay right)
+  // 0045: a servant matches the filter when ANY of his places does
   const scoped = useMemo(() => {
     const t = q.trim().toLowerCase();
+    const hit = (s: Servant) => allScopesOf(s, s.extra_scopes ?? []).some((x) =>
+      (scope.church === ALL || x.church_id === scope.church)
+      && (scope.service === ALL || x.service_id === scope.service)
+      && (scope.class === ALL || x.class_id === scope.class));
     return servants.filter((s) =>
-      (scope.church === ALL || s.church_id === scope.church)
-      && (scope.service === ALL || s.service_id === scope.service)
-      && (scope.class === ALL || s.class_id === scope.class)
+      (scope.church === ALL && scope.service === ALL && scope.class === ALL ? true : hit(s))
       && (!t
         || s.full_name.toLowerCase().includes(t)
         || (s.person?.national_id ?? s.user_id).toLowerCase().includes(t)
@@ -124,7 +148,14 @@ export default function ServantsPanel() {
     [scoped, statusFilter]
   );
 
-  const tree = useMemo(() => buildScopeTree(visible, lookups, (s) => s.full_name), [visible, lookups]);
+  // 0045: a multi-place servant appears under EACH of his places in the tree
+  // (same account, so the actions are the same on every copy)
+  const treeRows = useMemo(() => visible.flatMap((s) => {
+    const all = allScopesOf(s, s.extra_scopes ?? []);
+    if (all.length <= 1) return [s];
+    return all.map((x) => ({ ...s, church_id: x.church_id, service_id: x.service_id, class_id: x.class_id }));
+  }), [visible]);
+  const tree = useMemo(() => buildScopeTree(treeRows, lookups, (s) => s.full_name), [treeRows, lookups]);
 
   const flash = (tone: 'ok' | 'err', text: string) => {
     setNotice({ tone, text });
@@ -213,18 +244,26 @@ export default function ServantsPanel() {
             const stopped = p.status === 'suspended';
             const rowBusy = busy === p.id;
             const manageable = canManage(p);
+            const places = allScopesOf(servants.find((s) => s.id === p.id) ?? p, p.extra_scopes ?? []);
             return (
               <PersonCard
-                key={p.id}
+                key={`${p.id}-${p.class_id ?? p.service_id ?? p.church_id ?? ''}`}
                 id={`servant-row-${p.id}`}
                 kind="servant"
                 name={p.full_name}
                 photo={p.person?.image_url ?? p.photo_url}
                 stopped={stopped}
                 badges={
-                  <span className="badge bg-primary-100 text-primary-700">
-                    <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
-                  </span>
+                  <>
+                    <span className="badge bg-primary-100 text-primary-700">
+                      <ShieldCheck className="h-3 w-3" /> {ROLE_LABELS[p.role]}
+                    </span>
+                    {places.length > 1 && (
+                      <span className="badge bg-amber-100 text-amber-700" title={places.map((x) => scopeLabel(x, lookups, roleDepth(p.role))).join('\n')}>
+                        <MapPin className="h-3 w-3" /> {places.length} أماكن
+                      </span>
+                    )}
+                  </>
                 }
                 meta={
                   <>
@@ -247,7 +286,7 @@ export default function ServantsPanel() {
                   </div>
                 ) : undefined}
                 actions={manageable ? [
-                  { id: `edit-${p.id}`, tone: 'primary', icon: <Pencil className="h-3.5 w-3.5" />, label: 'تعديل', onClick: () => setEditing(p), disabled: rowBusy },
+                  { id: `edit-${p.id}`, tone: 'primary', icon: <Pencil className="h-3.5 w-3.5" />, label: 'تعديل', onClick: () => setEditing(servants.find((s) => s.id === p.id) ?? p), disabled: rowBusy },
                   { id: `perms-${p.id}`, tone: 'violet', icon: <KeyRound className="h-3.5 w-3.5" />, label: 'الصلاحيات', onClick: () => setPermsFor(p), disabled: rowBusy },
                   { id: `stop-${p.id}`, tone: stopped ? 'emerald' : 'amber', busy: rowBusy,
                     icon: stopped ? <PlayCircle className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />,
@@ -299,6 +338,7 @@ export function EditServantModal({
   onSaved: () => void;
 }) {
   const supabase = createClient();
+  const { scopes: approverScopes } = useAuth();
   const person = servant.person;
   const [fullName, setFullName] = useState(servant.full_name);
   const [phoneLocal, setPhoneLocal] = useState((person?.phone ?? servant.phone ?? '').replace(/^\+2/, '').replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH));
@@ -307,9 +347,26 @@ export function EditServantModal({
   const [address, setAddress] = useState(person?.address ?? '');
   const [notes, setNotes] = useState(person?.notes ?? '');
   const [role, setRole] = useState<AppRole>(servant.role);
-  const [churchId, setChurchId] = useState(servant.church_id ?? '');
-  const [serviceId, setServiceId] = useState(servant.service_id ?? '');
-  const [classId, setClassId] = useState(servant.class_id ?? '');
+  // 0045: ALL his places (primary first) — saved through set_servant_scopes
+  const initialScopes = useMemo(() => allScopesOf(servant, servant.extra_scopes ?? []), [servant]);
+  const [scopes, setScopes] = useState<ScopeRef[]>(initialScopes);
+  const churchId = scopes[0]?.church_id ?? '';
+  const serviceId = scopes[0]?.service_id ?? '';
+  const classId = scopes[0]?.class_id ?? '';
+  const lookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
+  const depth = roleDepth(role);
+  const locks = grantableLocks(approver, approverScopes);
+  const scopesChanged = JSON.stringify(scopes.map((s) => clampScope(s, depth)))
+    !== JSON.stringify(initialScopes.map((s) => clampScope(s, roleDepth(servant.role))));
+  const onRole = (r: AppRole) => {
+    setRole(r);
+    const d = roleDepth(r);
+    const seen = new Set<string>();
+    setScopes((list) => list.map((s) => clampScope(s, d)).filter((s) => {
+      const k = `${s.church_id}|${s.service_id ?? ''}|${s.class_id ?? ''}`;
+      if (seen.has(k)) return false; seen.add(k); return true;
+    }));
+  };
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -335,18 +392,13 @@ export function EditServantModal({
       ? ['service_manager', 'class_servant']
       : ['class_servant'];
 
-  const churchLocked = approver.role !== 'owner';
-  const serviceLocked = approver.role === 'service_manager';
-
-  const scopedServices = services.filter((s) => !churchId || s.church_id === churchId);
-  const scopedClasses = classes.filter((c) => !serviceId || c.service_id === serviceId);
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (phoneLocal && phoneLocal.length !== PHONE_LOCAL_LENGTH) {
       return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا بعد ${PHONE_PREFIX}`);
     }
+    if (scopes.length === 0 && role !== 'owner') return setError('اختر مكان الخدمة (الكنيسة على الأقل)');
     setSaving(true);
 
     let photo_url = person?.image_url ?? servant.photo_url ?? null;
@@ -385,16 +437,15 @@ export function EditServantModal({
       if (pe) { setError('تعذر حفظ بيانات الشخص'); setSaving(false); return; }
     }
 
-    // 2) the enrollment: role + scope (+ mirrors for safety)
+    // 2) the enrollment: role (+ mirrors for safety). The primary scope is
+    //    written by set_servant_scopes below so the columns and the list
+    //    never disagree.
     const { error: err } = await supabase
       .from(SERVANTS_TABLE)
       .update({
         full_name: fullName.trim(),
         phone,
         role,
-        church_id: churchId || null,
-        service_id: serviceId || null,
-        class_id: classId || null,
         photo_url,
       })
       .eq('id', servant.id);
@@ -404,11 +455,21 @@ export function EditServantModal({
       setSaving(false);
       return;
     }
+
+    // 3) 0045: the places — one RPC replaces the list (primary = first)
+    if (scopesChanged || role !== servant.role) {
+      const { error: se } = await supabase.rpc('set_servant_scopes', {
+        p_servant: servant.id,
+        p_scopes: scopes.map((s) => clampScope(s, depth)),
+      });
+      if (se) {
+        setError(se.message?.includes('scope_not_allowed') ? 'أحد الأماكن خارج نطاق إدارتك' : 'تعذر حفظ أماكن الخدمة (حدّث قاعدة البيانات 0045)');
+        setSaving(false);
+        return;
+      }
+    }
     onSaved();
   };
-
-  const lockCls = (locked: boolean) =>
-    `input-field ${locked ? 'bg-primary-50 pointer-events-none opacity-80' : ''}`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-6">
@@ -483,36 +544,25 @@ export function EditServantModal({
 
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-500">الدور</label>
-            <select className="input-field" value={role} onChange={(e) => setRole(e.target.value as AppRole)}>
+            <select className="input-field" value={role} onChange={(e) => onRole(e.target.value as AppRole)}>
               {grantableRoles.map((r) => (
                 <option key={r} value={r}>{ROLE_LABELS[r]}</option>
               ))}
             </select>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">الكنيسة</label>
-            <select className={lockCls(churchLocked)} value={churchId}
-              onChange={(e) => { setChurchId(e.target.value); setServiceId(''); setClassId(''); }}>
-              <option value="">كل الكنائس (بدون تحديد)</option>
-              {churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">الخدمة</label>
-            <select className={lockCls(serviceLocked)} value={serviceId}
-              onChange={(e) => { setServiceId(e.target.value); setClassId(''); }}>
-              <option value="">كل الخدمات (بدون تحديد)</option>
-              {scopedServices.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">الفصل</label>
-            <select className="input-field" value={classId} onChange={(e) => setClassId(e.target.value)}>
-              <option value="">كل الفصول (بدون تحديد)</option>
-              {scopedClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
+          {/* 0045: every place of the servant — add / remove / make primary */}
+          <ScopePicker
+            idPrefix={`edit-servant-${servant.id}`}
+            title="أماكن الخدمة"
+            hint="يمكن للخادم أن يخدم في أكثر من فصل أو خدمة أو كنيسة — الأول هو الأساسي"
+            value={scopes}
+            onChange={setScopes}
+            lookups={lookups}
+            depth={depth}
+            allowedChurches={locks.allowedChurches}
+            lockService={locks.lockService}
+          />
 
           <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-emerald-50/50 px-4 py-3 text-sm font-bold text-emerald-600">
             <Upload className="h-4 w-4" />

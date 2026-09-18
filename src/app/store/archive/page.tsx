@@ -36,7 +36,7 @@ const dayLabel = (iso: string) =>
 type StatusFilter = 'all' | StoreOrderStatus;
 
 export default function ArchivePage() {
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const [supabase] = useState(() => createClient());
   const approved = profile?.status === 'approved';
   const isManager = !!profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
@@ -80,7 +80,7 @@ export default function ArchivePage() {
 
   useEffect(() => { if (approved) load(0, false); }, [approved, load]);
   useDebouncedRealtime(
-    supabase, 'store-archive', [{ table: 'store_orders', filter: scopeFilter(profile) }],
+    supabase, 'store-archive', [{ table: 'store_orders', filter: scopeFilter(profile, scopes) }],
     () => load(0, false), { enabled: approved, delayMs: 800 }
   );
 

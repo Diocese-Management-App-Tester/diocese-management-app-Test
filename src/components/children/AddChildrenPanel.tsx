@@ -29,9 +29,10 @@ import {
 import {
   PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
   type Gender, type Church, type Service, type ClassRoom,
-  type Person, type AddPersonResult,
+  type Person, type AddPersonResult, type ScopeRef,
   DEFAULT_PASSWORD,
 } from '@/lib/types';
+import ScopePicker from '@/components/ScopePicker';
 
 // ---------- Helpers ----------
 
@@ -228,6 +229,9 @@ function SingleAddTab({
   // code generator following the owner's نظام الأكواد (scope → church/service/class abbreviations)
   const genPersonCode = useCodeGenerator('person');
   const generateCode = () => genPersonCode({ churchId: scope.churchId, serviceId: scope.serviceId, classId: scope.classId });
+  // 0045: OTHER classes to enroll him in at the same time (the selects above = the main class)
+  const [extraClasses, setExtraClasses] = useState<ScopeRef[]>([]);
+  const pickerLookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
 
   // ---- National ID (the QR code) + QR square ----
   const [code, setCode] = useState('');
@@ -354,6 +358,7 @@ function SingleAddTab({
     setName(''); setGender(''); setPhoneLocal('');
     setBDay(''); setBMonth(''); setBYear('');
     setAddress(''); setNotes(''); setStartPoints('0'); setPassword('');
+    setExtraClasses([]);
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -405,16 +410,34 @@ function SingleAddTab({
         return;
       }
       const result = data as AddPersonResult;
-      if (result?.already_enrolled) {
+      if (result?.already_enrolled && extraClasses.length === 0) {
         setError(`"${name.trim()}" مسجّل بالفعل في هذا الفصل`);
         setSaving(false);
         return;
       }
+
+      // 0045: the other classes — same person (by code), one enrollment each
+      let extraOk = 0; const extraFail: string[] = [];
+      for (const x of extraClasses) {
+        if (!x.class_id || !x.service_id || x.class_id === cls.id) continue;
+        const { error: xe, data: xd } = await supabase.rpc('add_person_and_enroll', {
+          p_church: x.church_id, p_service: x.service_id, p_class: x.class_id,
+          p_name: name.trim(), p_national_id: result?.national_id ?? (code.trim() || null),
+          p_gender: gender || null, p_birthdate: composeBirthdate(bDay, bMonth, bYear),
+          p_phone: phoneLocal ? `${PHONE_PREFIX}${phoneLocal}` : null,
+          p_address: address.trim() || null, p_notes: notes.trim() || null,
+          p_image_url: photoUrl, p_points: points, p_password: null,
+        });
+        if (xe) extraFail.push(classes.find((c) => c.id === x.class_id)?.name ?? '—');
+        else if (!(xd as AddPersonResult)?.already_enrolled) extraOk++;
+      }
+
+      const total = (result?.already_enrolled ? 0 : 1) + extraOk;
       setSavedName(
-        result?.person_created
-          ? name.trim()
-          : `${name.trim()} (شخص موجود — تم تسجيله في الفصل)`
+        (result?.person_created ? name.trim() : `${name.trim()} (شخص موجود)`)
+        + (extraClasses.length ? ` — سُجّل في ${total} ${total === 1 ? 'فصل' : 'فصول'}` : result?.person_created ? '' : ' — تم تسجيله في الفصل')
       );
+      if (extraFail.length) setError(`تعذر التسجيل في: ${extraFail.join('، ')}`);
       resetForm();
       setSaving(false);
     } catch {
@@ -491,6 +514,23 @@ function SingleAddTab({
       {/* ---------- Scope ---------- */}
       <div className="card space-y-3">
         <ScopeSelectors scope={scope} churches={churches} idPrefix="single" />
+
+        {/* 0045: enroll him in MORE classes at once */}
+        {scope.classId && (
+          <ScopePicker
+            idPrefix="single-extra"
+            title="فصول إضافية"
+            hint="المخدوم شخص واحد — يمكن تسجيله في أكثر من فصل أو خدمة أو كنيسة في نفس الوقت (الفصل أعلاه هو الأساسي)"
+            value={extraClasses}
+            onChange={setExtraClasses}
+            lookups={{ ...pickerLookups, classes: classes.filter((c) => c.id !== scope.classId) }}
+            depth="class"
+            requireLeaf
+            primaryLabel={null}
+            emptyText="لا توجد فصول إضافية"
+            addLabel="إضافة فصل آخر"
+          />
+        )}
 
         {/* National ID (the QR code) */}
         <div>

@@ -6,11 +6,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { KeyRound } from 'lucide-react';
+import ScopePicker, { clampScope, dedupeScopes, type ScopeDepth } from '@/components/ScopePicker';
+import { useAuth } from '@/lib/auth-context';
 import {
-  ROLE_LABELS, ADD_SERVANT_ERROR_LABELS,
+  ROLE_LABELS, ADD_SERVANT_ERROR_LABELS, scopeKey,
   type AppRole, type Church, type Service, type ClassRoom, type ServantEnrollment,
-  type AddServantInput, type AddServantOutcome, type AddServantError, type PermissionProfile,
+  type AddServantInput, type AddServantOutcome, type AddServantError, type PermissionProfile, type ScopeRef,
 } from '@/lib/types';
+
+const depthOf = (r: AppRole): ScopeDepth => r === 'church_manager' ? 'church' : r === 'service_manager' ? 'service' : 'class';
 
 /** Which roles may THIS manager grant? (mirror of the approval flow + SQL) */
 export function grantableRoles(approver: ServantEnrollment): AppRole[] {
@@ -58,6 +62,9 @@ export function useServantScope(approver: ServantEnrollment | null, churches: Ch
   const [churchId, setChurchId] = useState('');
   const [serviceId, setServiceId] = useState('');
   const [classId, setClassId] = useState('');
+  // 0045: ADDITIONAL places besides the primary one above
+  const [extraScopes, setExtraScopes] = useState<ScopeRef[]>([]);
+  const { scopes: approverScopes } = useAuth();
 
   useEffect(() => {
     if (!approver) return;
@@ -85,6 +92,7 @@ export function useServantScope(approver: ServantEnrollment | null, churches: Ch
     setRole(r);
     if (r === 'church_manager') { if (!serviceLocked) setServiceId(''); setClassId(''); }
     if (r === 'service_manager') setClassId('');
+    setExtraScopes((xs) => dedupeScopes(xs.map((x) => clampScope(x, depthOf(r)))));
   };
 
   /** validation message or null */
@@ -94,6 +102,23 @@ export function useServantScope(approver: ServantEnrollment | null, churches: Ch
     return null;
   };
 
+  const primary: ScopeRef | null = churchId ? {
+    church_id: churchId,
+    service_id: needService ? (serviceId || null) : null,
+    class_id: needClass ? (classId || null) : null,
+  } : null;
+  // every place, primary first, without duplicates of the primary
+  const allScopes: ScopeRef[] = primary
+    ? [primary, ...extraScopes.map((x) => clampScope(x, depthOf(role))).filter((x) => scopeKey(x) !== scopeKey(primary))]
+    : [];
+
+  // churches / services the approver may grant (mirror of SQL scope_grantable)
+  const allowedChurches = approver && approver.role !== 'owner'
+    ? Array.from(new Set((approverScopes.length ? approverScopes.map((s) => s.church_id) : [approver.church_id ?? '']).filter(Boolean)))
+    : undefined;
+  const wholeChurch = approverScopes.some((s) => !s.service_id);
+  const lockServiceExtra = approver?.role === 'service_manager' && !wholeChurch && approver.service_id ? approver.service_id : null;
+
   return {
     role, churchId, serviceId, classId,
     setRole: onRole, onChurch, onService, setClassId,
@@ -102,16 +127,22 @@ export function useServantScope(approver: ServantEnrollment | null, churches: Ch
       church_id: churchId,
       service_id: needService ? (serviceId || null) : null,
       class_id: needClass ? (classId || null) : null,
+      scopes: allScopes,
     },
+    // 0045
+    extraScopes, setExtraScopes, allScopes, depth: depthOf(role), allowedChurches, lockServiceExtra,
   };
 }
 
 export function RoleScopeFields({
-  scope, approver, churches, idPrefix,
+  scope, approver, churches, idPrefix, services = [], classes = [], extraLabel = 'أماكن خدمة إضافية',
 }: {
   scope: ReturnType<typeof useServantScope>; approver: ServantEnrollment; churches: Church[]; idPrefix: string;
+  /** 0045: pass services + classes to show the «أماكن إضافية» picker */
+  services?: Service[]; classes?: ClassRoom[]; extraLabel?: string;
 }) {
   const lockCls = (locked: boolean) => `input-field ${locked ? 'bg-primary-50 pointer-events-none opacity-80' : ''}`;
+  const lookups = useMemo(() => ({ churches, services, classes }), [churches, services, classes]);
   return (
     <div className="space-y-3">
       <div>
@@ -147,6 +178,23 @@ export function RoleScopeFields({
             {scope.visibleClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
+      )}
+      {/* 0045: more places (the selects above = the primary place) */}
+      {(services.length > 0 || scope.depth === 'church') && scope.churchId && (
+        <ScopePicker
+          idPrefix={`${idPrefix}-extra`}
+          title={extraLabel}
+          hint="يخدم في أكثر من فصل أو خدمة أو كنيسة؟ أضف باقي الأماكن هنا — المكان أعلاه هو الأساسي"
+          value={scope.extraScopes}
+          onChange={scope.setExtraScopes}
+          lookups={lookups}
+          depth={scope.depth}
+          allowedChurches={scope.allowedChurches}
+          lockService={scope.lockServiceExtra}
+          primaryLabel={null}
+          emptyText="لا توجد أماكن إضافية"
+          addLabel="إضافة مكان آخر"
+        />
       )}
     </div>
   );

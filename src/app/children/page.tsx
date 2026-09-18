@@ -100,7 +100,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
 
 export default function ChildrenPage() {
   const pageName = useNavLabel('children');
-  const { profile } = useAuth();
+  const { profile, scopes } = useAuth();
   const supabase = createClient();
   const router = useRouter();
   const [enrollments, setEnrollments] = useState<EnrollmentWithPerson[]>([]);
@@ -338,7 +338,7 @@ export default function ChildrenPage() {
 
   // Realtime sync — debounced (bursts of scans → ONE reload), filtered to
   // the caller's own scope, paused while the tab is hidden.
-  const rtFilter = scopeFilter(profile);
+  const rtFilter = scopeFilter(profile, scopes);
   useDebouncedRealtime(
     supabase,
     'persons-list',
