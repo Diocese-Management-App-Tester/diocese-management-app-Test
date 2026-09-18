@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -14,6 +14,7 @@ import type { CardTemplate } from '@/lib/card-types';
 import { DEFAULT_DESIGN, DEFAULT_PRINT_SETTINGS } from '@/lib/card-types';
 import BoundPrintTab from '@/components/cards/BoundPrintTab';
 import { useNavLabel } from '@/lib/customization-context';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 
 const ALL = '__all__';
 
@@ -51,14 +52,14 @@ export default function CardTemplatesPage() {
     if (profile?.status === 'approved') load();
   }, [profile, load]);
 
-  const scopeLabel = (t: CardTemplate) => {
-    const church = churches.find((c) => c.id === t.church_id)?.name ?? '';
-    if (t.service_id === null) return `${church} ← كل الخدمات`;
-    const service = services.find((s) => s.id === t.service_id)?.name ?? '';
-    if (t.class_id === null) return `${church} ← ${service} ← كل الفصول`;
-    const cls = classes.find((c) => c.id === t.class_id)?.name ?? '';
-    return `${church} ← ${service} ← ${cls}`;
-  };
+  // church → service → class tree + filter
+  const lookups = useMemo(() => toLookups(churches, services, classes), [churches, services, classes]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    templates,
+    (t, q) => t.name.toLowerCase().includes(q),
+  );
+  const scopeBadge = (t: CardTemplate) =>
+    t.service_id === null ? 'كل الخدمات' : t.class_id === null ? 'كل الفصول' : null;
 
   const duplicate = async (t: CardTemplate) => {
     await supabase.from('card_templates').insert({
@@ -125,15 +126,24 @@ export default function CardTemplatesPage() {
       ) : loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {templates.map((t) => (
+        <>
+        <ScopeGroupFilters idPrefix="cards" scope={scope} onScope={setScope} lookups={lookups}
+          search={search} onSearch={setSearch} placeholder="بحث باسم القالب..." />
+        <ScopeGroups
+          idPrefix="cards"
+          rows={visible}
+          lookups={lookups}
+          tone="indigo"
+          itemName={(t) => t.name}
+          emptyText={templates.length === 0 ? 'لا توجد قوالب بعد — أنشئ قالبك الأول' : 'لا توجد قوالب مطابقة'}
+          renderItem={(t) => (
             <li key={t.id} className="card flex items-center gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary-50 ring-2 ring-primary-100">
                 <IdCard className="h-6 w-6 text-primary-500" />
               </div>
               <Link href={`/settings/cards/${t.id}`} className="min-w-0 flex-1">
                 <p className="font-extrabold truncate">{t.name}</p>
-                <p className="text-xs text-slate-400 truncate">{scopeLabel(t)}</p>
+                {scopeBadge(t) && <p className="mt-0.5 text-[11px] text-slate-400">{scopeBadge(t)}</p>}
               </Link>
               <button
                 onClick={() => setRebinding(t)}
@@ -161,13 +171,9 @@ export default function CardTemplatesPage() {
                 <ChevronLeft className="h-5 w-5" />
               </Link>
             </li>
-          ))}
-          {templates.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">
-              لا توجد قوالب بعد — أنشئ قالبك الأول
-            </li>
           )}
-        </ul>
+        />
+        </>
       )}
 
       {showAdd && (

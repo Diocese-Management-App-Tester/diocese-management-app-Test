@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   CalendarDays, Plus, ArrowRight, Loader2, X, Pencil, Save, Trash2, Star, Clock,
@@ -9,6 +9,7 @@ import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { AppEvent, ClassRoom, Service, Church, EventRecurrence, PointsMode } from '@/lib/types';
 import { POINTS_MODE_LABELS } from '@/lib/types';
 import { WEEKDAY_LABELS, describeEventSchedule } from '@/lib/time';
@@ -49,16 +50,14 @@ export default function EventsPage() {
 
   useDebouncedRealtime(supabase, 'events-page', [{ table: 'events' }], load, { enabled: !!profile });
 
-  const churchName = (id: string) => churches.find((c) => c.id === id)?.name ?? '';
-
-  const scopeLabel = (ev: AppEvent) => {
-    const church = churchName(ev.church_id);
-    if (ev.service_id === null) return `${church} ← كل الخدمات`;
-    const service = services.find((s) => s.id === ev.service_id)?.name ?? '';
-    if (ev.class_id === null) return `${church} ← ${service} ← كل الفصول`;
-    const cls = classes.find((c) => c.id === ev.class_id)?.name ?? '';
-    return `${church} ← ${service} ← ${cls}`;
-  };
+  // church → service → class tree + filter (a church-wide event sits under its church)
+  const lookups = useMemo(() => toLookups(churches, services, classes), [churches, services, classes]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    events,
+    (ev, q) => ev.name.toLowerCase().includes(q) || (ev.description ?? '').toLowerCase().includes(q),
+  );
+  const scopeBadge = (ev: AppEvent) =>
+    ev.service_id === null ? 'كل الخدمات' : ev.class_id === null ? 'كل الفصول' : null;
 
   const remove = async (ev: AppEvent) => {
     if (!confirm(`حذف المناسبة «${ev.name}»؟ سجلات الحضور المرتبطة بها ستبقى بدون مناسبة.`)) return;
@@ -93,8 +92,17 @@ export default function EventsPage() {
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {events.map((ev) => (
+        <>
+        <ScopeGroupFilters idPrefix="events" scope={scope} onScope={setScope} lookups={lookups}
+          search={search} onSearch={setSearch} placeholder="بحث باسم المناسبة..." />
+        <ScopeGroups
+          idPrefix="events"
+          rows={visible}
+          lookups={lookups}
+          tone="violet"
+          itemName={(ev) => ev.name}
+          emptyText={events.length === 0 ? 'لا توجد مناسبات بعد' : 'لا توجد مناسبات مطابقة'}
+          renderItem={(ev) => (
             <li key={ev.id} className="card flex items-start gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-violet-50 ring-2 ring-violet-100">
                 <CalendarDays className="h-6 w-6 text-violet-400" />
@@ -110,8 +118,8 @@ export default function EventsPage() {
                   {ev.is_default && (
                     <span className="badge bg-emerald-100 text-emerald-700">افتراضي</span>
                   )}
+                  {scopeBadge(ev) && <span className="badge bg-slate-100 text-slate-500">{scopeBadge(ev)}</span>}
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">{scopeLabel(ev)}</p>
                 <p className="text-xs font-bold text-violet-600 mt-1 flex items-center gap-1">
                   <Clock className="h-3 w-3" /> {describeEventSchedule(ev)}
                 </p>
@@ -134,11 +142,9 @@ export default function EventsPage() {
                 </button>
               </div>
             </li>
-          ))}
-          {events.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">لا توجد مناسبات بعد</li>
           )}
-        </ul>
+        />
+        </>
       )}
 
       {showAdd && (

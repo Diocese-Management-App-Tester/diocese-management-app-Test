@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Layers, Plus, ArrowRight, Loader2, X, Pencil, Save, Upload } from 'lucide-react';
@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { Service, Church } from '@/lib/types';
 
 export default function ServicesPage() {
@@ -50,7 +51,12 @@ export default function ServicesPage() {
 
   useDebouncedRealtime(supabase, 'services-page', [{ table: 'services' }], load, { enabled: !!profile });
 
-  const churchName = (id: string) => churches.find((c) => c.id === id)?.name ?? '';
+  // church → (services) tree + filter
+  const lookups = useMemo(() => toLookups(churches, [], []), [churches]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    services,
+    (s, q) => s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q),
+  );
 
   return (
     <AppShell>
@@ -75,8 +81,18 @@ export default function ServicesPage() {
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {services.map((s) => (
+        <>
+        <ScopeGroupFilters idPrefix="services" scope={scope} onScope={setScope} lookups={lookups} deepest="church"
+          search={search} onSearch={setSearch} placeholder="بحث باسم الخدمة..." />
+        <ScopeGroups
+          idPrefix="services"
+          rows={visible}
+          lookups={lookups}
+          deepest="church"
+          tone="indigo"
+          itemName={(s) => s.name}
+          emptyText={services.length === 0 ? 'لا توجد خدمات بعد' : 'لا توجد خدمات مطابقة'}
+          renderItem={(s) => (
             <li key={s.id} className="card flex items-start gap-3">
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-accent-50 ring-2 ring-accent-100 flex items-center justify-center">
                 {s.photo_url ? (
@@ -87,7 +103,6 @@ export default function ServicesPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-extrabold">{s.name}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{churchName(s.church_id)}</p>
                 {s.description && <p className="text-xs text-slate-500 mt-1">{s.description}</p>}
               </div>
               {canEditService(s) && (
@@ -100,11 +115,9 @@ export default function ServicesPage() {
                 </button>
               )}
             </li>
-          ))}
-          {services.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">لا توجد خدمات بعد</li>
           )}
-        </ul>
+        />
+        </>
       )}
 
       {showAdd && (

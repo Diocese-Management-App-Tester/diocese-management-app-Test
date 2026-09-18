@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { School, Plus, ArrowRight, Loader2, X, Pencil, Save, Upload } from 'lucide-react';
@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { ClassRoom, Service, Church } from '@/lib/types';
 
 export default function ClassesPage() {
@@ -54,8 +55,12 @@ export default function ClassesPage() {
 
   useDebouncedRealtime(supabase, 'classes-page', [{ table: 'classes' }], load, { enabled: !!profile });
 
-  const serviceName = (id: string) => services.find((s) => s.id === id)?.name ?? '';
-  const churchName = (id: string) => churches.find((c) => c.id === id)?.name ?? '';
+  // church → service → (classes) tree + filter
+  const lookups = useMemo(() => toLookups(churches, services, []), [churches, services]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    classes,
+    (c, q) => c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q),
+  );
 
   return (
     <AppShell>
@@ -80,8 +85,18 @@ export default function ClassesPage() {
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {classes.map((c) => (
+        <>
+        <ScopeGroupFilters idPrefix="classes" scope={scope} onScope={setScope} lookups={lookups} deepest="service"
+          search={search} onSearch={setSearch} placeholder="بحث باسم الفصل..." />
+        <ScopeGroups
+          idPrefix="classes"
+          rows={visible}
+          lookups={lookups}
+          deepest="service"
+          tone="sky"
+          itemName={(c) => c.name}
+          emptyText={classes.length === 0 ? 'لا توجد فصول بعد' : 'لا توجد فصول مطابقة'}
+          renderItem={(c) => (
             <li key={c.id} className="card flex items-start gap-3">
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-sky-50 ring-2 ring-sky-100 flex items-center justify-center">
                 {c.photo_url ? (
@@ -92,9 +107,6 @@ export default function ClassesPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-extrabold">{c.name}</p>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {churchName(c.church_id)} ← {serviceName(c.service_id)}
-                </p>
                 {c.description && <p className="text-xs text-slate-500 mt-1">{c.description}</p>}
               </div>
               {canEditClass(c) && (
@@ -107,11 +119,9 @@ export default function ClassesPage() {
                 </button>
               )}
             </li>
-          ))}
-          {classes.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">لا توجد فصول بعد</li>
           )}
-        </ul>
+        />
+        </>
       )}
 
       {showAdd && (
