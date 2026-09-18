@@ -16,6 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { invalidateLookup } from '@/lib/queries';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { CallFeedback, ClassRoom, Service, Church, AppEvent } from '@/lib/types';
 import { describeEventSchedule } from '@/lib/time';
 import {
@@ -61,19 +62,16 @@ export default function CallFeedbacksPage() {
 
   useDebouncedRealtime(supabase, 'call-feedbacks-page', [{ table: 'call_feedbacks' }], load, { enabled: !!profile });
 
-  const churchName = (id: string) => churches.find((c) => c.id === id)?.name ?? '';
-
-  const scopeLabel = (fb: CallFeedback) => {
-    const parts: string[] = [churchName(fb.church_id)];
-    if (fb.service_id === null) parts.push('كل الخدمات');
-    else {
-      parts.push(services.find((s) => s.id === fb.service_id)?.name ?? '');
-      if (fb.class_id === null) parts.push('كل الفصول');
-      else parts.push(classes.find((c) => c.id === fb.class_id)?.name ?? '');
-    }
-    parts.push(fb.event_id === null ? 'كل المناسبات' : (events.find((e) => e.id === fb.event_id)?.name ?? 'مناسبة محذوفة'));
-    return parts.join(' ← ');
-  };
+  // church → service → class tree + filter; the event (4th level) stays a badge on the card
+  const lookups = useMemo(() => toLookups(churches, services, classes), [churches, services, classes]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    feedbacks,
+    (fb, q) => fb.name.toLowerCase().includes(q),
+  );
+  const scopeBadge = (fb: CallFeedback) =>
+    fb.service_id === null ? 'كل الخدمات' : fb.class_id === null ? 'كل الفصول' : null;
+  const eventLabel = (fb: CallFeedback) =>
+    fb.event_id === null ? 'كل المناسبات' : (events.find((e) => e.id === fb.event_id)?.name ?? 'مناسبة محذوفة');
 
   const remove = async (fb: CallFeedback) => {
     if (!confirm(`حذف نتيجة الافتقاد «${fb.name}»؟ المكالمات المسجلة بها ستبقى بدون نتيجة.`)) return;
@@ -120,8 +118,17 @@ export default function CallFeedbacksPage() {
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {feedbacks.map((fb, i) => (
+        <>
+        <ScopeGroupFilters idPrefix="feedbacks" scope={scope} onScope={setScope} lookups={lookups}
+          search={search} onSearch={setSearch} placeholder="بحث باسم النتيجة..." />
+        <ScopeGroups
+          idPrefix="feedbacks"
+          rows={visible}
+          lookups={lookups}
+          tone="teal"
+          itemName={null}
+          emptyText={feedbacks.length === 0 ? 'لا توجد نتائج اتصال بعد' : 'لا توجد نتائج مطابقة'}
+          renderItem={(fb) => { const i = feedbacks.findIndex((f) => f.id === fb.id); return (
             <li key={fb.id} className="card flex items-start gap-3">
               <div
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl shadow-sm ring-2 ring-black/5"
@@ -136,7 +143,10 @@ export default function CallFeedbacksPage() {
                     <CallFeedbackIcon icon={fb.icon} /> {fb.name}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-slate-400">{scopeLabel(fb)}</p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-slate-400">
+                  {scopeBadge(fb) && <span className="badge bg-slate-100 text-slate-500">{scopeBadge(fb)}</span>}
+                  <span className="badge bg-violet-50 text-violet-600">{eventLabel(fb)}</span>
+                </p>
               </div>
               <div className="flex shrink-0 flex-col gap-1">
                 <div className="flex gap-1.5">
@@ -175,11 +185,9 @@ export default function CallFeedbacksPage() {
                 </div>
               </div>
             </li>
-          ))}
-          {feedbacks.length === 0 && (
-            <li className="card py-12 text-center font-bold text-slate-400">لا توجد نتائج اتصال بعد</li>
-          )}
-        </ul>
+          ); }}
+        />
+        </>
       )}
 
       {showAdd && (

@@ -5,7 +5,7 @@
 // to a person. The approver sets role + scope and may attach permission
 // profiles right away.
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import {
   UserCheck, Check, X, Phone, Loader2, ArrowRight, ShieldQuestion, IdCard, User, KeyRound, Cake, MapPin,
@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/auth-context';
 import { usePermissions } from '@/lib/permissions-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { ServantEnrollment, Church, Service, ClassRoom, AppRole, Person } from '@/lib/types';
 import { ROLE_LABELS, SERVANTS_TABLE, GENDER_LABELS } from '@/lib/types';
 
@@ -28,6 +29,13 @@ export default function ApprovalsPanel() {
   const [services, setServices] = useState<Service[]>([]);
   const [classes, setClasses] = useState<ClassRoom[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // requests grouped church → service → class (the scope the servant asked for)
+  const lookups = useMemo(() => toLookups(churches, services, classes), [churches, services, classes]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    pending,
+    (p, q) => (p.full_name ?? '').toLowerCase().includes(q) || (p.user_id ?? '').toLowerCase().includes(q) || (p.phone ?? '').includes(q),
+  );
 
   const load = useCallback(async () => {
     const [{ data: p }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
@@ -75,8 +83,17 @@ export default function ApprovalsPanel() {
           <p className="font-bold">لا توجد طلبات معلقة 🎉</p>
         </div>
       ) : (
-        <ul className="space-y-4">
-          {pending.map((p) => (
+        <>
+        <ScopeGroupFilters idPrefix="approvals" scope={scope} onScope={setScope} lookups={lookups}
+          search={search} onSearch={setSearch} placeholder="بحث بالاسم أو الكود أو الهاتف..." />
+        <ScopeGroups
+          idPrefix="approvals"
+          rows={visible}
+          lookups={lookups}
+          tone="emerald"
+          itemName={null}
+          emptyText="لا توجد طلبات مطابقة"
+          renderItem={(p) => (
             <ApprovalCard
               key={p.id}
               request={p}
@@ -86,8 +103,9 @@ export default function ApprovalsPanel() {
               classes={classes}
               onDone={load}
             />
-          ))}
-        </ul>
+          )}
+        />
+        </>
       )}
     </>
   );

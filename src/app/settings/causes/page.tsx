@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Award, Plus, ArrowRight, Loader2, X, Pencil, Save, Trash2, Star,
@@ -9,6 +9,7 @@ import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { Cause, ClassRoom, Service, Church, PointsMode } from '@/lib/types';
 import { POINTS_MODE_LABELS } from '@/lib/types';
 
@@ -48,16 +49,14 @@ export default function CausesPage() {
 
   useDebouncedRealtime(supabase, 'causes-page', [{ table: 'causes' }], load, { enabled: !!profile });
 
-  const churchName = (id: string) => churches.find((c) => c.id === id)?.name ?? '';
-
-  const scopeLabel = (ca: Cause) => {
-    const church = churchName(ca.church_id);
-    if (ca.service_id === null) return `${church} ← كل الخدمات`;
-    const service = services.find((s) => s.id === ca.service_id)?.name ?? '';
-    if (ca.class_id === null) return `${church} ← ${service} ← كل الفصول`;
-    const cls = classes.find((c) => c.id === ca.class_id)?.name ?? '';
-    return `${church} ← ${service} ← ${cls}`;
-  };
+  // church → service → class tree + filter
+  const lookups = useMemo(() => toLookups(churches, services, classes), [churches, services, classes]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    causes,
+    (ca, q) => ca.name.toLowerCase().includes(q) || (ca.description ?? '').toLowerCase().includes(q),
+  );
+  const scopeBadge = (ca: Cause) =>
+    ca.service_id === null ? 'كل الخدمات' : ca.class_id === null ? 'كل الفصول' : null;
 
   const remove = async (ca: Cause) => {
     if (!confirm(`حذف السبب «${ca.name}»؟ سجلات النقاط المرتبطة به ستبقى بدون سبب.`)) return;
@@ -91,8 +90,17 @@ export default function CausesPage() {
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
-        <ul className="space-y-3">
-          {causes.map((ca) => (
+        <>
+        <ScopeGroupFilters idPrefix="causes" scope={scope} onScope={setScope} lookups={lookups}
+          search={search} onSearch={setSearch} placeholder="بحث باسم السبب..." />
+        <ScopeGroups
+          idPrefix="causes"
+          rows={visible}
+          lookups={lookups}
+          tone="amber"
+          itemName={(ca) => ca.name}
+          emptyText={causes.length === 0 ? 'لا توجد أسباب بعد' : 'لا توجد أسباب مطابقة'}
+          renderItem={(ca) => (
             <li key={ca.id} className="card flex items-start gap-3">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-50 ring-2 ring-amber-100">
                 <Award className="h-6 w-6 text-amber-400" />
@@ -108,8 +116,8 @@ export default function CausesPage() {
                   {ca.is_default && (
                     <span className="badge bg-emerald-100 text-emerald-700">افتراضي</span>
                   )}
+                  {scopeBadge(ca) && <span className="badge bg-slate-100 text-slate-500">{scopeBadge(ca)}</span>}
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">{scopeLabel(ca)}</p>
                 {ca.description && <p className="text-xs text-slate-500 mt-1">{ca.description}</p>}
               </div>
               <div className="flex shrink-0 gap-1.5">
@@ -129,11 +137,9 @@ export default function CausesPage() {
                 </button>
               </div>
             </li>
-          ))}
-          {causes.length === 0 && (
-            <li className="card py-12 text-center text-slate-400 font-bold">لا توجد أسباب بعد</li>
           )}
-        </ul>
+        />
+        </>
       )}
 
       {showAdd && (

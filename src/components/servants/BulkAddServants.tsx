@@ -465,7 +465,7 @@ export default function BulkAddServants({
                   <th className="p-1.5">كلمة المرور</th><th className="p-1.5">الميلاد</th><th className="p-1.5">الهاتف</th><th className="p-1.5 w-16" />
                 </tr></thead>
                 <tbody>
-                  {resolved.slice(0, 100).map((r) => (
+                  {resolved.map((r) => (
                     <tr key={r.row.key} className={r.row.status === 'ok' ? 'bg-emerald-50' : r.row.status === 'error' ? 'bg-red-50' : r.row.status === 'skipped' || r.duplicateInBatch ? 'bg-amber-50' : ''}>
                       <td className="max-w-[120px] truncate border-t border-indigo-50 p-1.5 font-extrabold text-slate-700">
                         {r.row.status === 'ok' ? r.name : (
@@ -513,7 +513,7 @@ export default function BulkAddServants({
                 </tbody>
               </table>
             </div>
-            {resolved.length > 100 && <p className="text-[11px] font-bold text-slate-400">يتم عرض أول 100 صف — سيتم استيراد الكل ({resolved.length})</p>}
+            <p className="text-[11px] font-bold text-slate-400">إجمالي {resolved.length} صفًا — كلها معروضة للمراجعة</p>
           </div>
 
           {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>}

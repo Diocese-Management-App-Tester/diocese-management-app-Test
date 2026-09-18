@@ -1412,7 +1412,7 @@ function BulkAddTab({
                   </tr>
                 </thead>
                 <tbody>
-                  {resolved.slice(0, 100).map((r) => (
+                  {resolved.map((r) => (
                     <tr
                       key={r.row.key}
                       className={
@@ -1498,11 +1498,7 @@ function BulkAddTab({
                 </tbody>
               </table>
             </div>
-            {resolved.length > 100 && (
-              <p className="text-[11px] font-bold text-slate-400">
-                يتم عرض أول 100 صف — سيتم استيراد الكل ({resolved.length})
-              </p>
-            )}
+            <p className="text-[11px] font-bold text-slate-400">إجمالي {resolved.length} صفًا — كلها معروضة للمراجعة</p>
           </div>
 
           {error && (

@@ -5,7 +5,7 @@
 // The reviewer may correct the class before approving; approval upserts the
 // person by code, enrolls him and stores the chosen password.
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import {
   UserCheck, Check, X, Phone, Loader2, IdCard, User, Cake, MapPin, Clock, History, Trash2,
@@ -13,6 +13,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
+import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { Church, Service, ClassRoom, ChildJoinRequest } from '@/lib/types';
 import { GENDER_LABELS, CHILD_JOIN_REQUEST_STATUS_LABELS } from '@/lib/types';
 
@@ -63,12 +64,12 @@ export default function ChildRequestsPanel() {
 
   useDebouncedRealtime(supabase, 'child-requests-panel', [{ table: 'child_join_requests' }], load, { enabled: !!profile });
 
-  const scopeLabel = (r: ChildJoinRequest) =>
-    [
-      churches.find((c) => c.id === r.church_id)?.name,
-      services.find((s) => s.id === r.service_id)?.name,
-      classes.find((c) => c.id === r.class_id)?.name,
-    ].filter(Boolean).join(' ← ') || '—';
+  // requests grouped church → service → class (the tree headers carry the scope)
+  const lookups = useMemo(() => toLookups(churches, services, classes), [churches, services, classes]);
+  const { scope, setScope, search, setSearch, visible } = useScopeGroups(
+    rows,
+    (r, q) => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || (r.phone ?? '').includes(q),
+  );
 
   return (
     <>
@@ -100,22 +101,27 @@ export default function ChildRequestsPanel() {
           <UserCheck className="mx-auto mb-3 h-10 w-10" />
           <p className="font-bold">{view === 'pending' ? 'لا توجد طلبات معلقة 🎉' : 'لا يوجد سجل بعد'}</p>
         </div>
-      ) : view === 'pending' ? (
-        <ul id="child-requests-list" className="space-y-4">
-          {rows.map((r) => (
-            <RequestCard key={r.id} request={r} churches={churches} services={services} classes={classes} onDone={load} />
-          ))}
-        </ul>
       ) : (
-        <ul id="child-requests-history" className="space-y-2">
-          {rows.map((r) => (
+        <>
+        <ScopeGroupFilters idPrefix="child-req" scope={scope} onScope={setScope} lookups={lookups}
+          search={search} onSearch={setSearch} placeholder="بحث بالاسم أو الكود أو الهاتف..." />
+        <ScopeGroups
+          idPrefix={view === 'pending' ? 'child-requests-list' : 'child-requests-history'}
+          rows={visible}
+          lookups={lookups}
+          tone="indigo"
+          itemName={null}
+          emptyText="لا توجد طلبات مطابقة"
+          renderItem={(r) => view === 'pending' ? (
+            <RequestCard key={r.id} request={r} churches={churches} services={services} classes={classes} onDone={load} />
+          ) : (
             <li key={r.id} className="card flex items-center gap-3 !py-3">
               <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-slate-50 flex items-center justify-center">
                 {r.image_url ? <Image src={r.image_url} alt={r.name} fill sizes="44px" className="object-cover" /> : <User className="h-5 w-5 text-slate-300" />}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate font-extrabold text-sm">{r.name} <span className="text-xs font-normal text-slate-400" dir="ltr">{r.code}</span></p>
-                <p className="truncate text-xs text-slate-400">{scopeLabel(r)}{r.decided_at ? ` · ${fmtWhen(r.decided_at)}` : ''}</p>
+                {r.decided_at && <p className="truncate text-xs text-slate-400">{fmtWhen(r.decided_at)}</p>}
                 {r.decision_note && <p className="truncate text-xs text-slate-500">📝 {r.decision_note}</p>}
               </div>
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ${r.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
@@ -129,8 +135,9 @@ export default function ChildRequestsPanel() {
                 <Trash2 className="h-4 w-4" />
               </button>
             </li>
-          ))}
-        </ul>
+          )}
+        />
+        </>
       )}
     </>
   );
