@@ -27,6 +27,7 @@ import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
 import { onBusTable } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
+import { nativeDetector, decodeVideoFrame } from '@/lib/qr-decode';
 
 // ---------- Scanner jobs — same system as the children page ----------
 // Attendance / points / data. Calls, messages and card printing don't make
@@ -113,6 +114,8 @@ export default function ScannerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanningRef = useRef(false);
+  // Off-screen canvas used by the jsQR fallback (iOS Safari / desktop)
+  const decodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState('');
 
@@ -561,29 +564,49 @@ export default function ScannerPage() {
   const handleQrRef = useRef<(v: string) => Promise<void>>(handleQr);
   handleQrRef.current = modalOpen ? async () => {} : handleQr;
 
-  // ---------- Camera (native BarcodeDetector) ----------
+  // ---------- Camera (native BarcodeDetector → jsQR fallback) ----------
+  // Android Chrome exposes the native BarcodeDetector (fast, GPU-backed).
+  // iOS Safari / Chrome-on-iOS / Firefox / desktop Safari do NOT — there we
+  // draw each video frame on a canvas and decode it with jsQR so the live
+  // scanner works everywhere instead of showing "browser not supported".
   const startCamera = async () => {
     setCameraError('');
     setResult(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('المتصفح لا يدعم الكاميرا — افتح التطبيق عبر HTTPS أو استخدم البحث اليدوي بالأسفل');
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch {
+        // Some iOS devices reject the constraint set — retry with the simplest one
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
       streamRef.current = stream;
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        const v = videoRef.current;
+        v.srcObject = stream;
+        // iOS requires these attributes to be set before play() for inline playback
+        v.setAttribute('playsinline', 'true');
+        v.setAttribute('webkit-playsinline', 'true');
+        v.muted = true;
+        try {
+          await v.play();
+        } catch {
+          /* autoplay may be blocked until metadata loads — the loop below waits for frames */
+        }
       }
       setCameraOn(true);
 
-      const BD = (window as unknown as {
-        BarcodeDetector?: new (opts: { formats: string[] }) => {
-          detect: (v: HTMLVideoElement) => Promise<{ rawValue: string }[]>;
-        };
-      }).BarcodeDetector;
-      if (!BD) {
-        setCameraError('المتصفح لا يدعم المسح المباشر — استخدم البحث اليدوي بالأسفل');
-        return;
-      }
-      const detector = new BD({ formats: ['qr_code'] });
+      const detector = nativeDetector();
+      if (!decodeCanvasRef.current) decodeCanvasRef.current = document.createElement('canvas');
+      const canvas = decodeCanvasRef.current;
+
       scanningRef.current = true;
       let lastCode = '';
       let lastAt = 0;
@@ -592,10 +615,16 @@ export default function ScannerPage() {
       const tickFrame = async () => {
         if (!scanningRef.current || !videoRef.current) return;
         try {
-          if (!handling) {
-            const codes = await detector.detect(videoRef.current);
-            if (codes.length > 0) {
-              const value = codes[0].rawValue;
+          const video = videoRef.current;
+          if (!handling && video.readyState >= 2 && video.videoWidth > 0) {
+            let value: string | null = null;
+            if (detector) {
+              const codes = await detector.detect(video);
+              value = codes[0]?.rawValue ?? null;
+            } else {
+              value = decodeVideoFrame(video, canvas);
+            }
+            if (value) {
               const t = Date.now();
               if (value !== lastCode || t - lastAt > 4000) {
                 lastCode = value;
@@ -608,11 +637,15 @@ export default function ScannerPage() {
         } catch {
           /* frame not ready */
         }
-        if (scanningRef.current) requestAnimationFrame(tickFrame);
+        if (scanningRef.current) {
+          // Native: every frame. jsQR: ~8 fps to keep the phone cool / responsive.
+          if (detector) requestAnimationFrame(tickFrame);
+          else setTimeout(tickFrame, 120);
+        }
       };
-      requestAnimationFrame(tickFrame);
+      tickFrame();
     } catch {
-      setCameraError('تعذر فتح الكاميرا — تأكد من منح الإذن أو استخدم البحث اليدوي');
+      setCameraError('تعذر فتح الكاميرا — تأكد من منح الإذن للكاميرا في إعدادات Safari أو استخدم البحث اليدوي');
     }
   };
 
@@ -1022,7 +1055,7 @@ export default function ScannerPage() {
       {/* ---------- Camera ---------- */}
       <section id="camera-section" className="card mb-4 overflow-hidden !p-0">
         <div className="relative flex aspect-[4/3] items-center justify-center bg-slate-900">
-          <video ref={videoRef} className={`h-full w-full object-cover ${cameraOn ? '' : 'hidden'}`} muted playsInline />
+          <video ref={videoRef} className={`h-full w-full object-cover ${cameraOn ? '' : 'hidden'}`} muted playsInline autoPlay />
           {!cameraOn && (
             <div className="text-center text-slate-400">
               <Camera className="mx-auto mb-2 h-10 w-10" />
