@@ -29,7 +29,14 @@ export type CardElementType =
   | 'constant' // church / service / class name
   | 'text' // free constant text
   | 'logo' // church logo
+  | 'service_logo' // service picture / logo (services.photo_url)
+  | 'class_logo' // class picture / logo (classes.photo_url)
   | 'image'; // uploaded constant image
+
+// element types that render an image bound to the person's scope
+export const SCOPE_LOGO_TYPES: readonly CardElementType[] = ['logo', 'service_logo', 'class_logo'];
+export const isImageElement = (t: CardElementType): boolean =>
+  t === 'photo' || t === 'image' || SCOPE_LOGO_TYPES.includes(t);
 
 export type ImageFit = 'cover' | 'contain' | 'stretch' | 'tile';
 export type TextAlign = 'right' | 'center' | 'left';
@@ -134,6 +141,24 @@ export interface CardPrintSettings {
   alignV: VAlign; // grid vertical alignment inside printable area
 }
 
+// ----- print profile (ملف طباعة محفوظ) — migration 0049 -----
+// A NAMED, reusable set of print settings (paper · margins · gaps · alignment
+// · cut marks · center lines). Saved once, applied to any template / to the
+// bound print page. Scoped church → service → class like the templates
+// (church_id NULL = shared with everyone who can see the module).
+export interface CardPrintProfile {
+  id: string;
+  church_id: string | null;
+  service_id: string | null;
+  class_id: string | null;
+  name: string;
+  settings: CardPrintSettings;
+  created_at: string;
+  created_by: string | null;
+  edited_at: string;
+  edited_by: string | null;
+}
+
 // ----- DB row -----
 export interface CardTemplate {
   id: string;
@@ -189,6 +214,8 @@ export const ELEMENT_TYPE_LABELS: Record<CardElementType, string> = {
   constant: 'بيان ثابت',
   text: 'نص ثابت',
   logo: 'شعار الكنيسة',
+  service_logo: 'شعار الخدمة',
+  class_logo: 'شعار الفصل',
   image: 'صورة / شعار مرفوع',
 };
 
@@ -239,8 +266,8 @@ export const newElement = (type: CardElementType, partial?: Partial<CardElement>
   type,
   x: 5,
   y: 5,
-  w: type === 'photo' || type === 'qr' || type === 'logo' || type === 'image' ? 20 : 50,
-  h: type === 'photo' || type === 'qr' || type === 'logo' || type === 'image' ? 20 : 10,
+  w: type === 'qr' || isImageElement(type) ? 20 : 50,
+  h: type === 'qr' || isImageElement(type) ? 20 : 10,
   rotation: 0,
   style: { ...DEFAULT_TEXT_STYLE },
   imageFit: 'cover',
@@ -379,6 +406,36 @@ export const normalizePrint = (p: Partial<CardPrintSettings> | null | undefined)
   ...DEFAULT_PRINT_SETTINGS,
   ...p,
 });
+
+// Do two print settings describe the same page layout? (used to show which
+// saved profile is currently «active» and whether it has unsaved changes)
+export const printSettingsEqual = (a: CardPrintSettings, b: CardPrintSettings): boolean => {
+  const na = normalizePrint(a);
+  const nb = normalizePrint(b);
+  return (Object.keys(DEFAULT_PRINT_SETTINGS) as (keyof CardPrintSettings)[])
+    .every((k) => na[k] === nb[k]);
+};
+
+// short human summary of a print profile: «A4 طولي · 2×5 · هوامش 10»
+export const describePrintSettings = (s: CardPrintSettings, card?: { width: number; height: number }): string => {
+  const paper = s.paper === 'custom' ? `${s.customWidth}×${s.customHeight} مم` : s.paper;
+  const orient = s.orientation === 'landscape' ? 'عرضي' : 'طولي';
+  const parts = [`${paper} ${orient}`];
+  if (card) {
+    const dims = paperDims(s);
+    const usableW = dims.w - s.marginRight - s.marginLeft;
+    const usableH = dims.h - s.marginTop - s.marginBottom;
+    const cols = Math.max(0, Math.floor((usableW + s.gapX) / (card.width + s.gapX)));
+    const rows = Math.max(0, Math.floor((usableH + s.gapY) / (card.height + s.gapY)));
+    parts.push(`${cols}×${rows}`);
+  }
+  const m = [s.marginTop, s.marginBottom, s.marginRight, s.marginLeft];
+  parts.push(m.every((v) => v === m[0]) ? `هوامش ${m[0]}` : `هوامش ${m.join('/')}`);
+  if (s.gapX || s.gapY) parts.push(`فراغ ${s.gapX}×${s.gapY}`);
+  if (s.cutMarks) parts.push('قص');
+  if (s.centerLineV || s.centerLineH) parts.push('منتصف');
+  return parts.join(' · ');
+};
 
 // paper size in mm honoring orientation
 export const paperDims = (s: CardPrintSettings): { w: number; h: number } => {

@@ -14,6 +14,7 @@ import {
 } from '@/lib/card-types';
 import type { HAlign, VAlign } from '@/lib/card-types';
 import CardCanvas, { type CardConstantsData, type CardPersonData } from './CardCanvas';
+import PrintProfilesBar from './PrintProfilesBar';
 
 // CSS defines 1in = 96px and 1in = 25.4mm → exact physical scale for print
 const MM_TO_PX = 96 / 25.4;
@@ -113,6 +114,12 @@ export default function BoundPrintTab() {
       return next;
     });
   };
+  // a saved print profile replaces the whole page settings (still persisted locally)
+  const applyProfile = (s: CardPrintSettings) => {
+    const next = normalizePrint(s);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    setSettings(next);
+  };
 
   // ---------- load everything ----------
   const load = useCallback(async () => {
@@ -179,6 +186,8 @@ export default function BoundPrintTab() {
       service_name: service?.name ?? 'كل الخدمات',
       class_name: cls?.name ?? 'كل الفصول',
       church_logo_url: church?.logo_url ?? null,
+      service_logo_url: service?.photo_url ?? null,
+      class_logo_url: cls?.photo_url ?? null,
     };
   }, [churches, services, classes]);
 
@@ -381,6 +390,18 @@ export default function BoundPrintTab() {
   return (
     <div className="flex flex-col gap-4">
       <FontsLoader />
+
+      {/* ---------- saved print profiles (ملفات الطباعة) ---------- */}
+      <PrintProfilesBar
+        settings={settings}
+        onApply={applyProfile}
+        card={{ width: cellW, height: cellH }}
+        defaultScope={churchFilter !== ALL ? {
+          church_id: churchFilter,
+          service_id: serviceFilter !== ALL ? serviceFilter : null,
+          class_id: classFilter !== ALL ? classFilter : null,
+        } : undefined}
+      />
 
       {/* ---------- paper settings ---------- */}
       <section className="card">

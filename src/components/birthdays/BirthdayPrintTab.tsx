@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom';
 import { ChevronRight, ChevronLeft, Loader2, Printer, Check, Square, CheckSquare, Cake } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import CardCanvas, { type CardConstantsData } from '@/components/cards/CardCanvas';
+import PrintProfilesBar from '@/components/cards/PrintProfilesBar';
 import type { CardDesign, CardPrintSettings, PaperSize, PaperOrientation } from '@/lib/card-types';
 import { PAPER_SIZES, paperDims, ARABIC_MONTHS } from '@/lib/card-types';
 import { ScopeSelectors, useScopeState, useStoreLookups } from '@/components/store/StoreBits';
@@ -92,10 +93,12 @@ export default function BirthdayPrintTab({
 
   const constantsFor = useCallback((r: BirthdayRow): CardConstantsData => {
     const ch = churches.find((c) => c.id === r.church_id);
+    const sv = services.find((s) => s.id === r.service_id);
+    const cl = classes.find((c) => c.id === r.class_id);
     return {
       church_name: ch?.name ?? '', church_logo_url: ch?.logo_url ?? null,
-      service_name: services.find((s) => s.id === r.service_id)?.name ?? '',
-      class_name: classes.find((c) => c.id === r.class_id)?.name ?? '',
+      service_name: sv?.name ?? '', service_logo_url: sv?.photo_url ?? null,
+      class_name: cl?.name ?? '', class_logo_url: cl?.photo_url ?? null,
     };
   }, [churches, services, classes]);
 
@@ -180,6 +183,14 @@ export default function BirthdayPrintTab({
           </>
         )}
       </section>
+
+      {/* ---------- saved print profiles (shared with the ID-card module) ---------- */}
+      <PrintProfilesBar
+        settings={settings}
+        onApply={(s) => onChange(s)}
+        card={{ width: design.width, height: design.height }}
+        defaultScope={{ church_id: template.church_id, service_id: template.service_id, class_id: template.class_id }}
+      />
 
       {/* ---------- paper ---------- */}
       <section className="card">

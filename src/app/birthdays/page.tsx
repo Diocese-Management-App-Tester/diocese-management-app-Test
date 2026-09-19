@@ -154,8 +154,13 @@ export default function BirthdaysMonthPage() {
 
   const constantsFor = useCallback((r: BirthdayRow): CardConstantsData => {
     const n = namesFor(r);
-    return { church_name: n.church, service_name: n.service, class_name: n.class, church_logo_url: churches.find((c) => c.id === r.church_id)?.logo_url ?? null };
-  }, [namesFor, churches]);
+    return {
+      church_name: n.church, service_name: n.service, class_name: n.class,
+      church_logo_url: churches.find((c) => c.id === r.church_id)?.logo_url ?? null,
+      service_logo_url: services.find((s) => s.id === r.service_id)?.photo_url ?? null,
+      class_logo_url: classes.find((c) => c.id === r.class_id)?.photo_url ?? null,
+    };
+  }, [namesFor, churches, services, classes]);
 
   const giftDefault = (r: BirthdayRow) => effectiveSettings(settings, r.church_id).gift_points;
   const canCancelGift = !!profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
