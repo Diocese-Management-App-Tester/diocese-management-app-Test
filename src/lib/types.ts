@@ -359,7 +359,7 @@ export interface AppEvent {
   end_time: string | null; // 'HH:MM:SS' Africa/Cairo
   points: number; // points granted per attendance
   points_mode: PointsMode; // fixed / editable / open (migration 0015)
-  is_default: boolean; // preselected on children & scanner pages
+  is_default: boolean; // default OF ITS SCOPE (0048): class → service → church; see lib/defaults.ts
   created_at: string;
   created_by: string | null;
   edited_at: string;
@@ -377,7 +377,7 @@ export interface Cause {
   description: string | null;
   points: number; // points amount bound to this cause
   points_mode: PointsMode; // fixed / editable / open (migration 0015)
-  is_default: boolean; // preselected on the children page
+  is_default: boolean; // default OF ITS SCOPE (0048): class → service → church; see lib/defaults.ts
   created_at: string;
   created_by: string | null;
   edited_at: string;

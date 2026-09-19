@@ -25,6 +25,7 @@ import NumPadModal from '@/components/NumPadModal';
 import { ViewPersonModal, ModalFrame } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
+import { pickScopedDefault } from '@/lib/defaults';
 import { onBusTable } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
 import { nativeDetector, decodeVideoFrame } from '@/lib/qr-decode';
@@ -102,6 +103,13 @@ export default function ScannerPage() {
   const [pointsMode, setPointsMode] = useState<PointsMode>('add');
   const [eventId, setEventId] = useState<string>('');
   const [causeId, setCauseId] = useState<string>('');
+  // true while the event / cause was picked BY THE DEFAULT RESOLVER (not by
+  // the servant) — such a pick follows the scope selectors; a manual pick is
+  // kept as long as it stays visible in the current scope.
+  const eventAutoRef = useRef(true);
+  const causeAutoRef = useRef(true);
+  const chooseEvent = (id: string) => { eventAutoRef.current = false; setEventId(id); };
+  const chooseCause = (id: string) => { causeAutoRef.current = false; setCauseId(id); };
 
   // Points overrides (numpad) for editable / open modes
   const [eventPtsOverride, setEventPtsOverride] = useState<number | null>(null);
@@ -156,14 +164,6 @@ export default function ScannerPage() {
     if (profile?.status === 'approved') loadLookups();
   }, [profile?.status, loadLookups]);
 
-  // Preselect defaults (marked in settings)
-  useEffect(() => {
-    setEventId((cur) => cur || (events.find((ev) => ev.is_default)?.id ?? ''));
-  }, [events]);
-  useEffect(() => {
-    setCauseId((cur) => cur || (causes.find((ca) => ca.is_default)?.id ?? ''));
-  }, [causes]);
-
   // ---------- Cascading selector options ----------
   const visibleServices = useMemo(
     () => services.filter((s) => churchFilter === ALL || s.church_id === churchFilter),
@@ -201,11 +201,37 @@ export default function ScannerPage() {
       ),
     [causes, churchFilter, serviceFilter, classFilter]
   );
+  // Preselect the DEFAULT event / cause of the selected scope (0048):
+  // class default → service default → church default. Re-resolved whenever
+  // the scope selectors change, unless the servant picked one himself and it
+  // is still valid for the scope.
+  const oneChurch = churches.length === 1 ? churches[0].id : profile?.church_id ?? null;
+  const scopeSel = useMemo(
+    () => ({ church: churchFilter, service: serviceFilter, class: classFilter }),
+    [churchFilter, serviceFilter, classFilter]
+  );
   useEffect(() => {
-    if (eventId && !visibleEvents.some((ev) => ev.id === eventId)) setEventId('');
+    const def = pickScopedDefault(events, scopeSel, oneChurch)?.id ?? '';
+    setEventId((cur) => {
+      if (cur && !eventAutoRef.current && visibleEvents.some((ev) => ev.id === cur)) return cur;
+      eventAutoRef.current = true;
+      return def;
+    });
+  }, [events, visibleEvents, scopeSel, oneChurch]);
+  useEffect(() => {
+    const def = pickScopedDefault(causes, scopeSel, oneChurch)?.id ?? '';
+    setCauseId((cur) => {
+      if (cur && !causeAutoRef.current && visibleCauses.some((ca) => ca.id === cur)) return cur;
+      causeAutoRef.current = true;
+      return def;
+    });
+  }, [causes, visibleCauses, scopeSel, oneChurch]);
+  // safety net: a manual pick that vanished from the lookup itself
+  useEffect(() => {
+    if (eventId && !visibleEvents.some((ev) => ev.id === eventId)) { eventAutoRef.current = true; setEventId(''); }
   }, [visibleEvents, eventId]);
   useEffect(() => {
-    if (causeId && !visibleCauses.some((ca) => ca.id === causeId)) setCauseId('');
+    if (causeId && !visibleCauses.some((ca) => ca.id === causeId)) { causeAutoRef.current = true; setCauseId(''); }
   }, [visibleCauses, causeId]);
 
   const selectedEvent = useMemo(() => events.find((ev) => ev.id === eventId) ?? null, [events, eventId]);
@@ -864,7 +890,7 @@ export default function ScannerPage() {
               !eventId && job !== 'data' ? '!border-violet-300 !bg-violet-50 text-violet-700' : ''
             }`}
             value={eventId}
-            onChange={(e) => { setEventId(e.target.value); setResult(null); }}
+            onChange={(e) => { chooseEvent(e.target.value); setResult(null); }}
           >
             <option value="">
               {job === 'attendance' && attendanceMode === 'remove' ? 'كل المناسبات' : 'اختر المناسبة *'}
@@ -939,7 +965,7 @@ export default function ScannerPage() {
                 aria-label="اختيار سبب النقاط"
                 className="input-field !w-1/2 min-w-0 shrink-0 appearance-none !px-2 text-xs font-bold"
                 value={causeId}
-                onChange={(e) => { setCauseId(e.target.value); setResult(null); }}
+                onChange={(e) => { chooseCause(e.target.value); setResult(null); }}
               >
                 <option value="">{pointsMode === 'manual' ? 'السبب الافتراضي (اختياري)' : 'اختر سبب النقاط *'}</option>
                 {visibleCauses.map((ca) => (
