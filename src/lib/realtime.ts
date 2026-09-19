@@ -4,37 +4,45 @@ import { useEffect, useRef } from 'react';
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
 /**
- * Debounced realtime subscription.
+ * ===================================================================
+ * Realtime — one shared BROADCAST bus for the hot tables (0046)
+ * ===================================================================
  *
- * WHY: every scan on Sunday inserts an `attendance_log` row AND (via trigger)
- * updates an `enrollments` row → 2 events. Before, every open screen reacted
- * to every event by re-downloading the full list, so the work grew as
- * scans × screens × rows. This hook:
+ * WHY. With 60–80 servants online every open app held 8–18
+ * `postgres_changes` subscriptions (bells · contexts · page · widgets).
+ * For `postgres_changes` Supabase re-runs the table's RLS policy ONCE PER
+ * CHANGE × PER SUBSCRIBER; one scan touches 2–4 rows → thousands of
+ * policy queries per scan → the database saturated and the app hung.
  *
- *   • coalesces bursts of events into ONE reload (trailing debounce),
- *   • never overlaps reloads (a reload that arrives while one is in flight
- *     is queued as a single follow-up),
- *   • supports optional server-side `filter` per table so a class servant is
- *     not woken up by another church's changes,
- *   • pauses while the tab is hidden and does a single refresh on return —
- *     a phone in a pocket costs nothing.
+ * HOW. Migration 0046 removed the hot tables from the publication and
+ * added STATEMENT-level triggers that `realtime.send()` one tiny message
+ * per statement on a per-church topic:
+ *     scope:all              (owner)
+ *     scope:church:<uuid>    (everyone serving in that church)
+ *     user:<uid>             (personal rows: notifications · chats · own enrollment)
+ * Authorization happens ONCE at channel join (RLS on realtime.messages).
  *
- * `onChange` may receive the payload for cheap local patches; callers that
- * need a full refetch just pass their `load`.
+ * The browser opens ONE channel per topic (2–4 per device, whatever the
+ * number of screens/widgets) and fans each message out to every listener
+ * that registered for that table. `useDebouncedRealtime` keeps its API,
+ * so the 84 call sites in the app did not change: the hook decides per
+ * table whether to listen on the bus or on classic `postgres_changes`.
+ *
+ * SAFETY NET. If the bus is not connected (migration not applied yet,
+ * realtime down, token trouble) every bus listener falls back to a slow
+ * poll (45 s while visible) and a refresh when the tab becomes visible —
+ * the screen stays correct, only less instant.
  */
+
+// ---------- Topics ----------
 /**
  * Realtime channel topics MUST be unique per subscription.
  *
  * `supabase.channel(topic)` returns the EXISTING channel when one with the
  * same topic is already registered on the (singleton) browser client. If that
  * channel has already been `subscribe()`d, calling `.on('postgres_changes')`
- * on it throws «cannot add postgres_changes callbacks … after subscribe()» —
- * which happened whenever two mounted components (or a React strict-mode
- * effect re-run racing the async `removeChannel`) used the same topic and
- * crashed the whole page (the child portal could not be opened).
- *
- * `uniqueTopic('child-msgs')` → `child-msgs-<time>-<n>`: readable prefix,
- * never colliding.
+ * on it throws — which used to crash pages when two components shared a
+ * topic. `uniqueTopic('child-msgs')` → `child-msgs-<time>-<n>`.
  */
 let topicSeq = 0;
 export function uniqueTopic(base: string): string {
@@ -42,13 +50,163 @@ export function uniqueTopic(base: string): string {
   return `${base}-${Date.now().toString(36)}-${topicSeq}`;
 }
 
+/** Tables whose changes travel on the broadcast bus (mirror of 0046 §2). */
+export const BUS_TABLES: ReadonlySet<string> = new Set([
+  'attendance_log', 'points_log', 'contact_log', 'enrollments', 'persons',
+  'notification_recipients', 'chat_messages', 'chat_read_state', 'store_orders',
+  'card_print_requests', 'user_achievements', 'servant_enrollments', 'servant_scopes',
+]);
+
+export interface BusMessage {
+  /** table */
+  t: string;
+  /** INSERT | UPDATE | DELETE */
+  op: string;
+  /** affected row count of the statement */
+  n?: number;
+  /** first 50 affected ids (enrollment ids for the log tables) */
+  ids?: string[];
+}
+
+type BusListener = (m: BusMessage) => void;
+
+interface BusState {
+  supabase: SupabaseClient | null;
+  /** current topics (from the signed-in servant's scopes) */
+  topics: string[];
+  channels: Map<string, RealtimeChannel>;
+  listeners: Map<string, Set<BusListener>>; // table → listeners
+  /** true once at least one topic channel reports SUBSCRIBED */
+  connected: boolean;
+  connListeners: Set<(ok: boolean) => void>;
+}
+
+const bus: BusState = {
+  supabase: null,
+  topics: [],
+  channels: new Map(),
+  listeners: new Map(),
+  connected: false,
+  connListeners: new Set(),
+};
+
+function setConnected(ok: boolean) {
+  if (bus.connected === ok) return;
+  bus.connected = ok;
+  bus.connListeners.forEach((fn) => { try { fn(ok); } catch { /* ignore */ } });
+}
+
+function dispatch(m: BusMessage) {
+  const set = bus.listeners.get(m.t);
+  if (!set) return;
+  set.forEach((fn) => { try { fn(m); } catch { /* listener error must not break the bus */ } });
+}
+
+function openTopic(supabase: SupabaseClient, topic: string, attempt = 0) {
+  if (bus.channels.has(topic)) return;
+  const ch = supabase.channel(topic, { config: { private: true } });
+  ch.on('broadcast', { event: 'change' }, (msg: { payload?: unknown }) => {
+    const p = msg?.payload as BusMessage | undefined;
+    if (p && typeof p.t === 'string') dispatch(p);
+  });
+  bus.channels.set(topic, ch);
+  ch.subscribe((status) => {
+    if (status === 'SUBSCRIBED') { setConnected(true); return; }
+    if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      // any other topic still up? keep "connected"
+      const anyUp = Array.from(bus.channels.values()).some((c) => c !== ch && c.state === 'joined');
+      if (!anyUp) setConnected(false);
+      // A private topic is refused when the socket had no JWT yet (race at
+      // login) or the migration isn't applied (topic policy missing). Retry
+      // with back-off a few times, then leave the pollers in charge.
+      if (status !== 'CLOSED' && attempt < 4 && bus.channels.get(topic) === ch) {
+        bus.channels.delete(topic);
+        supabase.removeChannel(ch).catch(() => {});
+        const delay = 2_000 * Math.pow(2, attempt) + Math.random() * 1_000;
+        setTimeout(() => {
+          if (bus.topics.includes(topic) && !bus.channels.has(topic)) openTopic(supabase, topic, attempt + 1);
+        }, delay);
+      }
+    }
+  });
+}
+
+function closeTopic(topic: string) {
+  const ch = bus.channels.get(topic);
+  if (!ch) return;
+  bus.channels.delete(topic);
+  bus.supabase?.removeChannel(ch).catch(() => {});
+  if (bus.channels.size === 0) setConnected(false);
+}
+
+/**
+ * Called by AuthProvider whenever the signed-in servant (or his scopes)
+ * change. Computes the topics and reconciles the open channels.
+ *   owner            → scope:all + user:<uid>
+ *   servant          → scope:church:<id> for each distinct church + user:<uid>
+ *   signed out       → nothing
+ */
+export function configureRealtimeBus(
+  supabase: SupabaseClient,
+  me: { uid: string; role: string; churchIds: string[] } | null,
+) {
+  bus.supabase = supabase;
+  const want: string[] = [];
+  if (me) {
+    want.push(`user:${me.uid}`);
+    if (me.role === 'owner') want.push('scope:all');
+    else Array.from(new Set(me.churchIds.filter(Boolean))).forEach((c) => want.push(`scope:church:${c}`));
+  }
+  const wantSet = new Set(want);
+  Array.from(bus.channels.keys()).forEach((t) => { if (!wantSet.has(t)) closeTopic(t); });
+  bus.topics = want;
+  if (want.length === 0) return;
+  // Make sure the socket carries the session JWT BEFORE joining private
+  // topics (RLS on realtime.messages needs auth.uid()).
+  supabase.realtime.setAuth().catch(() => {}).then(() => {
+    if (bus.topics !== want) return; // superseded meanwhile
+    want.forEach((t) => openTopic(supabase, t));
+  });
+}
+
+/** Subscribe to bus messages of one table. Returns the unsubscribe fn. */
+export function onBusTable(table: string, fn: BusListener): () => void {
+  let set = bus.listeners.get(table);
+  if (!set) { set = new Set(); bus.listeners.set(table, set); }
+  set.add(fn);
+  return () => { set?.delete(fn); if (set && set.size === 0) bus.listeners.delete(table); };
+}
+
+export function onBusConnection(fn: (ok: boolean) => void): () => void {
+  bus.connListeners.add(fn);
+  return () => { bus.connListeners.delete(fn); };
+}
+
+export function busConnected(): boolean { return bus.connected; }
+
+// ---------- The hook ----------
 export interface RealtimeTableSpec {
   table: string;
-  /** PostgREST-style filter, e.g. `church_id=eq.<uuid>` */
+  /** PostgREST-style filter, e.g. `church_id=eq.<uuid>` (postgres_changes only; ignored on the bus) */
   filter?: string;
   event?: 'INSERT' | 'UPDATE' | 'DELETE' | '*';
 }
 
+/** Poll period used when a bus table has no live connection. */
+const FALLBACK_POLL_MS = 45_000;
+
+/**
+ * Debounced realtime subscription.
+ *
+ *   • coalesces bursts of events into ONE reload (trailing debounce),
+ *   • never overlaps reloads (a reload that arrives while one is in flight
+ *     is queued as a single follow-up),
+ *   • pauses while the tab is hidden and does a single refresh on return,
+ *   • HOT tables (BUS_TABLES) listen on the shared broadcast bus — no
+ *     per-subscriber RLS work on the server; the others keep classic
+ *     `postgres_changes` with optional server-side `filter`,
+ *   • if the bus is down the hot tables fall back to a slow poll.
+ */
 export function useDebouncedRealtime(
   supabase: SupabaseClient,
   channelName: string,
@@ -100,22 +258,58 @@ export function useDebouncedRealtime(
     };
     document.addEventListener('visibilitychange', onVisible);
 
-    // unique topic per subscription — see uniqueTopic()
-    let channel: RealtimeChannel = supabase.channel(uniqueTopic(channelName));
-    (JSON.parse(specKey) as RealtimeTableSpec[]).forEach((t) => {
-      channel = channel.on(
-        'postgres_changes',
-        { event: t.event ?? '*', schema: 'public', table: t.table, ...(t.filter ? { filter: t.filter } : {}) },
-        schedule
-      );
-    });
-    channel.subscribe();
+    const specs = JSON.parse(specKey) as RealtimeTableSpec[];
+    const busSpecs = specs.filter((t) => BUS_TABLES.has(t.table));
+    const pgSpecs = specs.filter((t) => !BUS_TABLES.has(t.table));
+
+    // ---- hot tables → shared bus ----
+    const unsubs: (() => void)[] = [];
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const startPoll = () => {
+      if (pollTimer) return;
+      pollTimer = setInterval(() => { if (document.visibilityState === 'visible') schedule(); }, FALLBACK_POLL_MS);
+    };
+    const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+    if (busSpecs.length > 0) {
+      busSpecs.forEach((t) => {
+        unsubs.push(onBusTable(t.table, (m) => {
+          if (t.event && t.event !== '*' && m.op !== t.event) return;
+          schedule();
+        }));
+      });
+      // fallback: poll while the bus is not connected; refresh when it (re)connects
+      if (!busConnected()) startPoll();
+      unsubs.push(onBusConnection((ok) => {
+        if (ok) { stopPoll(); schedule(); } else startPoll();
+      }));
+      // a hidden→visible transition always refreshes bus-backed screens
+      // (cheap, and covers messages missed while the socket was asleep)
+      const onVisBus = () => { if (document.visibilityState === 'visible') schedule(); };
+      document.addEventListener('visibilitychange', onVisBus);
+      unsubs.push(() => document.removeEventListener('visibilitychange', onVisBus));
+    }
+
+    // ---- cold tables → classic postgres_changes ----
+    let channel: RealtimeChannel | null = null;
+    if (pgSpecs.length > 0) {
+      channel = supabase.channel(uniqueTopic(channelName));
+      pgSpecs.forEach((t) => {
+        channel = channel!.on(
+          'postgres_changes',
+          { event: t.event ?? '*', schema: 'public', table: t.table, ...(t.filter ? { filter: t.filter } : {}) },
+          schedule
+        );
+      });
+      channel.subscribe();
+    }
 
     return () => {
       disposed = true;
       if (timer) clearTimeout(timer);
+      stopPoll();
+      unsubs.forEach((u) => u());
       document.removeEventListener('visibilitychange', onVisible);
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, channelName, specKey, enabled, delayMs]);
@@ -125,6 +319,7 @@ export function useDebouncedRealtime(
  * Build the realtime filter that matches the caller's own scope, so the
  * server only pushes changes he can actually see. Returns undefined for the
  * owner (sees everything) or when the column is not scoped.
+ * (Used by the remaining postgres_changes tables; bus tables ignore it.)
  */
 export function scopeFilter(
   profile: {

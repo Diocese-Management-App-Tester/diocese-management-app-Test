@@ -29,7 +29,7 @@ import {
 } from '@/components/store/StoreBits';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
-import { useDebouncedRealtime } from '@/lib/realtime';
+import { useDebouncedRealtime, onBusTable } from '@/lib/realtime';
 import { fetchEnrollmentsPage, ALL } from '@/lib/queries';
 import {
   fetchStoreItems, lookupStoreItem, storeCheckout, storeErrorMessage, isMigrationMissing, MIGRATION_HINT,
@@ -99,20 +99,22 @@ export default function PosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, scope.church, scope.service, scope.class]);
 
-  // Live balance while the basket is open
+  // Live balance while the basket is open (0046: enrollments travel on the
+  // broadcast bus — re-read the one row when a message names this child)
   useEffect(() => {
     if (!child) return;
-    const channel = supabase
-      .channel(`pos-balance-${child.id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'enrollments', filter: `id=eq.${child.id}` },
-        (payload) => {
-          const pts = (payload.new as { points?: number } | null)?.points;
-          if (typeof pts === 'number') setBalance(pts);
-        })
-      .subscribe();
-    supabase.from('enrollments').select('points').eq('id', child.id).maybeSingle()
-      .then(({ data }) => { if (data && typeof data.points === 'number') setBalance(data.points); });
-    return () => { supabase.removeChannel(channel); };
+    let cancelled = false;
+    const readBalance = () => {
+      supabase.from('enrollments').select('points').eq('id', child.id).maybeSingle()
+        .then(({ data }) => { if (!cancelled && data && typeof data.points === 'number') setBalance(data.points); });
+    };
+    readBalance();
+    const off = onBusTable('enrollments', (m) => {
+      if (m.op !== 'UPDATE') return;
+      if (m.ids && m.ids.length > 0 && !m.ids.includes(child.id)) return;
+      readBalance();
+    });
+    return () => { cancelled = true; off(); };
   }, [supabase, child]);
 
   // ---------- step 2: items + basket ----------

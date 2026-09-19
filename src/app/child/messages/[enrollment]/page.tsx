@@ -62,22 +62,17 @@ function ThreadContent() {
 
   useEffect(() => { load(); }, [load]);
 
-  // realtime: any new message → debounced refetch (RPC filters to this child)
+  // 0046: chat_messages left the postgres_changes publication and the child
+  // portal has no session for the private broadcast topics → an open thread
+  // polls every 10 s while visible (cheap RPC, one child) + refresh on focus.
   useEffect(() => {
     if (!token) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const channel = supabase.channel(uniqueTopic(`child-thread-${enrollmentId}`))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(load, 500);
-      })
-      .subscribe();
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 10_000);
     const onVis = () => { if (document.visibilityState === 'visible') load(); };
     document.addEventListener('visibilitychange', onVis);
     return () => {
-      if (timer) clearTimeout(timer);
+      clearInterval(t);
       document.removeEventListener('visibilitychange', onVis);
-      supabase.removeChannel(channel);
     };
   }, [supabase, token, enrollmentId, load]);
 

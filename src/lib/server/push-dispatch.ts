@@ -29,6 +29,8 @@ export interface QueueItem {
 
 export interface DispatchResult {
   configured: boolean;
+  /** true when another run happened within the gate window and this one did nothing */
+  skipped?: boolean;
   tick?: unknown;
   queued: number;
   sent: number;
@@ -57,9 +59,21 @@ function configureVapid(): boolean {
 }
 
 /** Run the tick + push the pending queue. Safe to call often (idempotent). */
-export async function dispatchPending(limit = 300): Promise<DispatchResult> {
+export async function dispatchPending(limit = 300, opts: { gateSeconds?: number } = {}): Promise<DispatchResult> {
   const supabase = adminClient();
   if (!supabase) return { configured: false, queued: 0, sent: 0, failed: 0, gone: 0, error: 'missing SUPABASE_SERVICE_ROLE_KEY' };
+
+  // 0046 gate: every open app kicks this endpoint; with 80 users that was
+  // ~40 runs a minute, each executing notif_tick() + the queue query with
+  // the service role. Only ONE run per `gateSeconds` gets through — the
+  // rest answer immediately. (Gate missing = migration not applied → run.)
+  const gateSeconds = opts.gateSeconds ?? 45;
+  if (gateSeconds > 0) {
+    const { data: allowed, error: gateErr } = await supabase.rpc('notif_dispatch_gate', { p_min_seconds: gateSeconds });
+    if (!gateErr && allowed === false) {
+      return { configured: true, skipped: true, queued: 0, sent: 0, failed: 0, gone: 0 };
+    }
+  }
 
   let tick: unknown = null;
   try {

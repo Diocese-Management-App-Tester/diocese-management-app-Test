@@ -292,8 +292,9 @@ reset role;
 
 -- ---------- 9. realtime ----------
 do $$ begin
-  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'chat_messages') then
-    raise exception 'chat_messages not in realtime publication';
+  -- 0046: chat_messages moved to broadcast (zzz_rt_* triggers)
+  if not exists (select 1 from pg_trigger where tgname = 'zzz_rt_ins' and tgrelid = 'public.chat_messages'::regclass) then
+    raise exception 'chat_messages broadcast trigger missing';
   end if;
 end $$;
 

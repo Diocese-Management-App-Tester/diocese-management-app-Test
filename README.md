@@ -327,6 +327,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
    ⚠️ `0038_exam_results.sql` is **required** by وحدة نتائج الامتحانات (`/results/*`). Adds `grading_systems` + `grading_grades` (percent bands), `result_exams` (scope church → service? → class?, status, grading system, `grade_overall` / `grade_subject`, `pass_rule` overall | subjects | both, `pass_percent`, `absent_as_zero`, `min_required_subjects`, `locked` + audit, `published_at`), `result_subjects` (full / pass degree, weight, order, bonus) and `exam_results` (one row per enrollment × subject: score, status draft | completed | absent | excused, note, computed `percent` / `grade_id` / `passed`, created / edited by). All computation happens in triggers + `result_summary_core` / `result_exam_summary` (totals, weighted percent, overall grade, pass / fail, competition ranking `rank` by percent and `rank_score` by total). RPCs: `result_permissions`, `result_save_bulk`, `result_copy_from_exam`, `result_clear`, `result_exam_set_lock` (only path to lock / unlock), `result_exam_duplicate`, `grading_system_duplicate`, `result_student_history`, anon `child_portal_results`. RLS gated by `module_visible('results')` + `result_can(key)` (managers of the scope get everything; class servants need permission profiles for `results.enter / edit / import / export / manage_* / lock`); scope enforced with `scope_overlaps` / `scope_contains` / `enrollment_visible`. Seeds a global default grading system (Grade 1..5). Idempotent; run after 0037. Test: `supabase/tests/exam_results_test.sql`.
    ⚠️ `0040_code_system.sql` is **required** by نظام الأكواد (`/owner/customize/codes`). Extends `validate_app_settings()` for the `codes` key; adds `render_code(template, scopes, church, service, class, now)` (SQL mirror of `renderTemplate`), `code_template_for(kind)`, `new_person_code(...)` (used by `add_person_and_enroll` when no code is given), `occasion_new_ticket_code(church, service, class)` (replaces the zero-arg version — ticket codes follow the owner's design) and the anon-safe `code_settings()` RPC used by the signup page. Idempotent; run after 0037.
    ⚠️ `0039_library.sql` is **required** by وحدة المكتبة (`/library/*`, `/child/library/*`). Adds `library_subjects`, `library_books` (pdf_url), `library_lectures` (kind video | voice, media_url, thumbnail_url, lecture_date) and `library_favorites` (servant `user_id` or child `person_id` × book | lecture). Each content row carries an **audience** (`everyone | servants | service | class` + church / service / class ids) checked with `scope_overlaps` (read) / `scope_contains` (write). Helpers: `library_can(key)`, `library_permissions()`, `library_audience_visible / _writable`, `library_subject_visible`; anon RPCs `child_portal_library(nid)` and `child_portal_library_favorite(nid, book, lecture, on)` (module must be granted for the child's enrollment). Links only — no storage. Idempotent; run after 0037. Test: `supabase/tests/library_module_test.sql`.
+   ⚠️ `0046_realtime_broadcast_scale.sql` is **REQUIRED by the current frontend for live updates at scale** (fixes the lag / failures seen with 60–80 concurrent servants). Moves the hot tables (`attendance_log`, `points_log`, `contact_log`, `enrollments`, `persons`, `notification_recipients`, `chat_messages`, `chat_read_state`, `store_orders`, `card_print_requests`, `user_achievements`, `servant_enrollments`, `servant_scopes`) OUT of the `supabase_realtime` publication and adds statement-level triggers that `realtime.send()` **one broadcast message per statement** on `scope:all` / `scope:church:<id>` / `user:<uid>` topics (RLS policy on `realtime.messages` via `rt_topic_allowed`). Also: `pg_trgm` GIN indexes on `persons(name / phone / national_id)` for the search box, composite indexes for the list/badge queries, `notif_dispatch_gate()` + `rt_gates` so the push dispatcher runs at most once per 45 s across all devices. Idempotent; run after 0045. **Until it is applied the app still works**: hot-table screens fall back to a 45 s poll + refresh on focus. Test: `supabase/tests/realtime_broadcast_test.sql`.
 3. **Authentication → Providers → Email**: disable "Confirm email"
 4. Authentication → Users → Add user: `owner@diocese.app` + password
 5. Copy that user's UUID into `supabase/migrations/0002_bootstrap_owner.sql` and run it
@@ -517,6 +518,47 @@ rejected by RLS).
 - **No full-table downloads anywhere** — stats/home use RPC aggregates, the
   scanner resolves a QR via RPC, card printing fetches only the selected scope.
 
+## Scale Architecture — migration 0046 (60–80+ concurrent servants)
+
+### The incident
+On a scan day with ~60–80 servants online the app became laggy and then failed.
+Root causes found while studying the code:
+
+| # | Cause | Effect |
+|---|---|---|
+| 1 | Every open app held **8–18 `postgres_changes` subscriptions** (header bells, 3 contexts, the page, up to 10 home widgets), many on the hot tables. Supabase Realtime re-evaluates the table's **RLS policy once per change × per subscriber**. One scan = 2–4 row changes → **~3 000 policy queries per scan** with 80 devices. | DB saturation → every request queues → the app "hangs" |
+| 2 | `middleware.ts` called `supabase.auth.getUser()` on **every request** (page, RSC payload, link prefetch) — a network round-trip to the rate-limited Auth server. | +150–400 ms per navigation, Auth rate-limit errors |
+| 3 | Every open app POSTed `/api/notifications/dispatch` **every 2 min** (80 users → 40 serverless runs/min, each running `notif_tick()` with the service role). | wasted DB + function capacity |
+| 4 | Children page reloaded **6 lookup tables + all list pages** on every realtime burst. | multiplied the load of #1 |
+| 5 | Search used `ilike '%x%'` with no trigram index → **sequential scan of `persons`** per keystroke per user. | slow search, CPU burn |
+| 6 | Auth context ran 5 sequential queries at login and again on every `TOKEN_REFRESHED` (all devices ≈ together). | login lag, synchronized spikes |
+
+### The fix — a shared broadcast bus
+```
+                 DB statement (scan / import / points …)
+                          │  statement-level trigger (zzz_rt_*)
+                          ▼
+     realtime.send(payload, 'change', topic, private=true)   ← ONE message per statement
+        topics: scope:all │ scope:church:<uuid> │ user:<uid>
+                          │  authorized ONCE at channel join (RLS on realtime.messages)
+                          ▼
+   browser: ONE channel per topic (2–4 per device) → src/lib/realtime.ts bus
+                          │  fan-out by table name
+                          ▼
+   useDebouncedRealtime(…) ×84 call sites — API unchanged, debounced reloads
+```
+- **DB** (`0046_realtime_broadcast_scale.sql`): hot tables leave the publication; `rt_trg_scoped` / `rt_trg_by_enrollment` / `rt_trg_persons` / `rt_trg_*` statement triggers with transition tables; `rt_topic_allowed()` + policy on `realtime.messages`; `pg_trgm` GIN indexes; composite indexes; `notif_dispatch_gate()`.
+- **Client bus** (`src/lib/realtime.ts`): `BUS_TABLES` decides per table — hot tables listen on the bus, the rest keep classic `postgres_changes` (+ `filter`). `AuthProvider` calls `configureRealtimeBus()` with the servant's churches (owner → `scope:all`). **Safety net**: when the bus isn't connected (migration not applied, socket down) hot-table listeners poll every 45 s while visible and refresh when the tab returns.
+- **Auth** (`src/lib/auth-context.tsx`): `getSession()` (local) instead of `getUser()`; profile / scopes / person / church / service loaded **in parallel**; `TOKEN_REFRESHED` and repeated `SIGNED_IN` no longer reload the profile; own approval / scope changes arrive via `user:<uid>`.
+- **Middleware**: `getSession()` — the JWT is verified locally and refreshed only when expired; RLS still validates the real token on every query.
+- **Dispatcher**: server gate (one real run per 45 s across all devices, cron `GET` never gated) + client kicks every 5–7.5 min with jitter and a 60 s per-device throttle (`startDispatcherKicks`); an explicit send still kicks immediately (`kickDispatcher({ force: true })`).
+- **Children page**: the scan-burst subscription reloads **only the list**; events / causes / feedbacks have their own subscription.
+- **Child portal** (no auth session → cannot join private topics): hot-table blocks poll (45–60 s, open chat thread 10 s) + refresh on focus; web push remains the instant path for notifications.
+- **Scanner / POS** balance modals re-read the one row when a bus message names that enrollment.
+
+### Expected effect
+Realtime work per scan: **from ~(devices × channels) RLS evaluations to 2–3 tiny inserts**, independent of the number of devices. Auth server calls: from one per request to one per token expiry (~1 h). Dispatcher runs: from ~40/min to ≤ 1.3/min.
+
 ## Statistics Architecture — migration 0020
 The الإحصائيات tab (`src/app/stats/page.tsx`) never downloads raw rows; every
 number comes from a SECURITY INVOKER RPC in `0020_statistics_rpcs.sql`, so RLS
@@ -545,8 +587,8 @@ the by-cause queries indexed. Frontend helpers live in `src/lib/stats.ts`
 ### Expected capacity (Vercel + Supabase)
 | Plan | Persons (المخدومين) | Servants | Notes |
 |---|---|---|---|
-| Free + Free ($0) | ~5,000 | ~40 concurrent | DB pauses after 7 idle days, no backups — OK for pilot only |
-| Supabase Pro ($25) + Vercel Hobby* | ~20,000 | ~150 concurrent | recommended production floor; daily backups |
+| Free + Free ($0) | ~5,000 | ~40 concurrent (≈100 with 0046) | DB pauses after 7 idle days, no backups — OK for pilot only |
+| Supabase Pro ($25) + Vercel Hobby* | ~20,000 | ~150 concurrent (≈400 with 0046) | recommended production floor; daily backups |
 | Pro + Pro ($45) | 20,000–50,000 | 300+ concurrent | Vercel Hobby is non-commercial; Pro adds team seats & analytics |
 
 \*Vercel Hobby is for non-commercial use; a church ministry generally

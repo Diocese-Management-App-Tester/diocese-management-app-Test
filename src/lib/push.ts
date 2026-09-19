@@ -143,8 +143,35 @@ export async function syncPushRegistration(
 }
 
 /** Ask the server to push whatever is pending (fire-and-forget after a send). */
-export function kickDispatcher(): void {
+// Client-side throttle: at most one kick per 60 s from this device (the
+// server has its own cross-device gate, see notif_dispatch_gate).
+let lastKickAt = 0;
+export function kickDispatcher(opts: { force?: boolean } = {}): void {
+  const now = Date.now();
+  if (!opts.force && now - lastKickAt < 60_000) return;
+  lastKickAt = now;
   try { fetch('/api/notifications/dispatch', { method: 'POST', keepalive: true }).catch(() => {}); } catch { /* ignore */ }
+}
+
+/**
+ * Periodic kicks for a long-lived screen (header bell). Base period +
+ * random jitter so 80 phones don't all hit the endpoint at the same
+ * second; only while the tab is visible. Returns the stop function.
+ */
+export function startDispatcherKicks(baseMs = 5 * 60_000): () => void {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const loop = () => {
+    if (stopped) return;
+    const delay = baseMs + Math.floor(Math.random() * baseMs * 0.5);
+    t = setTimeout(() => {
+      if (document.visibilityState === 'visible') kickDispatcher();
+      loop();
+    }, delay);
+  };
+  // first kick shortly after start, randomly spread over 0–20 s
+  t = setTimeout(() => { kickDispatcher(); loop(); }, Math.floor(Math.random() * 20_000));
+  return () => { stopped = true; if (t) clearTimeout(t); };
 }
 
 export const PUSH_REASON_LABELS: Record<string, string> = {

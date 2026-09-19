@@ -318,8 +318,12 @@ reset role;
 
 -- ---------- 9. realtime publication ----------
 do $$ begin
-  if (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('achievements', 'user_achievements')) <> 2 then
+  -- 0046: user_achievements moved to broadcast (zzz_rt_* triggers)
+  if (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('achievements')) <> 1 then
     raise exception 'realtime publication missing';
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'zzz_rt_ins' and tgrelid = 'public.user_achievements'::regclass) then
+    raise exception 'user_achievements broadcast trigger missing';
   end if;
 end $$;
 
