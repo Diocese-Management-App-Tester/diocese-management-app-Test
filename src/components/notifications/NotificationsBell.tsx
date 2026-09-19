@@ -15,7 +15,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { useModuleVisible } from '@/lib/modules-context';
 import { fetchUnreadCount } from '@/lib/notifications';
-import { syncPushRegistration, kickDispatcher } from '@/lib/push';
+import { syncPushRegistration, startDispatcherKicks } from '@/lib/push';
 
 /**
  * `hidden` — the owner removed the bell from the header (تخصيص التطبيق).
@@ -38,13 +38,12 @@ export default function NotificationsBell({ icon: Icon = Bell, hidden = false }:
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (enabled) syncPushRegistration(supabase, { kind: 'servant' }); }, [enabled, supabase]);
   // Keep scheduled sends / reminders moving even without a per-minute server
-  // cron (Vercel Hobby allows daily crons only): every open servant app
-  // kicks the dispatcher on start and every 2 minutes while visible.
+  // cron (Vercel Hobby allows daily crons only). 0046: every ~5–7.5 min with
+  // jitter (was every 2 min on every device) and the server lets only one
+  // run through per 45 s across all devices.
   useEffect(() => {
     if (!enabled) return;
-    kickDispatcher();
-    const t = setInterval(() => { if (document.visibilityState === 'visible') kickDispatcher(); }, 120_000);
-    return () => clearInterval(t);
+    return startDispatcherKicks();
   }, [enabled]);
   useDebouncedRealtime(supabase, 'notif-bell', [{ table: 'notification_recipients' }], load, { enabled, delayMs: 800 });
 

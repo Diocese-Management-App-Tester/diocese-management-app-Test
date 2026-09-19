@@ -25,6 +25,7 @@ import NumPadModal from '@/components/NumPadModal';
 import { ViewPersonModal, ModalFrame } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
+import { onBusTable } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
 
 // ---------- Scanner jobs — same system as the children page ----------
@@ -1274,23 +1275,23 @@ function ManualPointsModal({
   const [flash, setFlash] = useState<'up' | 'down' | null>(null);
   const [lastOp, setLastOp] = useState<{ delta: number; cause: string } | null>(null);
 
-  // ---- Realtime: keep the balance in sync with the DB row ----
+  // ---- Realtime: keep the balance in sync with the DB row (0046: the
+  // enrollments table travels on the broadcast bus — re-read the one row
+  // when a message names this enrollment) ----
   useEffect(() => {
-    const channel = supabase
-      .channel(`scanner-manual-${enrollment.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'enrollments', filter: `id=eq.${enrollment.id}` },
-        (payload) => {
-          const pts = (payload.new as { points?: number } | null)?.points;
-          if (typeof pts === 'number') onBalance(pts);
-        }
-      )
-      .subscribe();
-    // Also re-read once on open so a stale search row gets corrected
-    supabase.from('enrollments').select('points').eq('id', enrollment.id).maybeSingle()
-      .then(({ data }) => { if (data && typeof data.points === 'number') onBalance(data.points); });
-    return () => { supabase.removeChannel(channel); };
+    let cancelled = false;
+    const readBalance = () => {
+      supabase.from('enrollments').select('points').eq('id', enrollment.id).maybeSingle()
+        .then(({ data }) => { if (!cancelled && data && typeof data.points === 'number') onBalance(data.points); });
+    };
+    // re-read once on open so a stale search row gets corrected
+    readBalance();
+    const off = onBusTable('enrollments', (m) => {
+      if (m.op !== 'UPDATE') return;
+      if (m.ids && m.ids.length > 0 && !m.ids.includes(enrollment.id)) return;
+      readBalance();
+    });
+    return () => { cancelled = true; off(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enrollment.id]);
 

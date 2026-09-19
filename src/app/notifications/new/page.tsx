@@ -192,7 +192,7 @@ export default function NewNotificationPage() {
       });
       if (res.status === 'scheduled') flash(`تمت الجدولة إلى ${targetLabel} ⏰`);
       else if (res.status === 'failed') flash('لا يوجد مستلمون في هذا النطاق');
-      else { flash(`تم الإرسال إلى ${res.recipients_count} مستلم ✅`); kickDispatcher(); }
+      else { flash(`تم الإرسال إلى ${res.recipients_count} مستلم ✅`); kickDispatcher({ force: true }); }
       setTimeout(() => router.replace('/notifications'), 800);
     } catch (e) {
       flash(notifErrorMessage(e, 'تعذر الإرسال'));

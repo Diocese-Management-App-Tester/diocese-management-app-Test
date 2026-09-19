@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -13,6 +14,7 @@ import type { ServantEnrollment, Church, Service, Person, ScopeRef } from '@/lib
 import { SERVANTS_TABLE, SERVANT_SCOPES_TABLE, allScopesOf } from '@/lib/types';
 import type { User } from '@supabase/supabase-js';
 import { servantSessionStale, clearServantRememberFlags } from '@/lib/session';
+import { configureRealtimeBus, onBusTable } from '@/lib/realtime';
 
 interface AuthState {
   user: User | null;
@@ -56,10 +58,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [service, setService] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const supabase = createClient();
+  // ONE browser client for the whole app (createBrowserClient is a
+  // singleton in the browser, but keep the reference stable anyway).
+  const [supabase] = useState(() => createClient());
+
+  // Drop stale responses when a newer load started (fast re-auth / realtime)
+  const loadSeq = useRef(0);
 
   const loadProfile = useCallback(
     async (uid: string) => {
+      const seq = ++loadSeq.current;
       // 0037: servant_enrollments. Fall back to the old `profiles` table when
       // the migration has not been applied yet (identical columns).
       let { data: p, error } = await supabase
@@ -71,51 +79,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
         p = res.data;
       }
+      if (seq !== loadSeq.current) return;
       const prof = (p ?? null) as ServantEnrollment | null;
+
+      if (!prof) {
+        setProfile(null); setScopes([]); setPerson(null); setChurch(null); setService(null);
+        configureRealtimeBus(supabase, { uid, role: 'pending', churchIds: [] });
+        return;
+      }
+
+      // Everything else in PARALLEL — was 4 sequential round-trips before
+      const [extraRes, perRes, chRes, svRes] = await Promise.all([
+        supabase.from(SERVANT_SCOPES_TABLE).select('church_id, service_id, class_id').eq('servant_id', uid),
+        prof.person_id
+          ? supabase.from('persons').select('*').eq('id', prof.person_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+        prof.church_id
+          ? supabase.from('churches').select('*').eq('id', prof.church_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+        prof.service_id
+          ? supabase.from('services').select('*').eq('id', prof.service_id).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      if (seq !== loadSeq.current) return;
+
+      const all = allScopesOf(prof, ((extraRes as { data: ScopeRef[] | null }).data ?? []) as ScopeRef[]);
       setProfile(prof);
+      setScopes(all);
+      setPerson(((perRes as { data: Person | null }).data ?? null));
+      setChurch(((chRes as { data: Church | null }).data ?? null));
+      setService(((svRes as { data: Service | null }).data ?? null));
 
-      // 0045: the extra places (table may not exist before the migration → ignore)
-      if (prof) {
-        const { data: extra } = await supabase
-          .from(SERVANT_SCOPES_TABLE)
-          .select('church_id, service_id, class_id')
-          .eq('servant_id', uid);
-        setScopes(allScopesOf(prof, (extra ?? []) as ScopeRef[]));
-      } else {
-        setScopes([]);
-      }
-
-      if (prof?.person_id) {
-        const { data: per } = await supabase.from('persons').select('*').eq('id', prof.person_id).maybeSingle();
-        setPerson((per ?? null) as Person | null);
-      } else {
-        setPerson(null);
-      }
-
-      if (prof?.church_id) {
-        const { data: c } = await supabase
-          .from('churches')
-          .select('*')
-          .eq('id', prof.church_id)
-          .single();
-        setChurch(c ?? null);
-      } else {
-        setChurch(null);
-      }
-
-      if (prof?.service_id) {
-        const { data: s } = await supabase
-          .from('services')
-          .select('*')
-          .eq('id', prof.service_id)
-          .single();
-        setService(s ?? null);
-      } else {
-        setService(null);
-      }
+      // 0046: join the broadcast topics of my scopes (owner → scope:all)
+      // (a pending servant may only join his own user:<uid> topic — the
+      // church topics are RLS-denied until he is approved)
+      const approved = prof.status === 'approved';
+      configureRealtimeBus(supabase, {
+        uid,
+        role: approved ? prof.role : 'pending',
+        churchIds: approved ? (all.map((s) => s.church_id).filter(Boolean) as string[]) : [],
+      });
     },
     [supabase]
   );
+
+  const clearAll = useCallback(() => {
+    setProfile(null);
+    setPerson(null);
+    setScopes([]);
+    setChurch(null);
+    setService(null);
+    configureRealtimeBus(supabase, null);
+  }, [supabase]);
 
   const refresh = useCallback(async () => {
     // «تذكرني» not ticked → the session was tab-only; drop it on a cold start
@@ -123,66 +138,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearServantRememberFlags();
       await supabase.auth.signOut();
       setUser(null);
-      setProfile(null);
-      setPerson(null);
-      setScopes([]);
-      setChurch(null);
-      setService(null);
+      clearAll();
       setLoading(false);
       if (!window.location.pathname.startsWith('/login')) window.location.href = '/login';
       return;
     }
-    const {
-      data: { user: u },
-    } = await supabase.auth.getUser();
+    // Local session first (no network) — getUser() is a round-trip to the
+    // Auth server and is rate-limited; the middleware already validated the
+    // cookie for this navigation.
+    const { data: { session } } = await supabase.auth.getSession();
+    const u = session?.user ?? null;
     setUser(u);
     if (u) await loadProfile(u.id);
-    else {
-      setProfile(null);
-      setPerson(null);
-      setScopes([]);
-      setChurch(null);
-      setService(null);
-    }
+    else clearAll();
     setLoading(false);
-  }, [supabase, loadProfile]);
+  }, [supabase, loadProfile, clearAll]);
 
   useEffect(() => {
     refresh();
+    let lastUid: string | null = null;
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) loadProfile(session.user.id);
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      // TOKEN_REFRESHED fires every ~55 min on EVERY device; the profile did
+      // not change — reloading it there was 5 queries × all users at once.
+      if (event === 'TOKEN_REFRESHED') return;
+      if (u) {
+        if (event === 'INITIAL_SESSION' && lastUid === u.id) return;
+        if (event === 'SIGNED_IN' && lastUid === u.id) return; // tab focus re-emits SIGNED_IN
+        lastUid = u.id;
+        loadProfile(u.id);
+      } else {
+        lastUid = null;
+        clearAll();
+      }
     });
     return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Realtime: react to own enrollment changes (e.g. approval) instantly
+  // Realtime (0046 bus, topic user:<uid>): my enrollment was approved /
+  // changed, or a manager added / removed one of my places → reload.
   useEffect(() => {
     if (!user) return;
-    const channel = supabase
-      .channel(`servant-${user.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: SERVANTS_TABLE, filter: `id=eq.${user.id}` },
-        () => loadProfile(user.id)
-      )
-      // 0045: a manager added / removed one of my places
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: SERVANT_SCOPES_TABLE, filter: `servant_id=eq.${user.id}` },
-        () => loadProfile(user.id)
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, supabase, loadProfile]);
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const bump = () => { if (t) clearTimeout(t); t = setTimeout(() => loadProfile(user.id), 600); };
+    const offA = onBusTable('servant_enrollments', bump);
+    const offB = onBusTable('servant_scopes', bump);
+    return () => { if (t) clearTimeout(t); offA(); offB(); };
+  }, [user, loadProfile]);
 
   const signOut = useCallback(async () => {
     clearServantRememberFlags();
+    configureRealtimeBus(supabase, null);
     await supabase.auth.signOut();
     window.location.href = '/login';
   }, [supabase]);

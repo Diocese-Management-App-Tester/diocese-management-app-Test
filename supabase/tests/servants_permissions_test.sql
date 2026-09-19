@@ -184,8 +184,12 @@ do $$ begin
 end $$;
 
 do $$ begin
-  if (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('permission_profiles', 'permissions', 'servant_enrollments')) <> 3 then
+  -- 0046: servant_enrollments moved to broadcast (zzz_rt_* triggers)
+  if (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('permission_profiles', 'permissions')) <> 2 then
     raise exception 'realtime publication incomplete';
+  end if;
+  if not exists (select 1 from pg_trigger where tgname = 'zzz_rt_upd' and tgrelid = 'public.servant_enrollments'::regclass) then
+    raise exception 'servant_enrollments broadcast trigger missing';
   end if;
 end $$;
 

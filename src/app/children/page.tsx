@@ -298,10 +298,9 @@ export default function ChildrenPage() {
     }
   }, [supabase, churchFilter, serviceFilter, classFilter, searchQ, myGroupOnly, myGroupIds, profileId, kind]);
 
-  // Full refresh used by realtime + after mutations
-  const load = useCallback(async () => {
-    await Promise.all([loadLookups(true), loadList()]);
-  }, [loadLookups, loadList]);
+  // Realtime on the LOOKUP tables only (events / causes / feedbacks) —
+  // they change rarely; a scan burst must NOT re-download all six.
+  const reloadLookupsOnly = useCallback(async () => { await loadLookups(true); }, [loadLookups]);
 
   // Scope / search changed → back to page 1
   useEffect(() => {
@@ -336,8 +335,10 @@ export default function ChildrenPage() {
     }
   };
 
-  // Realtime sync — debounced (bursts of scans → ONE reload), filtered to
-  // the caller's own scope, paused while the tab is hidden.
+  // Realtime sync — debounced (bursts of scans → ONE reload), paused while
+  // the tab is hidden. 0046: enrollments / persons arrive on the shared
+  // broadcast bus (one message per statement for the whole church) and
+  // reload ONLY the list; the lookup tables have their own subscription.
   const rtFilter = scopeFilter(profile, scopes);
   useDebouncedRealtime(
     supabase,
@@ -345,11 +346,19 @@ export default function ChildrenPage() {
     [
       { table: 'enrollments', filter: rtFilter },
       { table: 'persons' },
+    ],
+    loadList,
+    { enabled: profile?.status === 'approved', delayMs: 1500 }
+  );
+  useDebouncedRealtime(
+    supabase,
+    'persons-lookups',
+    [
       { table: 'events', filter: profile?.church_id && profile.role !== 'owner' ? `church_id=eq.${profile.church_id}` : undefined },
       { table: 'causes', filter: profile?.church_id && profile.role !== 'owner' ? `church_id=eq.${profile.church_id}` : undefined },
       { table: 'call_feedbacks', filter: profile?.church_id && profile.role !== 'owner' ? `church_id=eq.${profile.church_id}` : undefined },
     ],
-    load,
+    reloadLookupsOnly,
     { enabled: profile?.status === 'approved' }
   );
 
