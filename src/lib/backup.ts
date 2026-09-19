@@ -123,6 +123,7 @@ export const TABLE_META: Record<string, { label: string; group: string }> = {
   shepherd_groups:          { label: 'الأشابين — المجموعات', group: 'modules' },
   // cards
   card_templates:           { label: 'قوالب الكروت', group: 'cards' },
+  card_print_profiles:      { label: 'ملفات الطباعة المحفوظة', group: 'cards' },
   card_print_requests:      { label: 'طلبات طباعة الكروت', group: 'cards' },
   // settings
   app_settings:             { label: 'تخصيص التطبيق (الشريط · الرأس · الأسماء · الأكواد)', group: 'settings' },

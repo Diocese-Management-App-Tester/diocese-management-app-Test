@@ -501,7 +501,10 @@ export interface ChildBirthday {
   days_left?: number;
   module_granted?: boolean;
   card?: { id: string; name: string; design: unknown } | null;
-  constants?: { church_name: string; service_name: string; class_name: string; church_logo_url: string | null };
+  constants?: {
+    church_name: string; service_name: string; class_name: string; church_logo_url: string | null;
+    service_logo_url?: string | null; class_logo_url?: string | null; // 0049
+  };
   gift?: { points: number; created_at: string } | null;
 }
 

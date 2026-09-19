@@ -11,6 +11,7 @@ import type { CardDesign, CardPrintSettings, CardTemplate, PaperSize, PaperOrien
 import { PAPER_SIZES, paperDims, H_ALIGN_LABELS, V_ALIGN_LABELS } from '@/lib/card-types';
 import type { HAlign, VAlign } from '@/lib/card-types';
 import CardCanvas, { type CardConstantsData, type CardPersonData } from './CardCanvas';
+import PrintProfilesBar from './PrintProfilesBar';
 
 // CSS defines 1in = 96px and 1in = 25.4mm → exact physical scale for print
 const MM_TO_PX = 96 / 25.4;
@@ -126,6 +127,8 @@ export default function PrintTab({
       service_name: service?.name ?? constants.service_name,
       class_name: cls?.name ?? constants.class_name,
       church_logo_url: church?.logo_url ?? constants.church_logo_url,
+      service_logo_url: service?.photo_url ?? constants.service_logo_url ?? null,
+      class_logo_url: cls?.photo_url ?? constants.class_logo_url ?? null,
     };
   }, [churches, services, classes, constants]);
 
@@ -293,6 +296,14 @@ export default function PrintTab({
 
   return (
     <div className="flex flex-col gap-4">
+      {/* ---------- saved print profiles (ملفات الطباعة) — apply / save the settings below ---------- */}
+      <PrintProfilesBar
+        settings={settings}
+        onApply={(s) => onChange(s)}
+        card={{ width: design.width, height: design.height }}
+        defaultScope={{ church_id: template.church_id, service_id: template.service_id, class_id: template.class_id }}
+      />
+
       {/* ---------- paper settings ---------- */}
       <section className="card">
         <h3 className="mb-2 text-sm font-extrabold text-slate-600">الورقة</h3>

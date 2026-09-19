@@ -55,14 +55,18 @@ export default function BirthdayCardDesignerPage() {
     setPrint(normalizePrint(tpl.print_settings));
     const [{ data: church }, svc, cls] = await Promise.all([
       supabase.from('churches').select('name, logo_url').eq('id', tpl.church_id).single(),
-      tpl.service_id ? supabase.from('services').select('name').eq('id', tpl.service_id).single() : Promise.resolve({ data: null }),
-      tpl.class_id ? supabase.from('classes').select('name').eq('id', tpl.class_id).single() : Promise.resolve({ data: null }),
+      tpl.service_id ? supabase.from('services').select('name, photo_url').eq('id', tpl.service_id).single() : Promise.resolve({ data: null }),
+      tpl.class_id ? supabase.from('classes').select('name, photo_url').eq('id', tpl.class_id).single() : Promise.resolve({ data: null }),
     ]);
+    const svcRow = svc.data as { name: string; photo_url: string | null } | null;
+    const clsRow = cls.data as { name: string; photo_url: string | null } | null;
     setConstants({
       church_name: church?.name ?? '',
-      service_name: (svc.data as { name: string } | null)?.name ?? 'مدارس الأحد',
-      class_name: (cls.data as { name: string } | null)?.name ?? 'فصل المخدوم',
+      service_name: svcRow?.name ?? 'مدارس الأحد',
+      class_name: clsRow?.name ?? 'فصل المخدوم',
       church_logo_url: church?.logo_url ?? null,
+      service_logo_url: svcRow?.photo_url ?? null,
+      class_logo_url: clsRow?.photo_url ?? null,
     });
     setLoading(false);
   }, [supabase, id]);

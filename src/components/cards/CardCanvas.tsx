@@ -2,13 +2,13 @@
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import QRCode from 'qrcode';
-import { User } from 'lucide-react';
+import { User, Landmark } from 'lucide-react';
 import type {
   CardDesign,
   CardElement,
   ImageFit,
 } from '@/lib/card-types';
-import { ageFromBirthdate, ARABIC_MONTHS } from '@/lib/card-types';
+import { ageFromBirthdate, ARABIC_MONTHS, isImageElement } from '@/lib/card-types';
 
 // ---------- data fed into a card ----------
 export interface CardPersonData {
@@ -43,7 +43,27 @@ export interface CardConstantsData {
   service_name: string;
   class_name: string;
   church_logo_url: string | null;
+  // service / class pictures (services.photo_url / classes.photo_url) —
+  // optional so older callers / RPC payloads keep working (→ placeholder)
+  service_logo_url?: string | null;
+  class_logo_url?: string | null;
 }
+
+// url of the image an element shows (null → placeholder)
+export const elementImageUrl = (
+  el: CardElement,
+  person: CardPersonData,
+  constants: CardConstantsData,
+): string | null => {
+  switch (el.type) {
+    case 'photo': return person.image_url;
+    case 'logo': return constants.church_logo_url;
+    case 'service_logo': return constants.service_logo_url ?? null;
+    case 'class_logo': return constants.class_logo_url ?? null;
+    case 'image': return el.imageUrl ?? null;
+    default: return null;
+  }
+};
 
 export const SAMPLE_PERSON: CardPersonData = {
   name: 'مينا جرجس عبد المسيح',
@@ -166,11 +186,9 @@ function ElementView({
     />
   ) : null;
 
-  if (el.type === 'photo' || el.type === 'logo' || el.type === 'image') {
-    const url =
-      el.type === 'photo' ? person.image_url
-      : el.type === 'logo' ? constants.church_logo_url
-      : el.imageUrl ?? null;
+  if (isImageElement(el.type)) {
+    const url = elementImageUrl(el, person, constants);
+    const PlaceholderIcon = el.type === 'photo' ? User : Landmark;
     return (
       <div style={base}>
         {bgLayer}
@@ -178,7 +196,7 @@ function ElementView({
           <div style={{ position: 'relative', width: '100%', height: '100%', backgroundImage: `url(${url})`, ...fitToCss(el.imageFit) }} />
         ) : (
           <div className={`relative flex h-full w-full items-center justify-center text-slate-300 ${el.bgEnabled ? '' : 'bg-slate-100'}`}>
-            <User style={{ width: '60%', height: '60%' }} />
+            <PlaceholderIcon style={{ width: '60%', height: '60%' }} />
           </div>
         )}
       </div>

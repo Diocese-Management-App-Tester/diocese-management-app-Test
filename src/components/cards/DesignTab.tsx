@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import {
   Plus, Trash2, Upload, X, ChevronUp, ChevronDown, Loader2,
   Type, User, QrCode, Landmark, ImagePlus, TextCursorInput, Image as ImageIcon,
-  ZoomIn, ZoomOut, Maximize, Lock, LockOpen,
+  ZoomIn, ZoomOut, Maximize, Lock, LockOpen, Church, Users,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
@@ -13,7 +13,7 @@ import type {
 } from '@/lib/card-types';
 import {
   newElement, VARIABLE_FIELDS, BIRTHDAY_VARIABLE_FIELDS, CONSTANT_FIELDS, ELEMENT_TYPE_LABELS,
-  IMAGE_FIT_LABELS, FONT_FAMILIES,
+  IMAGE_FIT_LABELS, FONT_FAMILIES, isImageElement,
 } from '@/lib/card-types';
 import CardCanvas, { SAMPLE_PERSON, type CardConstantsData, type CardPersonData } from './CardCanvas';
 
@@ -75,6 +75,8 @@ const TYPE_ICONS: Record<CardElementType, React.ReactNode> = {
   constant: <Landmark className="h-4 w-4" />,
   text: <Type className="h-4 w-4" />,
   logo: <Landmark className="h-4 w-4" />,
+  service_logo: <Church className="h-4 w-4" />,
+  class_logo: <Users className="h-4 w-4" />,
   image: <ImageIcon className="h-4 w-4" />,
 };
 
@@ -469,6 +471,20 @@ export default function DesignTab({
                   <button onClick={() => addElement('logo')} className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-bold hover:bg-gold-50">
                     <Landmark className="h-4 w-4 text-gold-500" /> شعار الكنيسة
                   </button>
+                  <button
+                    onClick={() => addElement('service_logo')}
+                    className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-bold hover:bg-gold-50"
+                    title="صورة الخدمة المرفوعة في إدارة الخدمات — تتغير مع خدمة كل مخدوم"
+                  >
+                    <Church className="h-4 w-4 text-gold-500" /> شعار الخدمة
+                  </button>
+                  <button
+                    onClick={() => addElement('class_logo')}
+                    className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-bold hover:bg-gold-50"
+                    title="صورة الفصل المرفوعة في إدارة الفصول — تتغير مع فصل كل مخدوم"
+                  >
+                    <Users className="h-4 w-4 text-gold-500" /> شعار الفصل
+                  </button>
                   <button onClick={() => addElement('text')} className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-sm font-bold hover:bg-gold-50">
                     <Type className="h-4 w-4 text-gold-500" /> نص ثابت
                   </button>
@@ -728,8 +744,16 @@ export default function DesignTab({
           )}
 
           {/* image settings */}
-          {(selected.type === 'photo' || selected.type === 'logo' || selected.type === 'image') && (
+          {isImageElement(selected.type) && (
             <div className="mt-3 border-t border-indigo-50 pt-3">
+              {(selected.type === 'logo' || selected.type === 'service_logo' || selected.type === 'class_logo') && (
+                <p className="mb-2 rounded-xl bg-gold-50 p-2 text-[11px] font-bold text-gold-700">
+                  {selected.type === 'logo' && 'يعرض شعار الكنيسة المرفوع في إدارة الكنائس — يتبع كنيسة كل مخدوم عند الطباعة.'}
+                  {selected.type === 'service_logo' && 'يعرض صورة / شعار الخدمة المرفوعة في إدارة الخدمات — يتبع خدمة كل مخدوم عند الطباعة.'}
+                  {selected.type === 'class_logo' && 'يعرض صورة / شعار الفصل المرفوعة في إدارة الفصول — يتبع فصل كل مخدوم عند الطباعة.'}
+                  {' '}إن لم تكن الصورة مرفوعة يظهر مكانها فارغاً.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="mb-0.5 block text-[11px] font-bold text-slate-500">طريقة عرض الصورة</span>
