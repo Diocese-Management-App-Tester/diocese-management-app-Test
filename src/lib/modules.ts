@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity';
 
 export interface AppModule {
   key: ModuleKey;
@@ -132,6 +132,15 @@ export const MODULES: AppModule[] = [
     icon: Library,
     color: 'text-lime-700',
     paths: ['/library'],
+  },
+  {
+    key: 'activity',
+    label: 'سجل النشاط',
+    desc: 'كل ما يحدث في التطبيق: مَن فعل ماذا على مَن ومتى — حضور · نقاط · بيانات · خدام · دخول · وكل عملية في كل وحدة، مع الفرق قبل/بعد، حسب المستخدم أو حسب العملية، وتحميل 10 أو 100 أو 1000 عملية والتعمق أكثر',
+    href: '/activity',
+    icon: History,
+    color: 'text-slate-700',
+    paths: ['/activity'],
   },
 ];
 

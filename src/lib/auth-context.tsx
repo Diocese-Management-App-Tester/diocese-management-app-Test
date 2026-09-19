@@ -15,6 +15,7 @@ import { SERVANTS_TABLE, SERVANT_SCOPES_TABLE, allScopesOf } from '@/lib/types';
 import type { User } from '@supabase/supabase-js';
 import { servantSessionStale, clearServantRememberFlags } from '@/lib/session';
 import { configureRealtimeBus, onBusTable } from '@/lib/realtime';
+import { logActivity } from '@/lib/activity';
 
 interface AuthState {
   user: User | null;
@@ -193,6 +194,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     clearServantRememberFlags();
     configureRealtimeBus(supabase, null);
+    // 0047: leave a trace before the session is gone (never blocks sign-out)
+    await Promise.race([logActivity(supabase, 'auth.logout'), new Promise((r) => setTimeout(r, 1500))]);
     await supabase.auth.signOut();
     window.location.href = '/login';
   }, [supabase]);
