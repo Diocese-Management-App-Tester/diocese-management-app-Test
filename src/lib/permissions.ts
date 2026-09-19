@@ -13,7 +13,7 @@ import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
   QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
-  Library, BookOpen,
+  Library, BookOpen, History, Eye, Cog,
 } from 'lucide-react';
 
 export interface PermissionGroup {
@@ -39,6 +39,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'servants', label: 'الخدام', icon: ShieldCheck, color: 'text-rose-600' },
   { key: 'results', label: 'نتائج الامتحانات', icon: ClipboardCheck, color: 'text-emerald-600' },
   { key: 'library', label: 'المكتبة', icon: Library, color: 'text-lime-700' },
+  { key: 'activity', label: 'سجل النشاط', icon: History, color: 'text-slate-700' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -96,6 +97,12 @@ export const PERMISSIONS: PermissionDef[] = [
   // default and need a profile to manage content ----
   { key: 'library.view', group: 'library', label: 'تصفح المكتبة', desc: 'رؤية المواضيع والكتب والمحاضرات المتاحة له (افتراضي لكل خادم)' },
   { key: 'library.manage', group: 'library', label: 'إدارة المكتبة', desc: 'إضافة وتعديل وحذف المواضيع والكتب والمحاضرات في نطاقه' },
+
+  // ---- سجل النشاط (0047) — owner + church managers see everything in
+  // their church by default; service managers see their service; class
+  // servants need `activity.view` ----
+  { key: 'activity.view', group: 'activity', label: 'عرض سجل النشاط', desc: 'رؤية العمليات في نطاقه (خادم الفصل يحتاجها؛ المديرون يملكونها)' },
+  { key: 'activity.view_all', group: 'activity', label: 'عرض سجل الكنيسة كاملاً', desc: 'مسؤول الخدمة / خادم الفصل يرى كل عمليات كنيسته لا نطاقه فقط' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
@@ -143,6 +150,8 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'results.stats': PieChart,
   'library.view': BookOpen,
   'library.manage': Library,
+  'activity.view': Eye,
+  'activity.view_all': Cog,
 };
 
 /** Resolve the key set from the grant rows + the profiles (owner ⇒ '*'). */

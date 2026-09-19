@@ -219,6 +219,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 - ✅ **وحدة الفعاليات (0032)**: رحلات · مؤتمرات · احتفالات · أنشطة. **الخادم** (`/occasions`) يرى **لوحة الفعاليات** (صورة، عنوان، نوع، موعد، مكان، منظّم، آخر موعد للتسجيل، الأماكن المتاحة، عدّادات) وينشئ الفعالية بنطاق كنيسة → خدمة → فصل، سعة (أو بلا حد)، **تأكيد تلقائي أو مراجعة**، نقاط عند تسجيل الدخول، وقائمة تحقق أولية. صفحة الفعالية (`/occasions/[id]`): **لوحة معلومات** (مسجّل · قيد المراجعة · مؤكد · سجّل الدخول · ملغي · متاح)، **المشاركون** (بحث وفلاتر، إضافة من مخدومي نطاقه، ورقة المشارك: تغيير الحالة قيد المراجعة → مؤكد → سجّل الدخول → ملغي، **قائمة التحقق** ✓ لكل مشارك — الدفع، إذن ولي الأمر، المواصلات…، عرض تذكرته، ملاحظة، حذف، تصدير CSV)، **تسجيل الدخول** بمسح QR التذكرة **أو كارت المخدوم** (أو كود يدوي / بحث بالاسم) مع كارت نتيجة أخضر / كهرماني ونقاط الدخول، **قائمة التحقق** (تعريف العناصر وترتيبها ونسبة إنجاز كل عنصر)، **الإعلانات والتذكيرات** + سجل تلقائي لحالات المشاركين. **المخدوم** (`/child/occasions`) يرى الفعاليات القادمة لفصله / خدمته / كنيسته مع حالته على كل كارت، يفتح الفعالية ويضغط **«أنا مشارك!»** (أو يلغي مشاركته قبل البدء)، وعند التأكيد تظهر **تذكرته الإلكترونية** (QR فريد `T-XXXXXXXXXX` قابل للحفظ كصورة)، وقائمة التحقق الخاصة به، والإعلانات وإشعارات حالته. الحالات: قيد المراجعة → مؤكد → سجّل الدخول → ملغي. مقيدة بصلاحيات الوحدات (`module_visible('occasions')`) وبالنطاق (RLS): الخادم يدير مخدومي نطاقه فقط حتى على فعالية أوسع.
 - ✅ **وحدة نتائج الامتحانات (0038)**: `/results` — الخادم ينشئ **الامتحان** (الاسم · التاريخ · العام الدراسي · النطاق كنيسة → خدمة؟ → فصل؟ · الوصف · الحالة مسودة / مفتوح / مكتمل / مؤرشف · نظام التقدير · قاعدة النجاح) ويضيف **المواد** (اسم · كود · الدرجة الكاملة · درجة النجاح · الوزن · الترتيب · مادة إضافية). **أنظمة التقدير** (`/results/grading`) عامة أو لكل كنيسة بشرائح (اسم · من٪ · إلى٪ · لون · ناجح) مع تحقق من التداخل والفجوات. **الإدخال الجماعي** (`/results/bulk`) جدول مخدومين × مواد بلوحة المفاتيح (Enter/↓ التالي، Alt+A غائب، لصق عمود من Excel) مع تحقق فوري (> الدرجة الكاملة / سالب / غير رقمي)، تقدير مباشر، مسودة تلقائية في الجهاز، حفظ الكل بشريط تقدّم وإعادة المحاولة للفاشلة. **الاستيراد من Excel** (`/results/import`) قالب جاهز بأكواد المخدومين، معاينة، مطابقة بالكود ثم بالاسم، اكتشاف غير المعروف / المكرر / غير الصالح مع التصحيح قبل الاستيراد. صفحة الامتحان: لوحة (عدد · مكتمل · ناجح · راسب · نسبة النجاح · متوسط · أعلى · أقل · توزيع التقديرات)، قائمة النتائج، **الترتيب مع التعادل (1,2,2,4)** بالنسبة أو بالمجموع، بطاقة نتيجة المخدوم (عرض / تعديل / طباعة)، **قفل النتائج** بعد الاعتماد، نسخ النتائج من امتحان آخر، مسح، تكرار الامتحان، نشر للبوابة. **التقارير** (`/results/reports`) نتائج امتحان · ترتيب · أداء المواد · أداء الفصول والخدمات · توزيع التقديرات · النجاح والرسوب مع فلاتر النطاق / العام / الفترة وتصدير Excel وطباعة. **نتائج المخدومين** (`/results/students`) بحث + سجل كل امتحانات المخدوم مع تطور النسبة. كل الحسابات (النسبة · التقدير · النجاح · المجموع · الترتيب) تُجرى في قاعدة البيانات؛ الصلاحيات `results.view / enter / edit / import / export / manage_exams / manage_subjects / manage_grading / lock / stats` عبر نظام الصلاحيات الحالي، والمديرون يملكون كل الصلاحيات في نطاقهم.
 - ✅ **وحدة المكتبة (0039)**: `/library` — مكتبة بروابط فقط (لا رفع ملفات) منظمة بـ **مواضيع** (اسم · وصف · صورة غلاف). كل موضوع فيه تبويبان: **📚 الكتب** (عنوان · مؤلف · وصف · غلاف · رابط PDF — Google Drive أو رابط مباشر) و**🎓 المحاضرات** (عنوان · متحدث · وصف · تاريخ · 🎥 فيديو أو 🎙️ صوت · رابط YouTube / Drive / MP3 / MP4 · صورة مصغرة تلقائية من YouTube / Drive). الرئيسية تعرض المواضيع ككروت (صورة · اسم · عدد الكتب · عدد المحاضرات) مع **بحث** في المواضيع والكتب والمحاضرات والمؤلفين والمتحدثين، وتبويب **⭐ المفضلة** لكل خادم. المحاضرات تُشغَّل داخل التطبيق (YouTube / Drive embed · `<audio>` · `<video>`). **الجمهور** لكل موضوع / كتاب / محاضرة: الجميع · الخدام فقط · خدمة محددة · فصل محدد (بنفس نظام النطاق). **المخدوم** (`/child/library`) يتصفح المتاح له ويحفظ مفضلته. الصلاحيات: `library.view` (افتراضي لكل خادم في نطاق مفعّل) · `library.manage` (المديرون، أو عبر ملف صلاحيات). مقيدة بصلاحيات الوحدات (`module_visible('library')`) وواقعية.
+- ✅ **وحدة سجل النشاط (0047)**: `/activity` — **كل ما يحدث في التطبيق، كل عملية**: حضور · نقاط · مكالمات · رسائل · بيانات الأشخاص · تسجيلات · خدام · صلاحيات · بنية · مناسبات · متجر · امتحانات · فعاليات · إشعارات · مكتبة · نسخ احتياطي · دخول / خروج — تُسجَّل **تلقائيًا من قاعدة البيانات** (مشغّل عام على كل جدول أعمال) فلا تفلت أي عملية حتى لو جاءت من RPC أو من مشغّل آخر أو من بوابة المخدوم. كل سطر: **مَن** (خادم بدوره · مخدوم من بوابته · النظام) · **ماذا** (مفتاح ثابت مثل `attendance.add` · `person.update` · `servant.approve` مترجم لجملة عربية) · **على مَن** (اسم المخدوم / الخادم / الكنيسة…) · **أين** (كنيسة → خدمة → فصل) · **الفرق** قبل ← بعد (التعديل يحفظ الأعمدة المتغيرة فقط) · **العملية الجماعية** (استيراد 300 مخدوم = دفعة واحدة برقم مشترك). أربعة تبويبات: **السجل** (خط زمني مباشر مجمّع باليوم، بحث، فترة اليوم / ٧ / ٣٠ / الكل، نوع الفاعل، النطاق، نوع العملية — يحمّل **10 أو 100 أو 1000** عملية ثم «**تعمّق أكثر**» يجلب الأقدم بلا تكرار عبر keyset pagination) · **بالمستخدم** (كل فاعل بعدد عملياته وآخرها → عملياته) · **بالعملية** (مجمّعة حسب الوحدة مع العدّادات → عملياتها) · **نظرة عامة** (KPIs · آخر ٣٠ يومًا · ساعات النشاط · الأكثر نشاطًا · وللمالك مدة الاحتفاظ + تنظيف). كل سطر يفتح **ورقة تفاصيل** بجدول قبل / بعد وأزرار «كل عملياته» · «كل ما حدث له» · «مثلها» · «عرض الدفعة». تصدير Excel للمُحمَّل. الصلاحيات: المالك ومديرو الكنائس يرون كل شيء في نطاقهم افتراضيًا، مسؤول الخدمة يرى خدمته، خادم الفصل يحتاج `activity.view` (فصله) و`activity.view_all` لكل الكنيسة. مقيدة بصلاحيات الوحدات (`module_visible('activity')`)، لا أحد يكتب فيها من التطبيق مباشرة.
 - ✅ **تخصيص التطبيق (0035)**: from **وحدة المالك → تخصيص التطبيق** the owner controls the app shell for everyone — **شريط المهام**: the **5 bottom-bar slots** (`/owner/customize/taskbar`), each slot = any destination (a core page, any module, or the owner module) with an optional custom icon (190+ icon library) and label, re-orderable, with a live preview; everything NOT in the bar is listed in the **side menu under the 5** (core pages moved out, the owner module, the modules granted to the user's scope). **أيقونات الهيدر** (`/owner/customize/header`): choose which icons sit in the header and their order — تاريخ العمل · جرس الرسائل · جرس الإشعارات · **quick links** to any page / module, each with an optional icon; the menu button is fixed. Stored in `app_settings.navigation` (owner-write, all-read, realtime → every device re-lays instantly). Resolution is per user: a slot pointing at a module hidden from a servant falls back to a default core page; module-bound header widgets vanish when the module isn't granted
 - ✅ **نظام الأكواد (0040)**: from **تخصيص التطبيق → نظام الأكواد** (`/owner/customize/codes`) the owner designs how every code the app generates looks. A code is a **template = ordered parts joined by a separator** (dash by default): `نص ثابت` (prefix) · `الوقت` (generation moment in ms → `1702655732293`) · `التاريخ` (YYYYMMDD · YYMMDD · YYYY …) · `عشوائي` (N chars — alnum / digits / letters / hex) · `اختصار الكنيسة` / `الخدمة` / `الفصل` (abbreviations the owner gives each scope in the same page, with a fallback text) + letter case. Example: `P-1702655732293` or `STM-C1-231215-4F7K`. **One default system** is followed by every generator, and each **generator** — كود المخدوم · كود الخادم · كود منتج المتجر · كود تذكرة المناسبة — can pick **النظام الافتراضي** / **تصميم خاص** (its own template) / **الطريقة الأصلية** (the app's built-in `P-XXXXXXXX` …), with «الكل» shortcuts. Live colored preview + ready presets. Applied in: إضافة مخدوم (single + bulk `AUTO`, monotonic clock so timestamp codes never collide), تعديل كود المخدوم, signup code generation (anon reads via `code_settings()`), store item code, and — **in the database** — `add_person_and_enroll` fallback code (`new_person_code`) and occasion ticket codes (`render_code`, SQL mirror of `renderTemplate`). Stored in `app_settings.codes` (validated by trigger, realtime). Existing codes never change. `src/lib/code-templates.ts` · `useCodeGenerator(kind)`
 - ✅ **إضافة خدام فردي / جماعي (0041)**: managers add servants directly from **إدارة الخدام → إضافة** — single form (scope · code typed/scanned/generated · data · password · permission profiles) or bulk Excel / paste import with column mapping, auto codes + passwords, preview and a credentials Excel export. Servants are approved instantly. Server route `/api/servants/create` + RPC `admin_add_servant` (service_role only). See § Add servants directly.
@@ -296,6 +297,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 | `/occasions` | occasions module — board (cover, title, kind, date, place, organizer, seats, counters), scope selectors, phase filters, add |
 | `/occasions/[id]` | occasion detail — stats, participants (add / status / checklist / ticket / remove / CSV), QR check-in, checklist editor, announcements |
 | `/child/occasions` | child portal — occasions board with my registration status |
+| `/activity` | activity log module — tabs السجل (live timeline, 10/100/1000 per dig, keyset «تعمّق أكثر») · بالمستخدم · بالعملية · نظرة عامة (+ owner retention / prune); `?tab=&actor=&kind=&action=&group=&person=&batch=` |
 | `/child/occasions/[id]` | child portal — occasion detail: «أنا مشارك», cancel, e-ticket QR, my checklist, notifications |
 
 ## Data Models & Storage
@@ -327,6 +329,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
    ⚠️ `0038_exam_results.sql` is **required** by وحدة نتائج الامتحانات (`/results/*`). Adds `grading_systems` + `grading_grades` (percent bands), `result_exams` (scope church → service? → class?, status, grading system, `grade_overall` / `grade_subject`, `pass_rule` overall | subjects | both, `pass_percent`, `absent_as_zero`, `min_required_subjects`, `locked` + audit, `published_at`), `result_subjects` (full / pass degree, weight, order, bonus) and `exam_results` (one row per enrollment × subject: score, status draft | completed | absent | excused, note, computed `percent` / `grade_id` / `passed`, created / edited by). All computation happens in triggers + `result_summary_core` / `result_exam_summary` (totals, weighted percent, overall grade, pass / fail, competition ranking `rank` by percent and `rank_score` by total). RPCs: `result_permissions`, `result_save_bulk`, `result_copy_from_exam`, `result_clear`, `result_exam_set_lock` (only path to lock / unlock), `result_exam_duplicate`, `grading_system_duplicate`, `result_student_history`, anon `child_portal_results`. RLS gated by `module_visible('results')` + `result_can(key)` (managers of the scope get everything; class servants need permission profiles for `results.enter / edit / import / export / manage_* / lock`); scope enforced with `scope_overlaps` / `scope_contains` / `enrollment_visible`. Seeds a global default grading system (Grade 1..5). Idempotent; run after 0037. Test: `supabase/tests/exam_results_test.sql`.
    ⚠️ `0040_code_system.sql` is **required** by نظام الأكواد (`/owner/customize/codes`). Extends `validate_app_settings()` for the `codes` key; adds `render_code(template, scopes, church, service, class, now)` (SQL mirror of `renderTemplate`), `code_template_for(kind)`, `new_person_code(...)` (used by `add_person_and_enroll` when no code is given), `occasion_new_ticket_code(church, service, class)` (replaces the zero-arg version — ticket codes follow the owner's design) and the anon-safe `code_settings()` RPC used by the signup page. Idempotent; run after 0037.
    ⚠️ `0039_library.sql` is **required** by وحدة المكتبة (`/library/*`, `/child/library/*`). Adds `library_subjects`, `library_books` (pdf_url), `library_lectures` (kind video | voice, media_url, thumbnail_url, lecture_date) and `library_favorites` (servant `user_id` or child `person_id` × book | lecture). Each content row carries an **audience** (`everyone | servants | service | class` + church / service / class ids) checked with `scope_overlaps` (read) / `scope_contains` (write). Helpers: `library_can(key)`, `library_permissions()`, `library_audience_visible / _writable`, `library_subject_visible`; anon RPCs `child_portal_library(nid)` and `child_portal_library_favorite(nid, book, lecture, on)` (module must be granted for the child's enrollment). Links only — no storage. Idempotent; run after 0037. Test: `supabase/tests/library_module_test.sql`.
+   ⚠️ `0047_activity_log.sql` is **required** by وحدة سجل النشاط (`/activity`). Adds `activity_log` (actor kind / id / name / role · table · op INSERT | UPDATE | DELETE | EVENT · `action` key · `changed[]` · row / target person / target name / enrollment · church / service / class · `old_data` / `new_data` (trimmed, secrets stripped) · `meta` · `batch_id` / `batch_size` · source) and a **generic statement-level audit trigger** (`activity_audit`, transition tables → one call per statement) attached by `activity_audit_attach(table)` to every business table listed in `activity_audited_tables()` (skips staging / heartbeat / token tables). Actor resolution: `auth.uid()` → servant; `child_portal_person()` now stamps `app.child_actor` on the transaction → child; otherwise system. `activity_action_key()` maps table + op (+ status flips) to stable keys (`attendance.add`, `points.deduct`, `servant.approve`, `enrollment.stop`, `result_exam.lock` …). RPCs: `log_activity(action, person, enrollment, meta, scope)` for app events (anon may log `auth.*` only), `child_portal_log_activity(token, …)`, `activity_feed(filters, limit ≤ 1000, before, before_id)` keyset page, `activity_summary(filters)`, `activity_actors(filters)`, `activity_person_history(person)`, `activity_permissions()`, `activity_settings()` / `activity_settings_set()` (`app_settings.activity.keep_days`), `activity_prune(days)`. RLS: `activity_row_visible` (owner all · church manager / `activity.view_all` whole church · `activity.view` own scope). Realtime: joins the 0046 bus, throttled to one message per 3 s (`rt_gates`). `set_config('app.audit_off','1')` silences the trigger inside a transaction. Idempotent; run after 0046. Test: `supabase/tests/activity_log_test.sql`.
    ⚠️ `0046_realtime_broadcast_scale.sql` is **REQUIRED by the current frontend for live updates at scale** (fixes the lag / failures seen with 60–80 concurrent servants). Moves the hot tables (`attendance_log`, `points_log`, `contact_log`, `enrollments`, `persons`, `notification_recipients`, `chat_messages`, `chat_read_state`, `store_orders`, `card_print_requests`, `user_achievements`, `servant_enrollments`, `servant_scopes`) OUT of the `supabase_realtime` publication and adds statement-level triggers that `realtime.send()` **one broadcast message per statement** on `scope:all` / `scope:church:<id>` / `user:<uid>` topics (RLS policy on `realtime.messages` via `rt_topic_allowed`). Also: `pg_trgm` GIN indexes on `persons(name / phone / national_id)` for the search box, composite indexes for the list/badge queries, `notif_dispatch_gate()` + `rt_gates` so the push dispatcher runs at most once per 45 s across all devices. Idempotent; run after 0045. **Until it is applied the app still works**: hot-table screens fall back to a 45 s poll + refresh on focus. Test: `supabase/tests/realtime_broadcast_test.sql`.
 3. **Authentication → Providers → Email**: disable "Confirm email"
 4. Authentication → Users → Add user: `owner@diocese.app` + password
@@ -558,6 +561,80 @@ Root causes found while studying the code:
 
 ### Expected effect
 Realtime work per scan: **from ~(devices × channels) RLS evaluations to 2–3 tiny inserts**, independent of the number of devices. Auth server calls: from one per request to one per token expiry (~1 h). Dispatcher runs: from ~40/min to ≤ 1.3/min.
+
+## Activity Log module — migration 0047 (وحدة سجل النشاط)
+
+**Goal**: one place that shows *everything that happens in the app* — every
+operation, by anyone, on anything — organised by **user** or by **operation**,
+loading 10 / 100 / 1 000 rows at a time and digging deeper on demand.
+
+### Why the database writes the log (not the screens)
+The app has ~60 business tables written from screens, RPCs, server routes,
+triggers (counters, mirrors, automatic achievements), cron and the child
+portal. Logging from the frontend would miss every write that doesn't go
+through a screen. So the log is produced by **one generic AFTER … FOR EACH
+STATEMENT trigger** (`activity_audit`) using transition tables:
+
+```
+statement on <table>  ──▶  activity_audit()
+   ├─ actor   = activity_actor()      auth.uid() → servant_enrollments (name, role)
+   │                                  app.child_actor (set by child_portal_person) → persons
+   │                                  otherwise system / service_role
+   ├─ per row = to_jsonb(row)  →  activity_trim()  (secrets + oversized values out)
+   ├─ target  = activity_resolve_target(table, row)   enrollment → person → name · scope
+   ├─ action  = activity_action_key(table, op, old, new)   'attendance.add' · 'servant.approve' …
+   ├─ UPDATE  = changed[] + old/new restricted to the changed columns
+   │            (edited_at / updated_at-only updates are dropped)
+   └─ batch   = one batch_id per statement, batch_size = rows
+```
+
+One statement = one function call however many rows it touched (a 300-row
+bulk import is 300 log rows sharing a `batch_id`, written in one INSERT …
+SELECT). The trigger runs `security definer`, so RLS on the source tables
+never blocks it; the log table itself is **read-only for the API** (only the
+trigger and `log_activity()` insert).
+
+### App-level events
+Things that are not table writes — servant login / failed login / logout,
+child portal login, exports, prints, prune — go through `log_activity()` /
+`child_portal_log_activity()` (`src/lib/activity.ts → logActivity()`, never
+throws, never blocks the operation).
+
+### Reading — keyset pagination, 10 / 100 / 1 000
+`activity_feed(filters, limit, before, before_id)` orders by
+`(created_at desc, id desc)` and takes the last row of the previous page as
+the cursor — no OFFSET, so digging 10 000 rows deep costs the same as the
+first page and a row inserted meanwhile can never shift or duplicate the
+list. `activity_summary(filters)` returns totals, by action / table / op /
+actor / day / hour for the same filters (drives the «بالعملية» and «نظرة
+عامة» tabs); `activity_actors(filters)` drives «بالمستخدم». Filters are a
+JSON object rendered by `activity_where()` with `format('%L')` (literal-quoted,
+injection-safe — tested).
+
+### Who sees what
+| role | default | with `activity.view_all` |
+|---|---|---|
+| owner | everything | — |
+| church_manager | his church(es) + scope-less rows made by his servants | — |
+| service_manager | his service | whole church |
+| class_servant | nothing — needs `activity.view` → his class | whole church |
+
+Plus the module must be granted (`module_visible('activity')`, وحدة المالك →
+صلاحيات الوحدات). The owner sets retention (`keep_days`, default 365) and
+prunes from the «نظرة عامة» tab.
+
+### Cost & realtime budget
+Audit rows are small (a scan ≈ 3 rows: attendance_log insert · enrollments
+counters · notification). Indexes cover every filter of the screen. The
+realtime broadcast for `activity_log` is **throttled to one message per 3 s**
+(`rt_gates`) so a scan day never doubles the bus traffic 0046 reduced — the
+screen refetches the head of the feed and picks up every row anyway.
+
+### Files
+`supabase/migrations/0047_activity_log.sql` · `supabase/tests/activity_log_test.sql`
+· `src/lib/activity.ts` (types · Arabic registry of groups / verbs / nouns /
+columns · `describe(row)` · fetch helpers · Excel export) ·
+`src/components/activity/ActivityBits.tsx` · `src/app/activity/{layout,page}.tsx`.
 
 ## Statistics Architecture — migration 0020
 The الإحصائيات tab (`src/app/stats/page.tsx`) never downloads raw rows; every

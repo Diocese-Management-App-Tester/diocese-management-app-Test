@@ -20,6 +20,7 @@ import { userIdToEmail, codeToUserId } from '@/lib/types';
 import { childLogin, fetchChildProfile, setChildToken, childErrorMessage, getChildToken } from '@/lib/child-portal';
 import QrScanner from '@/components/store/QrScanner';
 import { SERVANT_NO_REMEMBER_KEY, SERVANT_TAB_ALIVE_KEY } from '@/lib/session';
+import { logActivity } from '@/lib/activity';
 
 type LoginKind = 'servant' | 'child';
 
@@ -83,10 +84,13 @@ function LoginInner() {
         password,
       });
       if (err) {
+        // 0047: failed attempts are logged (anon may log auth.* only)
+        void logActivity(supabase, 'auth.login_failed', { meta: { code: clean.slice(0, 40) } });
         setError('بيانات الدخول غير صحيحة، تأكد من الكود وكلمة المرور');
         setLoading(false);
         return;
       }
+      void logActivity(supabase, 'auth.login', { meta: { remember, ua: navigator.userAgent.slice(0, 120) } });
       try {
         if (remember) {
           window.localStorage.removeItem(SERVANT_NO_REMEMBER_KEY);

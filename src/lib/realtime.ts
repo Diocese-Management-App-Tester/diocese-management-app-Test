@@ -55,6 +55,7 @@ export const BUS_TABLES: ReadonlySet<string> = new Set([
   'attendance_log', 'points_log', 'contact_log', 'enrollments', 'persons',
   'notification_recipients', 'chat_messages', 'chat_read_state', 'store_orders',
   'card_print_requests', 'user_achievements', 'servant_enrollments', 'servant_scopes',
+  'activity_log',
 ]);
 
 export interface BusMessage {
