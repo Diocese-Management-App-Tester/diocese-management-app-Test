@@ -569,6 +569,13 @@ export default function ChildrenPage() {
     () => ({ church: churchFilter, service: serviceFilter, class: classFilter }),
     [churchFilter, serviceFilter, classFilter]
   );
+  // NOTE: this is the ONLY place that writes the selection automatically.
+  // It must use the functional updater (reads the REAL current value) and
+  // there must be no second effect doing a plain `setEventId('')` from a
+  // stale closure in the same commit — that used to override this update
+  // every other scope change (alternating "changes / doesn't change" bug).
+  // A pick that is no longer visible in the scope is replaced here too, so
+  // no separate "keep valid" effect is needed.
   useEffect(() => {
     const def = pickScopedDefault(events, scopeSel, oneChurch)?.id ?? '';
     setEventId((cur) => {
@@ -602,16 +609,6 @@ export default function ChildrenPage() {
         ? (causePtsOverride ?? selectedCause.points)
         : causePtsOverride
     : null;
-
-  // keep selections valid when scope changes (the resolver above already
-  // replaces an invalid pick with the scope's default; this is the safety net
-  // for a manual pick that vanished from the lookup itself)
-  useEffect(() => {
-    if (eventId && !visibleEvents.some((ev) => ev.id === eventId)) { eventAutoRef.current = true; setEventId(''); }
-  }, [visibleEvents, eventId]);
-  useEffect(() => {
-    if (causeId && !visibleCauses.some((ca) => ca.id === causeId)) { causeAutoRef.current = true; setCauseId(''); }
-  }, [visibleCauses, causeId]);
 
   // Patch one enrollment in place (optimistic update after a mutation)
   const patchEnrollment = (id: string, patch: Partial<EnrollmentWithPerson>) =>
