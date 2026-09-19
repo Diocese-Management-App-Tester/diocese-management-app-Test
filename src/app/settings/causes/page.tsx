@@ -12,6 +12,7 @@ import { useDebouncedRealtime } from '@/lib/realtime';
 import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
 import type { Cause, ClassRoom, Service, Church, PointsMode } from '@/lib/types';
 import { POINTS_MODE_LABELS } from '@/lib/types';
+import { defaultLevelLabel } from '@/lib/defaults';
 
 // Sentinel for "all services / all classes" in select controls (null in DB)
 const ALL = 'all';
@@ -114,7 +115,7 @@ export default function CausesPage() {
                     {ca.points_mode === 'editable' && ' ✎'}
                   </span>
                   {ca.is_default && (
-                    <span className="badge bg-emerald-100 text-emerald-700">افتراضي</span>
+                    <span className="badge bg-emerald-100 text-emerald-700">{defaultLevelLabel(ca)}</span>
                   )}
                   {scopeBadge(ca) && <span className="badge bg-slate-100 text-slate-500">{scopeBadge(ca)}</span>}
                 </div>
@@ -216,11 +217,9 @@ function CauseModal({
       is_default: isDefault,
     };
 
-    // Only one default cause: clear others first when marking this one
-    if (isDefault) {
-      await supabase.from('causes').update({ is_default: false }).eq('is_default', true);
-    }
-
+    // One default PER SCOPE (0048): the DB trigger switches off the other
+    // default of the SAME church / service / class; defaults of other levels
+    // are untouched (class default beats service default beats church default).
     const { error: err } = mode === 'add'
       ? await supabase.from('causes').insert({ ...base, created_by: profile?.id })
       : await supabase.from('causes').update({ ...base, edited_by: profile?.id }).eq('id', cause!.id);
@@ -328,17 +327,26 @@ function CauseModal({
             </div>
           )}
 
-          {/* Default radio — preselected on the children page */}
-          <label className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700 cursor-pointer">
-            <input
-              id="cause-default-radio"
-              type="radio"
-              checked={isDefault}
-              onClick={() => setIsDefault((v) => !v)}
-              onChange={() => {}}
-              className="h-4 w-4 accent-emerald-600"
-            />
-            جعل هذا السبب الافتراضي (يُختار تلقائياً عند تسجيل النقاط)
+          {/* Default radio — preselected on children & scanner pages for THIS scope (0048) */}
+          <label className="flex flex-col gap-1 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700 cursor-pointer">
+            <span className="flex items-center gap-2">
+              <input
+                id="cause-default-radio"
+                type="radio"
+                checked={isDefault}
+                onClick={() => setIsDefault((v) => !v)}
+                onChange={() => {}}
+                className="h-4 w-4 accent-emerald-600"
+              />
+              {serviceId === ALL || !serviceId
+                ? 'جعله السبب الافتراضي للكنيسة'
+                : classId === ALL || !classId
+                  ? 'جعله السبب الافتراضي للخدمة'
+                  : 'جعله السبب الافتراضي للفصل'}
+            </span>
+            <span className="text-xs font-normal text-emerald-600/80">
+              يُختار تلقائياً عند تسجيل النقاط. الأولوية: افتراضي الفصل ← ثم الخدمة ← ثم الكنيسة.
+            </span>
           </label>
           <textarea className="input-field" placeholder="وصف السبب" rows={2} value={description}
             onChange={(e) => setDescription(e.target.value)} />

@@ -40,6 +40,7 @@ import {
   fetchEnrollmentsPage, fetchMyGroupIds, fetchMyGroupEnrollments, cachedLookup, ALL, PAGE_SIZE, type EnrollmentKind,
 } from '@/lib/queries';
 import { useNavLabel } from '@/lib/customization-context';
+import { pickScopedDefault } from '@/lib/defaults';
 
 type AttendanceMode = 'add' | 'remove';
 type PointsMode = 'add' | 'subtract';
@@ -177,6 +178,13 @@ export default function ChildrenPage() {
   // and messages are follow-ups for it. Points additionally carry a CAUSE.
   const [eventId, setEventId] = useState<string>('');
   const [causeId, setCauseId] = useState<string>('');
+  // true while the event / cause was picked BY THE DEFAULT RESOLVER (not by
+  // the servant) — such a pick follows the scope selectors; a manual pick is
+  // kept as long as it stays visible in the current scope.
+  const eventAutoRef = useRef(true);
+  const causeAutoRef = useRef(true);
+  const chooseEvent = (id: string) => { eventAutoRef.current = false; setEventId(id); };
+  const chooseCause = (id: string) => { causeAutoRef.current = false; setCauseId(id); };
   const [messageChannel, setMessageChannel] = useState<MessageChannel>('whatsapp');
   const [messageTemplate, setMessageTemplate] = useState('');
   const [showCompose, setShowCompose] = useState(false);
@@ -552,13 +560,31 @@ export default function ChildrenPage() {
   useEffect(() => { setEventPtsOverride(null); }, [eventId]);
   useEffect(() => { setCausePtsOverride(null); }, [causeId]);
 
-  // Preselect the DEFAULT event / cause (marked in settings)
+  // Preselect the DEFAULT event / cause of the selected scope (0048):
+  // class default → service default → church default. Re-resolved whenever
+  // the scope selectors change, unless the servant picked one himself and it
+  // is still valid for the scope.
+  const oneChurch = churches.length === 1 ? churches[0].id : profile?.church_id ?? null;
+  const scopeSel = useMemo(
+    () => ({ church: churchFilter, service: serviceFilter, class: classFilter }),
+    [churchFilter, serviceFilter, classFilter]
+  );
   useEffect(() => {
-    setEventId((cur) => cur || (events.find((ev) => ev.is_default)?.id ?? ''));
-  }, [events]);
+    const def = pickScopedDefault(events, scopeSel, oneChurch)?.id ?? '';
+    setEventId((cur) => {
+      if (cur && !eventAutoRef.current && visibleEvents.some((ev) => ev.id === cur)) return cur;
+      eventAutoRef.current = true;
+      return def;
+    });
+  }, [events, visibleEvents, scopeSel, oneChurch]);
   useEffect(() => {
-    setCauseId((cur) => cur || (causes.find((ca) => ca.is_default)?.id ?? ''));
-  }, [causes]);
+    const def = pickScopedDefault(causes, scopeSel, oneChurch)?.id ?? '';
+    setCauseId((cur) => {
+      if (cur && !causeAutoRef.current && visibleCauses.some((ca) => ca.id === cur)) return cur;
+      causeAutoRef.current = true;
+      return def;
+    });
+  }, [causes, visibleCauses, scopeSel, oneChurch]);
 
   // Effective points respecting points_mode:
   // fixed -> bound number; editable -> override or bound; open -> override only
@@ -577,12 +603,14 @@ export default function ChildrenPage() {
         : causePtsOverride
     : null;
 
-  // keep selections valid when scope changes
+  // keep selections valid when scope changes (the resolver above already
+  // replaces an invalid pick with the scope's default; this is the safety net
+  // for a manual pick that vanished from the lookup itself)
   useEffect(() => {
-    if (eventId && !visibleEvents.some((ev) => ev.id === eventId)) setEventId('');
+    if (eventId && !visibleEvents.some((ev) => ev.id === eventId)) { eventAutoRef.current = true; setEventId(''); }
   }, [visibleEvents, eventId]);
   useEffect(() => {
-    if (causeId && !visibleCauses.some((ca) => ca.id === causeId)) setCauseId('');
+    if (causeId && !visibleCauses.some((ca) => ca.id === causeId)) { causeAutoRef.current = true; setCauseId(''); }
   }, [visibleCauses, causeId]);
 
   // Patch one enrollment in place (optimistic update after a mutation)
@@ -1194,7 +1222,7 @@ export default function ChildrenPage() {
               !eventId && job !== 'print_card' && job !== 'achievement' ? '!border-violet-300 !bg-violet-50 text-violet-700' : ''
             }`}
             value={eventId}
-            onChange={(e) => setEventId(e.target.value)}
+            onChange={(e) => chooseEvent(e.target.value)}
           >
             <option value="">
               {job === 'attendance' && attendanceMode === 'remove' ? 'كل المناسبات' : 'اختر المناسبة *'}
@@ -1307,7 +1335,7 @@ export default function ChildrenPage() {
               aria-label="اختيار سبب النقاط"
               className="input-field !w-1/2 min-w-0 shrink-0 appearance-none !px-2 text-xs font-bold"
               value={causeId}
-              onChange={(e) => setCauseId(e.target.value)}
+              onChange={(e) => chooseCause(e.target.value)}
             >
               <option value="">اختر سبب النقاط *</option>
               {visibleCauses.map((ca) => (

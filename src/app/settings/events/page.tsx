@@ -13,6 +13,7 @@ import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/com
 import type { AppEvent, ClassRoom, Service, Church, EventRecurrence, PointsMode } from '@/lib/types';
 import { POINTS_MODE_LABELS } from '@/lib/types';
 import { WEEKDAY_LABELS, describeEventSchedule } from '@/lib/time';
+import { defaultLevelLabel } from '@/lib/defaults';
 
 // Sentinel for "all services / all classes" in select controls (null in DB)
 const ALL = 'all';
@@ -116,7 +117,7 @@ export default function EventsPage() {
                     {ev.points_mode === 'editable' && ' ✎'}
                   </span>
                   {ev.is_default && (
-                    <span className="badge bg-emerald-100 text-emerald-700">افتراضي</span>
+                    <span className="badge bg-emerald-100 text-emerald-700">{defaultLevelLabel(ev)}</span>
                   )}
                   {scopeBadge(ev) && <span className="badge bg-slate-100 text-slate-500">{scopeBadge(ev)}</span>}
                 </div>
@@ -237,11 +238,9 @@ function EventModal({
       is_default: isDefault,
     };
 
-    // Only one default event: clear others first when marking this one
-    if (isDefault) {
-      await supabase.from('events').update({ is_default: false }).eq('is_default', true);
-    }
-
+    // One default PER SCOPE (0048): the DB trigger switches off the other
+    // default of the SAME church / service / class; defaults of other levels
+    // are untouched (class default beats service default beats church default).
     const { error: err } = mode === 'add'
       ? await supabase.from('events').insert({ ...base, created_by: profile?.id })
       : await supabase.from('events').update({ ...base, edited_by: profile?.id }).eq('id', event!.id);
@@ -425,17 +424,26 @@ function EventModal({
             </div>
           )}
 
-          {/* Default radio — preselected on children & scanner pages */}
-          <label className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700 cursor-pointer">
-            <input
-              id="event-default-radio"
-              type="radio"
-              checked={isDefault}
-              onClick={() => setIsDefault((v) => !v)}
-              onChange={() => {}}
-              className="h-4 w-4 accent-emerald-600"
-            />
-            جعل هذه المناسبة الافتراضية (تُختار تلقائياً عند تسجيل الحضور)
+          {/* Default radio — preselected on children & scanner pages for THIS scope (0048) */}
+          <label className="flex flex-col gap-1 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700 cursor-pointer">
+            <span className="flex items-center gap-2">
+              <input
+                id="event-default-radio"
+                type="radio"
+                checked={isDefault}
+                onClick={() => setIsDefault((v) => !v)}
+                onChange={() => {}}
+                className="h-4 w-4 accent-emerald-600"
+              />
+              {serviceId === ALL || !serviceId
+                ? 'جعلها المناسبة الافتراضية للكنيسة'
+                : classId === ALL || !classId
+                  ? 'جعلها المناسبة الافتراضية للخدمة'
+                  : 'جعلها المناسبة الافتراضية للفصل'}
+            </span>
+            <span className="text-xs font-normal text-emerald-600/80">
+              تُختار تلقائياً عند تسجيل الحضور. الأولوية: افتراضي الفصل ← ثم الخدمة ← ثم الكنيسة.
+            </span>
           </label>
 
           <textarea className="input-field" placeholder="وصف المناسبة" rows={2} value={description}
