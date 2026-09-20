@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports';
 
 export interface AppModule {
   key: ModuleKey;
@@ -141,6 +141,15 @@ export const MODULES: AppModule[] = [
     icon: History,
     color: 'text-slate-700',
     paths: ['/activity'],
+  },
+  {
+    key: 'reports',
+    label: 'تقارير وجداول',
+    desc: 'اختر البيانات (كنيسة · خدمة · فصل · فترة) والحقول التي تريدها بالضبط — رتّبها وسمّها وصفّها — ثم صمّم التقرير (عنوان · نص · شعار · جدول · رسم بياني · متغيرات) على صفحات، وصدّره PDF أو Excel أو اطبعه، واحفظه كقالب يُعاد استخدامه بنطاق جديد',
+    href: '/reports',
+    icon: FileBarChart2,
+    color: 'text-fuchsia-600',
+    paths: ['/reports'],
   },
 ];
 

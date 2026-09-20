@@ -13,7 +13,7 @@ import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
   QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
-  Library, BookOpen, History, Eye, Cog,
+  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer,
 } from 'lucide-react';
 
 export interface PermissionGroup {
@@ -40,6 +40,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'results', label: 'نتائج الامتحانات', icon: ClipboardCheck, color: 'text-emerald-600' },
   { key: 'library', label: 'المكتبة', icon: Library, color: 'text-lime-700' },
   { key: 'activity', label: 'سجل النشاط', icon: History, color: 'text-slate-700' },
+  { key: 'reports', label: 'تقارير وجداول', icon: FileBarChart2, color: 'text-fuchsia-600' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -103,6 +104,12 @@ export const PERMISSIONS: PermissionDef[] = [
   // servants need `activity.view` ----
   { key: 'activity.view', group: 'activity', label: 'عرض سجل النشاط', desc: 'رؤية العمليات في نطاقه (خادم الفصل يحتاجها؛ المديرون يملكونها)' },
   { key: 'activity.view_all', group: 'activity', label: 'عرض سجل الكنيسة كاملاً', desc: 'مسؤول الخدمة / خادم الفصل يرى كل عمليات كنيسته لا نطاقه فقط' },
+
+  // ---- تقارير وجداول (0050) — every servant who sees the module can build
+  // and export reports of HIS scope (RLS bounds the data); saving templates
+  // for a whole service / church follows `can_access` ----
+  { key: 'reports.build', group: 'reports', label: 'إنشاء وتصدير التقارير', desc: 'اختيار البيانات والحقول وتصميم التقرير وتصديره PDF / Excel / طباعة (افتراضي لكل خادم يرى الوحدة)' },
+  { key: 'reports.templates', group: 'reports', label: 'إدارة القوالب', desc: 'حفظ وتعديل وحذف قوالب التقارير في نطاقه' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
@@ -152,6 +159,8 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'library.manage': Library,
   'activity.view': Eye,
   'activity.view_all': Cog,
+  'reports.build': Printer,
+  'reports.templates': LayoutTemplate,
 };
 
 /** Resolve the key set from the grant rows + the profiles (owner ⇒ '*'). */

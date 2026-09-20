@@ -185,6 +185,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 - **Children** — **إدارة المخدومين → المخدومين** gets a **«الفصول»** action (`src/components/children/PersonClassesModal.tsx`): every class the child is in (across churches), **add him to several more at once** (`add_person_and_enroll` per class — same person by code, own attendance / points per class) or **remove one** (never the last — use «حذف»). Cards show a **«N فصول»** badge. The single **إضافة** form has **«فصول إضافية»** to enroll a new child in several classes in one go. Servant mirror rows are listed read-only there.
 
 ## Currently Completed Features
+- ✅ **تقارير وجداول (0050)**: report builder module — pick a data source (المخدومون · سجل الحضور · سجل النقاط · الافتقاد · نتائج الامتحانات · الخدام), scope + filters, then EXACTLY the fields to export (select · reorder · rename · width · align · row filters · sort) with a live preview; a mm-exact page designer (title · text · logo · image · table that flows over pages · SVG charts · lines · boxes · header / footer · page numbers · portrait / landscape per page); export PDF (rasterized pages, perfect Arabic RTL) · Excel (the chosen columns only) · print; save the design as a template (`report_templates`, scoped) and re-run it with a new church / service / class / period
 - ✅ **شخص واحد في أماكن متعددة (0045)**: الخادم يخدم في عدة كنائس / خدمات / فصول (`servant_scopes` + `my_scopes()` + `set_servant_scopes`) — يختارها في التسجيل ويعدّلها المدير من الطلبات / تعديل / إضافة عبر `ScopePicker`; المخدوم يُسجَّل في عدة فصول من «الفصول» أو من نموذج الإضافة
 - ✅ **النسخ الاحتياطي والاسترجاع (0044)**: owner-only page under الإعدادات → النشاط — backup asks what to back up (every DB table grouped in Arabic + servants' login accounts, «الكل» default) and downloads ONE JSON to the device; restore from a device file asks what to restore + دمج / استبدال, FK-ordered staged upsert with triggers off; scheduled backups (daily / weekly / monthly, Cairo hour, keep last N) run by Vercel Cron into the private `backups` bucket and are downloadable from the history
 - ✅ PWA: manifest (RTL/Arabic), service worker, installable, app icons — **name / icon / diocese name & logo configurable through Vercel env vars** (see Setup Guide § 4)
@@ -299,6 +300,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 | `/occasions/[id]` | occasion detail — stats, participants (add / status / checklist / ticket / remove / CSV), QR check-in, checklist editor, announcements |
 | `/child/occasions` | child portal — occasions board with my registration status |
 | `/activity` | activity log module — tabs السجل (live timeline, 10/100/1000 per dig, keyset «تعمّق أكثر») · بالمستخدم · بالعملية · نظرة عامة (+ owner retention / prune); `?tab=&actor=&kind=&action=&group=&person=&batch=` |
+| `/reports` | reports & tables module — 4-step wizard (البيانات → الحقول والمعاينة → التصميم → التصدير PDF / Excel / طباعة) · `?tab=templates` saved templates · `?template=<id>` opens a template |
 | `/child/occasions/[id]` | child portal — occasion detail: «أنا مشارك», cancel, e-ticket QR, my checklist, notifications |
 
 ## Data Models & Storage
@@ -656,6 +658,64 @@ screen refetches the head of the feed and picks up every row anyway.
 · `src/lib/activity.ts` (types · Arabic registry of groups / verbs / nouns /
 columns · `describe(row)` · fetch helpers · Excel export) ·
 `src/components/activity/ActivityBits.tsx` · `src/app/activity/{layout,page}.tsx`.
+
+## Reports & Tables module — migration 0050 (وحدة تقارير وجداول)
+
+**Goal**: let a servant pull *exactly the data he wants* out of the app,
+arrange it on paper the way he likes, and get it as **PDF · Excel · print** —
+then keep the design as a **template** and re-run it for another class / month.
+
+### Flow
+```
+1 البيانات   source · church → service → class · filters (period · event · cause · exam · gender · status …)  ──▶ load (RLS-bounded, paged)
+2 الحقول     pick / order / rename / width / align · row filters (يحتوي · يساوي · أكبر من …) · sort · LIVE preview · quick Excel
+3 التصميم    pages (add · delete · reorder · duplicate · portrait / landscape) · elements (عنوان · نص · شعار · صورة · جدول · رسم بياني · خط · مربع)
+             drag to move · corner handle to resize · properties panel · header / footer · page numbers · {variables}
+4 التصدير    full preview of every physical page · PDF · Excel · print · «حفظ كقالب»
+```
+
+### Architecture (`src/lib/reports/`)
+| File | Role |
+|---|---|
+| `types.ts` | the versioned JSON document `ReportDefinition = { version, query, design }` — what a template stores and what the wizard edits; defaults + `normalizeDefinition()` for upgrading older templates |
+| `sources.ts` | **data-source registry**: each source declares its `fields` (key · label · type · group · numeric), the `filters` it understands and a `load()` that returns flat `ReportRow`s. Sources: `enrollments` · `attendance` · `points` · `contacts` · `exam_results` (per-subject columns added dynamically per exam) · `servants`. *Adding a source = one entry.* |
+| `engine.ts` | pure functions shared by preview / print / PDF / Excel: `filterRows` · `sortRows` · `formatCell` / `excelValue` · `aggregate` · `chartData` · `{variables}` resolution (`{church_name}` `{count}` `{today}` `{page}` `{pages}` `{sum:field}` …) · `layoutPages()` — splits a flowing table over continuation pages · `tableColumns()` |
+| `templates.ts` | `report_templates` CRUD + migration-missing detection |
+| `export-excel.ts` | SheetJS export of **exactly the chosen columns** in the chosen order with the chosen titles (numbers stay numeric, dates stay dates, RTL sheet, optional totals) |
+
+**Rendering** — `src/components/reports/ReportPageView.tsx` draws ONE physical
+page in mm at a given `scale` (px/mm). The same component is used by the
+designer canvas (interactive), the export preview, the hidden **print portal**
+(1 mm = 1 mm with `@page` per page size) and the **PDF** path (each page
+rasterized at 200 dpi with `modern-screenshot` → `jsPDF` image pages — so
+Arabic shaping / RTL is pixel-perfect without embedding fonts). Charts are
+pure SVG (`ReportChart.tsx`: column · bar · pie · donut · line).
+
+**Aggregates** — `report_enrollment_period_stats(enrollments[], from, to, event)`
+(SECURITY INVOKER) returns per-enrollment attendance / points / calls inside
+a period so the المخدومون source never downloads log rows for a whole scope.
+
+**Templates** — `report_templates (church_id · service_id · class_id · name ·
+source · definition jsonb)`; scope semantics identical to `card_print_profiles`
+(read = `scope_overlaps`, write = `can_access`, `church_id NULL` = shared,
+owner-only). RLS requires `module_visible('reports')`. Using a template loads
+its query + design and jumps to step 1 — the user only picks the new scope /
+filters and runs it.
+
+**Permissions** — module `reports` (owner grants it from صلاحيات الوحدات);
+keys `reports.build` (informational — everyone who sees the module builds
+reports of his own RLS scope) and `reports.templates` (class servants need it
+to save / edit / delete templates; managers have it).
+
+**Ready for later** — more chart kinds (add a `case` in `ReportChart` +
+`CHART_KIND_LABELS`), calculated columns (engine already resolves `{sum:}`
+`{avg:}` …), grouping / sub-totals, scheduled runs (definition is a JSON
+document — a cron can `load()` + render server-side), more sources.
+
+### Files
+`supabase/migrations/0050_report_templates.sql` · `src/lib/reports/*` ·
+`src/components/reports/{ReportBits,DataStep,FieldsStep,DesignStep,ExportStep,ReportPageView,ReportChart,TemplatesPanel}.tsx`
+· `src/app/reports/{layout,page}.tsx`.
 
 ## Statistics Architecture — migration 0020
 The الإحصائيات tab (`src/app/stats/page.tsx`) never downloads raw rows; every
