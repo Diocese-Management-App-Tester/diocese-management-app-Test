@@ -14,9 +14,18 @@
 --   2. Deletes the seeded auth users (a0000000-0000-4000-8000-0000000000NN)
 --      and, by default, EVERY other auth user that has no servant row left
 --      (see the SEED_ONLY switch below to keep your real accounts).
---   3. Restores the two rows the migrations seed on a fresh install:
+--   3. Restores the one row the migrations seed on a fresh install:
 --        · module_access('cards')  — 0024 grants the cards module globally
---   4. Prints the remaining row-count per table (should all be 0).
+--      (written with the activity log switched off, so سجل النشاط stays
+--      empty — 0047 audits module_access).
+--   4. Prints the remaining row-count per table (should all be 0 except
+--      module_access = 1).
+--
+-- Covers every table up to migration 0051 — servant_scopes · person_credentials
+-- · child_sessions · child_join_requests · backup_* · activity_log · rt_gates ·
+-- card_print_profiles · report_templates are all plain public tables, so the
+-- catalogue-driven TRUNCATE below picks them (and any future table) up
+-- automatically.
 --
 -- ⚠️  THIS DELETES ALL DATA — there is no undo. Take a backup first if the
 --     project holds anything real (Supabase → Database → Backups).
@@ -29,6 +38,10 @@
 begin;
 set local search_path = public, extensions;
 set local client_min_messages = warning;
+
+-- 0047: keep the wipe itself out of سجل النشاط (the audit trigger honours
+-- this transaction-local flag; harmless on schemas before 0047)
+do $$ begin perform set_config('app.audit_off', '1', true); end $$;
 
 -- ---------------------------------------------------------------------
 -- 0. Switch: true  → only the 7 seeded demo accounts are removed from auth
@@ -120,6 +133,9 @@ begin
   end loop;
   select count(*) into n from auth.users;
   msg := msg || format('  public rows left: %s (module_access.cards = 1 is expected) · auth.users left: %s', total, n) || E'\n';
+  if to_regclass('public.child_sessions') is not null then
+    msg := msg || '  child portal sessions / passwords / join requests · servant scopes · backups · activity log · print profiles · report templates: cleared' || E'\n';
+  end if;
   raise notice '%', msg;
 end $$;
 
