@@ -20,7 +20,8 @@
 #
 # Before the FIRST run on an existing database run
 #   supabase/scripts/baseline_migration_history.sql   once in the SQL editor,
-# otherwise the CLI will try to re-apply 0001 … 0051.
+# otherwise the CLI will try to re-apply 0001 … 0051 (and 0002 would create a
+# second owner "000000" next to your real one).
 #
 # One-time: the "production" environment (Settings → Environments) can require
 # a manual approval before the deploy job runs.
