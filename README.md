@@ -342,6 +342,14 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 4. Login in the app with code `000000` + password `000000`
 5. ⚠️ **Immediately** change both in **الإعدادات → تعديل بياناتي** (the e-mail `<code>@diocese.app` follows the code automatically)
 
+   **Who can change a login code** (`/api/servants/account` · `change_code`):
+   | Actor | Own code | Another servant's code |
+   |---|---|---|
+   | owner | ✅ **تعديل بياناتي** — pencil button → generate / scan / type → confirm → save (the only self-service code change in the app) | ✅ إدارة الخدام |
+   | church / service manager | ❌ read-only | ✅ within his scope (never the owner's) |
+   | class servant | ❌ read-only | ❌ |
+   Passwords are unchanged: everyone changes his **own** password (old + new) in تعديل بياناتي; a superior resets a forgotten one from إدارة الخدام.
+
 ### 1a. Database migrations — automatic deploy (CI)
 `supabase/config.toml` · `.github/workflows/supabase-migrations.yml` (shipped as `supabase/scripts/github-workflow-supabase-migrations.yml` — move it there, see one-time setup) · `supabase/scripts/`
 

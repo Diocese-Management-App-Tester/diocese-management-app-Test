@@ -6,12 +6,14 @@
 // servant enrollment. Falls back to the enrollment when no person is bound.
 
 import { useState } from 'react';
-import { X, Save, User, Phone, Upload, IdCard, Cake, MapPin } from 'lucide-react';
+import { X, Save, User, Phone, Upload, IdCard, Cake, MapPin, Pencil } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
 import { SERVANTS_TABLE, GENDER_LABELS, PHONE_PREFIX, PHONE_LOCAL_LENGTH, userIdToEmail, codeToUserId, type Gender } from '@/lib/types';
 import ResetPasswordSection from '@/components/ResetPasswordSection';
+import { EditCodeModal } from '@/components/PersonDataModals';
+import { changeServantCode, servantAccountMessage } from '@/lib/servant-account';
 
 export default function EditProfileModal({ onClose }: { onClose: () => void }) {
   const { profile, person, refresh } = useAuth();
@@ -27,6 +29,22 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+
+  // OWNER ONLY: change MY code (= login name). Same confirmed flow as in
+  // إدارة الخدام (generate / scan / type → confirm) → service-role API updates
+  // the auth e-mail + servant row + persons.national_id. The default owner
+  // created by migration 0002 (code 000000) changes his code here.
+  const isOwner = profile?.role === 'owner';
+  const currentCode = person?.national_id ?? profile?.user_id ?? '';
+  const [code, setCode] = useState(currentCode);
+  const [codeModal, setCodeModal] = useState(false);
+  const codeChanged = isOwner && code.trim() !== currentCode;
+  const startCodeEdit = () => {
+    const ok = confirm(
+      `⚠️ تعديل كودي\n\nالكود هو اسم دخولك للتطبيق وهويتك في كل التسجيلات وما يُطبع على بطاقتك.\n\nبعد التغيير ستدخل بالكود الجديد ونفس كلمة المرور.\n\nهل تريد المتابعة؟`
+    );
+    if (ok) setCodeModal(true);
+  };
 
   const save = async () => {
     if (!profile) return;
@@ -48,6 +66,16 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
     }
     const phone = phoneLocal ? `${PHONE_PREFIX}${phoneLocal}` : '';
 
+    // 0) my code (owner only) → auth e-mail + user_id + persons.national_id
+    if (codeChanged) {
+      const ok = confirm(
+        `تأكيد تغيير كودي\n\nمن: ${currentCode}\nإلى: ${code.trim()}\n\nستدخل بالكود الجديد من الآن.\n\nهل أنت متأكد؟`
+      );
+      if (!ok) { setBusy(false); return; }
+      const r = await changeServantCode(profile.id, code.trim());
+      if (!r.ok) { setBusy(false); return setError(servantAccountMessage(r.error)); }
+    }
+
     let err = null;
     if (person) {
       ({ error: err } = await supabase.from('persons').update({
@@ -66,6 +94,9 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
     }
     setBusy(false);
     if (err) return setError('تعذر حفظ التعديلات، حاول مجدداً');
+    // the auth e-mail changed → refresh the local session so the JWT carries
+    // the new e-mail (the session itself stays valid; no re-login needed)
+    if (codeChanged) await supabase.auth.refreshSession().catch(() => null);
     await refresh();
     onClose();
   };
@@ -87,10 +118,49 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-3">
-          <p className="flex items-center gap-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            <IdCard className="h-3.5 w-3.5" /> الكود / اسم الدخول:
-            <b dir="ltr" className="text-slate-700">{person?.national_id ?? profile?.user_id}</b>
-          </p>
+          {isOwner ? (
+            /* OWNER: the code is editable (confirmed flow) — everyone else sees it read-only */
+            <div>
+              <label className="mb-1 flex items-center gap-1 text-xs font-bold text-gray-500">
+                <IdCard className="h-3.5 w-3.5" /> الكود / اسم الدخول
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="my-code"
+                  className={`input-field flex-1 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${codeChanged ? '!border-amber-300 !bg-amber-50 !text-amber-800' : ''}`}
+                  dir="ltr"
+                  value={code}
+                  disabled
+                  readOnly
+                  aria-label="الكود"
+                />
+                <button
+                  id="my-code-edit"
+                  type="button"
+                  onClick={startCodeEdit}
+                  disabled={busy}
+                  aria-label="تعديل كودي"
+                  title="تعديل كودي"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white shadow transition hover:bg-amber-600 active:scale-95 disabled:opacity-60"
+                >
+                  <Pencil className="h-5 w-5" />
+                </button>
+              </div>
+              {codeChanged ? (
+                <p className="mt-1 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+                  <span>سيتغير كودك من <span dir="ltr">{currentCode}</span> إلى <span dir="ltr">{code}</span> عند الحفظ</span>
+                  <button type="button" onClick={() => setCode(currentCode)} className="shrink-0 rounded-lg bg-white px-2 py-1 text-amber-700 hover:bg-amber-100">تراجع</button>
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-slate-400">المالك فقط يستطيع تغيير كوده — اضغط زر التعديل (توليد أو مسح أو كتابة كود)</p>
+              )}
+            </div>
+          ) : (
+            <p className="flex items-center gap-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              <IdCard className="h-3.5 w-3.5" /> الكود / اسم الدخول:
+              <b dir="ltr" className="text-slate-700">{currentCode}</b>
+            </p>
+          )}
 
           <div>
             <label className="mb-1 flex items-center gap-1 text-xs font-bold text-gray-500">
@@ -183,6 +253,20 @@ export default function EditProfileModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+
+      {isOwner && codeModal && profile && (
+        /* stop the click from bubbling to this modal's backdrop (which would close it) */
+        <div onClick={(e) => e.stopPropagation()}>
+          <EditCodeModal
+            personId={person?.id ?? profile.id}
+            currentCode={currentCode}
+            initialCode={code}
+            codeKind="servant"
+            onConfirm={(c) => { setCode(c); setCodeModal(false); }}
+            onClose={() => setCodeModal(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }
