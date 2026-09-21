@@ -33,7 +33,7 @@
 -- AFTER WIPING
 --   · run supabase/seed_test_data.sql again for a fresh demo set, OR
 --   · create the real owner in Authentication → Users and run
---     supabase/migrations/0002_bootstrap_owner.sql to start for real.
+--     supabase/scripts/bootstrap_owner.sql to start for real.
 -- =====================================================================
 begin;
 set local search_path = public, extensions;

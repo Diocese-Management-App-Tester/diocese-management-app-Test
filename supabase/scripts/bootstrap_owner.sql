@@ -1,5 +1,11 @@
 -- =====================================================================
--- Bootstrap the App Owner
+-- Bootstrap the App Owner  (one-off script — NOT a migration)
+--
+-- This file used to live at supabase/migrations/0002_bootstrap_owner.sql.
+-- It was moved here because it needs a real auth.users UUID and must be
+-- run manually once per project; `supabase db push` (CI) must never try
+-- to apply it.
+--
 -- HOW TO USE:
 -- 1) In Supabase Dashboard > Authentication > Users, click "Add user"
 --    and create the owner account (email + password).
