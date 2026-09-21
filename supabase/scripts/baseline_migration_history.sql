@@ -14,10 +14,12 @@
 --   table is skipped.  We insert 0001 .. 0051 here.
 --
 -- Equivalent CLI command (needs the DB password, same result):
---   supabase migration repair --status applied 0001 0003 0004 ... 0051
+--   supabase migration repair --status applied 0001 0002 0003 ... 0051
 --
--- Safe to re-run (ON CONFLICT DO NOTHING).  0002 is not listed because
--- the owner bootstrap is a script now (supabase/scripts/bootstrap_owner.sql).
+-- Safe to re-run (ON CONFLICT DO NOTHING).  0002 (owner 000000 / 000000)
+-- is listed too: an existing database already has its owner, so CI must
+-- NOT create a second one.  If you DO want the default owner on an
+-- existing DB, run supabase/migrations/0002_bootstrap_owner.sql by hand.
 -- =====================================================================
 
 create schema if not exists supabase_migrations;
@@ -29,6 +31,7 @@ alter table supabase_migrations.schema_migrations add column if not exists name 
 
 insert into supabase_migrations.schema_migrations (version, name) values
   ('0001', 'schema'),
+  ('0002', 'bootstrap_owner'),
   ('0003', 'signup_scope'),
   ('0004', 'class_servant_edit'),
   ('0005', 'photos_and_servants'),

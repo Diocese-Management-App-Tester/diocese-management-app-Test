@@ -10,9 +10,8 @@
 #   * concatenates every <version>_<name>.sql in version order (the same
 #     order the Supabase CLI uses: legacy 0001 -> 0051, then the
 #     timestamped YYYYMMDDHHMMSS_* files that follow)
-#   * the owner bootstrap lives in supabase/scripts/bootstrap_owner.sql
-#     (needs a real auth.users UUID; run it separately AFTER creating the
-#     owner in Supabase Auth) so it is never part of this file
+#   * includes 0002_bootstrap_owner.sql → a fresh install gets the default
+#     owner (code 000000 / password 000000 — change it after first login)
 #   * keeps `alter type ... add value` (0005) in place — nothing in the
 #     migrations references the new value afterwards, so it is safe both in
 #     autocommit mode and in a single transaction (the enum is created by
@@ -47,9 +46,8 @@ last=$(basename "${files[-1]}"); last=${last%%_*}
 -- HOW TO USE (new Supabase project):
 --   1. SQL Editor → paste / run this whole file once.
 --   2. Authentication → Providers → Email → disable "Confirm email".
---   3. Authentication → Users → Add user  (e.g. owner@diocese.app).
---   4. Put that user's UUID into supabase/scripts/bootstrap_owner.sql
---      and run it.
+--   3. Log in with code 000000 / password 000000 (created by 0002) and
+--      change both in الإعدادات → تعديل بياناتي.
 --   (Preferred for new projects: 'supabase link' + 'supabase db push'
 --    applies supabase/migrations/ and records them in the history table.)
 --
