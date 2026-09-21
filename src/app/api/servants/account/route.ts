@@ -18,6 +18,9 @@
 // 0043: ONLY a SUPERIOR may reset a password without knowing the old one.
 // A servant changing HIS OWN password goes through Supabase Auth in the
 // browser (old + new + confirm — EditProfileModal), never through here.
+// OWN CODE: only the OWNER may change his own code (تعديل بياناتي) — nobody
+// else can change the owner's code, and other servants get their code
+// changed by a superior only.
 //
 // Env (server): SUPABASE_SERVICE_ROLE_KEY. Without it → 503 «not configured».
 
@@ -40,8 +43,12 @@ function adminClient() {
 type Actor = { id: string; role: string; status: string; church_id: string | null; service_id: string | null };
 type Target = { id: string; role: string; person_id: string | null; church_id: string | null; service_id: string | null; user_id: string };
 
-function canManage(actor: Actor, target: Target): boolean {
-  if (actor.id === target.id) return false; // never self — own password = old + new in the app
+function canManage(actor: Actor, target: Target, action: 'reset_password' | 'change_code'): boolean {
+  if (actor.id === target.id) {
+    // self: own password = old + new in the browser, never here.
+    // own code: the OWNER only.
+    return action === 'change_code' && actor.role === 'owner';
+  }
   if (actor.role === 'owner') return true;
   if (target.role === 'owner') return false;
   if (actor.role === 'church_manager') return !!actor.church_id && target.church_id === actor.church_id;
@@ -71,7 +78,7 @@ export async function POST(req: NextRequest) {
   ]);
   if (!actor || actor.status !== 'approved') return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   if (!target) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-  if (!canManage(actor as Actor, target as Target)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  if (!canManage(actor as Actor, target as Target, action)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   // ---------- reset password ----------
   if (action === 'reset_password') {
