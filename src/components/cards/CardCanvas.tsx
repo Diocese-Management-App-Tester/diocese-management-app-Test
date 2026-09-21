@@ -21,7 +21,25 @@ export interface CardPersonData {
   // ----- birthday-card extras (optional; derived from birthdate when absent) -----
   birthday_year?: number;      // the year the card is for (default: current year)
   gift_points?: number | null; // points gifted for this birthday
+  // ----- bulk-print extras (optional) -----
+  // Free-form row data: when present, every `{{key}}` inside a free-text
+  // element or a label prefix is replaced by fields[key]. Absent (the normal
+  // ID / birthday cards) → texts are rendered verbatim, exactly as before.
+  fields?: Record<string, string>;
 }
+
+// {{ key }} → fields[key] (case-insensitive key match; unknown keys → '')
+const PLACEHOLDER_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
+export const fillPlaceholders = (text: string, fields: Record<string, string> | undefined): string => {
+  if (!fields || !text || text.indexOf('{{') === -1) return text;
+  const lower = new Map<string, string>();
+  Object.keys(fields).forEach((k) => lower.set(k.toLowerCase(), fields[k]));
+  return text.replace(PLACEHOLDER_RE, (_m, key: string) => {
+    const k = key.trim();
+    if (k in fields) return fields[k] ?? '';
+    return lower.get(k.toLowerCase()) ?? '';
+  });
+};
 
 // Arabic «N سنة» with correct plural forms
 export const arabicYears = (n: number): string => {
@@ -90,7 +108,7 @@ const resolveText = (
   constants: CardConstantsData
 ): string => {
   let value = '';
-  if (el.type === 'text') value = el.text ?? '';
+  if (el.type === 'text') value = fillPlaceholders(el.text ?? '', person.fields);
   else if (el.type === 'constant') {
     if (el.field === 'church_name') value = constants.church_name;
     else if (el.field === 'service_name') value = constants.service_name;
@@ -126,7 +144,8 @@ const resolveText = (
       case 'gift_points': value = person.gift_points != null ? String(person.gift_points) : '—'; break;
     }
   }
-  return el.label ? `${el.label} ${value}` : value;
+  const label = el.label ? fillPlaceholders(el.label, person.fields) : '';
+  return label ? `${label} ${value}` : value;
 };
 
 // QR image as data-url (rendered async once per national_id)
