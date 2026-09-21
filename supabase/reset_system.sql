@@ -25,7 +25,7 @@
 --   owner_code      login code of the owner (login name; e-mail becomes
 --                   <code>@diocese.app). Leave '' to NOT create an owner —
 --                   then add the user in Authentication → Users and run
---                   supabase/migrations/0002_bootstrap_owner.sql.
+--                   supabase/scripts/bootstrap_owner.sql.
 --   owner_password  plain password (≥ 6 chars). Hashed with bcrypt here.
 --   owner_name / owner_phone
 --
@@ -118,7 +118,7 @@ declare
 begin
   select * into o from _reset_opts;
   if coalesce(o.owner_code, '') = '' then
-    raise notice 'owner_code is empty → no owner created. Add the user in Authentication → Users and run 0002_bootstrap_owner.sql';
+    raise notice 'owner_code is empty → no owner created. Add the user in Authentication → Users and run supabase/scripts/bootstrap_owner.sql';
     return;
   end if;
   if length(coalesce(o.owner_password, '')) < 6 then

@@ -313,8 +313,9 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 
 ### 1. Supabase
 1. Create a project at supabase.com
-2. SQL Editor → **fastest path:** run `supabase/full_schema.sql` once — it is every migration (`0001` → `0041`, except `0002`) combined into one file, verified to produce a schema identical to running the files one by one. Regenerate it after adding a migration with `supabase/build_full_schema.sh`.
-   Alternatively run **all** migrations in `supabase/migrations/` in numeric order (`0001` → `0041`). Either way `0002_bootstrap_owner.sql` runs after step 5.
+2. **Preferred (CLI / CI):** `supabase link --project-ref <ref>` then `supabase db push` — applies every file in `supabase/migrations/` in version order and records it in `supabase_migrations.schema_migrations`, so later pushes only apply new files. See **Database migrations — automatic deploy (CI)** below.
+   **Manual fallback:** SQL Editor → run `supabase/full_schema.sql` once — it is every migration combined into one file, verified to produce a schema identical to running the files one by one. Regenerate it after adding a migration with `supabase/build_full_schema.sh`. If you go this way, also run `supabase/scripts/baseline_migration_history.sql` so CI knows those files are already applied.
+   The owner bootstrap (`supabase/scripts/bootstrap_owner.sql`, formerly `0002`) runs after step 5 in both cases.
    ⚠️ In `0005` the `alter type ... add value 'suspended'` must run in its own query before the rest of the file
    ⚠️ `0019_performance_rls_indexes_rpc.sql` is **required** by the current frontend (home / scanner call its RPCs). It is safe to re-run (idempotent).
    ⚠️ `0020_statistics_rpcs.sql` is **required** by the الإحصائيات tab (all `stats_*` RPCs). Idempotent; depends on 0019 (`my_scope()`, `enrollment_visible()`).
@@ -339,8 +340,50 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
    ⚠️ `0046_realtime_broadcast_scale.sql` is **REQUIRED by the current frontend for live updates at scale** (fixes the lag / failures seen with 60–80 concurrent servants). Moves the hot tables (`attendance_log`, `points_log`, `contact_log`, `enrollments`, `persons`, `notification_recipients`, `chat_messages`, `chat_read_state`, `store_orders`, `card_print_requests`, `user_achievements`, `servant_enrollments`, `servant_scopes`) OUT of the `supabase_realtime` publication and adds statement-level triggers that `realtime.send()` **one broadcast message per statement** on `scope:all` / `scope:church:<id>` / `user:<uid>` topics (RLS policy on `realtime.messages` via `rt_topic_allowed`). Also: `pg_trgm` GIN indexes on `persons(name / phone / national_id)` for the search box, composite indexes for the list/badge queries, `notif_dispatch_gate()` + `rt_gates` so the push dispatcher runs at most once per 45 s across all devices. Idempotent; run after 0045. **Until it is applied the app still works**: hot-table screens fall back to a 45 s poll + refresh on focus. Test: `supabase/tests/realtime_broadcast_test.sql`.
 3. **Authentication → Providers → Email**: disable "Confirm email"
 4. Authentication → Users → Add user: `owner@diocese.app` + password
-5. Copy that user's UUID into `supabase/migrations/0002_bootstrap_owner.sql` and run it
+5. Copy that user's UUID into `supabase/scripts/bootstrap_owner.sql` and run it in the SQL editor
 6. Login in the app with user id `owner` + your password
+
+### 1a. Database migrations — automatic deploy (CI)
+`supabase/config.toml` · `.github/workflows/supabase-migrations.yml` (shipped as `supabase/scripts/github-workflow-supabase-migrations.yml` — move it there, see one-time setup) · `supabase/scripts/`
+
+Migrations are deployed by **GitHub Actions** — nothing is pasted into the SQL editor any more.
+
+| Event | What runs |
+|---|---|
+| Pull request → `main` touching `supabase/migrations/**` | `check_migration_names.sh` (file-name lint) → `supabase db push --dry-run` against production — the job log lists exactly which files **would** be applied |
+| Push / merge to `main` | `supabase db push --linked --yes` — applies **only** the files not yet in `supabase_migrations.schema_migrations`, in version order. Runs in the `production` environment (add required reviewers there if you want a manual approval gate). |
+| `workflow_dispatch` | same as push — re-run the deploy by hand |
+
+**One-time setup**
+1. Move the workflow into place (the PR bot could not write to `.github/`): `git mv supabase/scripts/github-workflow-supabase-migrations.yml .github/workflows/supabase-migrations.yml` and commit.
+2. Repository → Settings → Secrets and variables → Actions → add:
+   - `SUPABASE_ACCESS_TOKEN` — https://supabase.com/dashboard/account/tokens
+   - `SUPABASE_PROJECT_ID` — the 20-character project ref (dashboard URL / Project Settings → General)
+   - `SUPABASE_DB_PASSWORD` — Project Settings → Database
+3. **Existing database (set up through the SQL editor):** run `supabase/scripts/baseline_migration_history.sql` once in the SQL editor. It only inserts the versions `0001 … 0051` into the history table — no schema change — so the first CI push does not try to re-apply them. (`supabase migration list --linked` should then show every file on both sides.)
+4. Optional: Settings → Environments → `production` → *Required reviewers* for a click-to-approve before each deploy.
+
+**File-name rules (the CLI enforces the first, CI enforces all)**
+- Only `<version>_<name>.sql` is a migration: `^[0-9]+_.*\.sql$`. Anything else in `supabase/migrations/` is **silently skipped** by the CLI — the lint step turns that into a failure.
+- The digits before the first `_` are the **version** = primary key of the history table and the **sort key**. Files are applied in **string order** of the version. Because `"0051" < "20260921120000"` the old 4-digit files always sort before the new timestamped ones — no renaming of the existing 0001…0051 files was needed (and renaming an applied file would break the history).
+- **New migrations must be timestamped** — `YYYYMMDDHHMMSS_snake_case_name.sql` (UTC). Always create them with the CLI so the timestamp is correct:
+  ```bash
+  npx supabase migration new add_something      # → supabase/migrations/20260921153012_add_something.sql
+  ```
+  A new file whose version is **lower** than one already applied is refused by `db push` ("Found local migration files to be inserted before the last migration on remote database") — regenerate the timestamp if a PR sat open while another migration was merged.
+- **Never edit, rename or delete an applied migration.** The CLI will not re-run it; write a new migration instead. CI prints a warning when it sees this.
+- Keep migrations **idempotent** (`if not exists`, `create or replace`, `drop … if exists`) as every file in this repo already is — a failed push can then simply be re-run.
+- `db push` runs each file as one batch on one connection and records the version at the end of that batch. Enum values added with `alter type … add value` cannot be *used* in the **same** file (the `0005` note above) — put the usage in the next migration.
+- Scripts that are **not** migrations (`bootstrap_owner.sql`, `baseline_migration_history.sql`, the seed / wipe / reset files, `tests/`, `rollbacks/`) live outside `supabase/migrations/` on purpose.
+
+**Day-to-day**
+```bash
+npx supabase migration new <name>             # create the file, write SQL in it
+npx supabase db push --dry-run --linked       # optional local preview (needs `supabase link` once)
+git add supabase/migrations && git commit && git push   # open PR → dry-run job → merge → deploy job
+bash supabase/build_full_schema.sh            # optional: refresh full_schema.sql for manual installs
+```
+If a push fails half-way: fix the SQL (files are idempotent), re-run the workflow (`workflow_dispatch`). To skip a file that was applied by hand: `supabase migration repair --status applied <version> --linked`.
 
 ### 1b. Demo / test data — `seed_test_data.sql` & `wipe_test_data.sql`
 Two one-file scripts to **fill the whole database with realistic Arabic demo data** (every table, every module) and to **wipe it back to a clean install**. Run them in the SQL Editor after `full_schema.sql` (steps 3–5 are **not** needed — the seed creates its own login accounts).
@@ -348,7 +391,7 @@ Two one-file scripts to **fill the whole database with realistic Arabic demo dat
 | Script | What it does |
 |---|---|
 | `supabase/seed_test_data.sql` | **Up to date with migration 0051.** 2 churches · 3 services · 5 classes · 8 servant accounts (owner → pending request → **suspended**) · **extra servant scopes** (a servant in two classes, 0045) with their **mirror enrollments** (`kind = servant`, created by the trigger) · 26 children / 27 child enrollments (one in two classes, **one stopped** — 0043) · **child portal accounts** (bcrypt passwords, one on the default `000000`, live / «تذكرني» / expired sessions with known test tokens, pending / rejected / approved **join requests** — 0042) · 8 events incl. **scoped defaults** per church / service / class (0048) · 8 weeks of attendance · points / deductions · calls & messages with feedback · data-change requests · card templates + print queue · shepherd groups · store items + completed / cancelled orders · online exams (published / draft / closed) with attempts · birthdays (today / +2d / +6d) with gift · chat (child · staff · broadcasts) · online classes (ended & finalized · **live now** · scheduled · cancelled) · occasions (trip · conference · celebration tomorrow · completed) with tickets & checklist · manual + automatic notifications, push subscriptions · results module (grading systems, locked exam, open exam, archive) · library (subjects / books / lectures / favorites) · **card print profiles** (shared / church / service / class — 0049) · **report templates** for every data source (0050) · **backup schedules + run history** incl. a failed run and a restore (0044) · **activity log**: every seeded row is audited under the servant who «did it» (the script switches `auth.uid()` per section) plus app-level events — logins / logouts over 10 days, QR scans, exports, prints, a failed login, child-portal events (0047) · module grants (incl. `activity`, `reports`) · permission profiles · home widgets / names / navigation / **code system** (0040) / activity retention. Ends with a row-count summary. **Run once** (fixed UUIDs). |
-| `supabase/reset_system.sql` | **Factory reset** — `TRUNCATE … CASCADE` every public table, deletes **every** login account (auth.users + identities + sessions), clears **every** uploaded file (photos · logos · backups; buckets stay), restores the `cards` module grant, and **optionally re-creates the owner** in the same run (edit `owner_code` / `owner_password` / `owner_name` at the top; `owner_code = ''` → no owner, use `0002_bootstrap_owner.sql` instead). Schema / functions / policies stay — no re-migration needed. Prints what is left. |
+| `supabase/reset_system.sql` | **Factory reset** — `TRUNCATE … CASCADE` every public table, deletes **every** login account (auth.users + identities + sessions), clears **every** uploaded file (photos · logos · backups; buckets stay), restores the `cards` module grant, and **optionally re-creates the owner** in the same run (edit `owner_code` / `owner_password` / `owner_name` at the top; `owner_code = ''` → no owner, use `supabase/scripts/bootstrap_owner.sql` instead). Schema / functions / policies stay — no re-migration needed. Prints what is left. |
 | `supabase/wipe_test_data.sql` | `TRUNCATE … CASCADE` every public table (catalogue-driven — new tables such as `activity_log`, `child_sessions`, `backup_*`, `report_templates` are picked up automatically; runs with `app.audit_off` so the wipe leaves no activity rows), deletes the seeded auth users (and, by default, every auth user left without a servant row — flip `seed_only` inside to keep real accounts), clears storage objects, restores the `cards` module grant that `0024` seeds, prints what is left (should be 0). Schema / functions / policies stay. |
 
 **Demo logins** (password `Test@1234` for all — the login name is the code):
