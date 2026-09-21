@@ -467,6 +467,57 @@ migration is not applied the bar hides itself.
   visible or only checked requests, delete one (✕), delete selected, delete all,
   and optionally auto-delete printed requests after printing (with confirm).
 
+### Bulk Print tab — طباعة جماعية (`/settings/cards/[id]` → third tab)
+Generate **hundreds / thousands of personalised cards from ONE template**
+without touching the database: **Data → Template → Cards → Preview → Print**.
+The Design and Print tabs are unchanged; the new tab only *reads* the
+template's design + print settings (`src/components/cards/BulkPrintTab.tsx`,
+`BulkSourcePanel.tsx`, `BulkPreviewPane.tsx`, helpers in `src/lib/bulk-print.ts`).
+
+1. **البيانات — data source** (any mix, appendable):
+   - **توليد أكواد** — N codes, **sequential** (start · step · zero-padded
+     length · prefix / suffix → `A-001, A-002 …`) or **random** (length,
+     charset letters+digits / digits / letters, unambiguous — no `0 O 1 I`,
+     unique). Into a new column, an existing column, or a fresh table.
+   - **لصق بيانات** — paste from Excel / Google Sheets (Tab · `,` · `;` or one
+     value per line, quoted CSV honoured); *first row = headers* toggle;
+     live preview.
+   - **استيراد Excel** — xlsx / xls / csv (lazy `xlsx`), sheet picker, header
+     row toggle, columns auto-detected, preview table.
+2. **Editable table** — add / edit / delete rows (paged 50 per page), add /
+   rename / delete columns, checkbox in the header = column **available to
+   the design**, total card count badge, row selection (per page / all) for
+   «print selected». Persisted per template in `localStorage`
+   (`bulk-print:<templateId>`) so a reload keeps the data.
+3. **الربط — connect data to the design**
+   - **Dynamic fields**: every enabled column is a placeholder
+     `{{column}}` (e.g. `{{code}} · {{name}} · {{class}} · {{service}} ·
+     {{phone}}`) usable inside any **نص ثابت** element or a variable's
+     «نص قبل القيمة» — mixed text is fine (`الفصل: {{class}}`). Copy chip
+     per field + a one-click «add as text element to the design» button
+     (then move / style it in the Design tab and save). Case-insensitive
+     key match; unknown keys print empty and are flagged with a warning
+     listing the design's placeholders that have no matching column.
+   - **Mapping**: the template's standard elements (name · phone ·
+     national id / **QR** · birthdate / age · address · photo URL · church /
+     service / class constants) each read one column (auto-mapped from header
+     synonyms, Arabic and English). Unmapped constants keep the template's
+     values; with no QR mapping the first enabled column feeds the QR.
+   - Implementation: `CardPersonData.fields?` + `fillPlaceholders()` in
+     `CardCanvas.tsx` — opt-in, so ID / birthday cards render exactly as before.
+4. **المعاينة — preview**: «كارت 15 من 100», first / prev / next / last, jump
+   to number, slider, ← → keys, zoom, and the row's data listed next to the
+   card to verify every field.
+5. **الطباعة — print**: **all cards** · **range** (`1-50`, `3, 7, 20-30`) ·
+   **selected rows**; page layout starts from the template's print settings
+   (paper · orientation · margins · gaps · cut marks · center lines,
+   editable locally without changing the template) plus **cards per page**
+   (capped at the computed cols × rows); pages are created automatically
+   (`N كارت ← M صفحة`, first-page preview); the hidden mm-exact sheet uses
+   the same `CardCanvas` at `96/25.4 px/mm` with the **exact card
+   dimensions from the template** — mounted only while printing so large
+   sets (QR codes) stay fast.
+
 ## Status, attendance & points badges on the children page (سجل الحضور / سجل النقاط)
 Each person card shows badges under the name — **status** first (only when an
 event is selected), then attendance, then points:
