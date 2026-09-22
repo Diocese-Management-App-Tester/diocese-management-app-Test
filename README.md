@@ -451,7 +451,7 @@ Files that make it work (all ignored by Vercel):
 
 | File | Purpose |
 |---|---|
-| `wrangler.jsonc` | Worker config: name, `nodejs_compat`, static assets, self-service binding, the two daily **crons** |
+| `wrangler.jsonc` | Worker config: name, `nodejs_compat`, static assets, the two daily **crons** (no service/R2/KV/D1 bindings — nothing to create before the first deploy) |
 | `open-next.config.ts` | OpenNext adapter config (default no-op cache — the app is fully dynamic, no ISR, so no R2/KV/D1 bindings are needed) |
 | `cloudflare/worker.ts` | Thin custom Worker: re-uses the generated `fetch` handler and adds a `scheduled` handler that calls `/api/backup/cron` and `/api/notifications/dispatch` on the cron ticks (same schedule as `vercel.json`) |
 | `public/_headers` | Immutable cache headers for `/_next/static/*` |
@@ -481,7 +481,8 @@ version without activating it).
 | `Executing user build command: npm run build` (instead of `npm run cf:build`) | Build command not changed from Cloudflare's default | Settings → Build → **Build command** = `npm run cf:build`, **Deploy command** = `npx wrangler deploy` |
 | `Error: @supabase/ssr: Your project's URL and API key are required to create a Supabase client!` repeated for every page, then `Export encountered errors on following paths` | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are not set as **build** variables (they are inlined by `next build`; runtime variables alone are not enough) | Settings → **Build → Variables and secrets** → add both (copy the values from Vercel). `npm run cf:build` now runs `cloudflare/preflight.mjs` first and fails immediately with this exact instruction instead of 2 minutes later |
 | `Missing entry-point` / `wrangler deploy` can't find `.open-next/worker.js` | Build ran `next build` only | Same as the first row — the OpenNext step is part of `cf:build` |
-| Worker exceeds 3 MiB compressed | Free plan size limit | Workers Paid plan ($5/mo → 10 MiB) |
+| `Service binding 'WORKER_SELF_REFERENCE' references Worker '…' which was not found [code: 10143]` | A `services` self-binding pointed at a Worker name that doesn't exist yet (first deploy) or differs from `name` (after a rename) | Removed — the app has no ISR so the binding isn't needed. If you re-add it, `service` must equal `name` exactly and the Worker must already exist |
+| `Total Upload: … / gzip: 2435 KiB` then a size error | Free plan allows 3 MiB compressed; the server bundle is ~2.4 MiB today, so there is headroom but not much | Workers Paid plan ($5/mo → 10 MiB) if it grows past the limit |
 
 #### Option B — from your machine / CI
 ```bash
