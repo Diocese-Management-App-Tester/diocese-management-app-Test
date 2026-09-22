@@ -475,6 +475,14 @@ version without activating it).
 5. Save & deploy. The Worker is served at `https://diocese-management.<account>.workers.dev`; add a custom domain under Settings → Domains & Routes.
 6. Production branch = `main` → both Vercel and Cloudflare redeploy on every merge. (Use only one of them for the crons if you don't want the daily jobs to run twice — remove `triggers.crons` from `wrangler.jsonc` or the `crons` from `vercel.json`. Both jobs are idempotent, so running twice is harmless, just redundant.)
 
+#### Troubleshooting the Cloudflare build
+| Symptom in the build log | Cause | Fix |
+|---|---|---|
+| `Executing user build command: npm run build` (instead of `npm run cf:build`) | Build command not changed from Cloudflare's default | Settings → Build → **Build command** = `npm run cf:build`, **Deploy command** = `npx wrangler deploy` |
+| `Error: @supabase/ssr: Your project's URL and API key are required to create a Supabase client!` repeated for every page, then `Export encountered errors on following paths` | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are not set as **build** variables (they are inlined by `next build`; runtime variables alone are not enough) | Settings → **Build → Variables and secrets** → add both (copy the values from Vercel). `npm run cf:build` now runs `cloudflare/preflight.mjs` first and fails immediately with this exact instruction instead of 2 minutes later |
+| `Missing entry-point` / `wrangler deploy` can't find `.open-next/worker.js` | Build ran `next build` only | Same as the first row — the OpenNext step is part of `cf:build` |
+| Worker exceeds 3 MiB compressed | Free plan size limit | Workers Paid plan ($5/mo → 10 MiB) |
+
 #### Option B — from your machine / CI
 ```bash
 cp .dev.vars.example .dev.vars       # runtime vars for local preview
