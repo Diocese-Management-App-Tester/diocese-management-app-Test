@@ -14,7 +14,7 @@
 // Variables and Secrets) AND as runtime variables.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "diocese-management",
+  "name": "diocese-management-app",
   "main": "cloudflare/worker.ts",
   "compatibility_date": "2025-12-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
