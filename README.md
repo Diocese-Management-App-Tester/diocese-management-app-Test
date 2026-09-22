@@ -433,6 +433,65 @@ npm run dev
 3. (Optional) add the **PWA branding** variables below
 4. Deploy — done. PWA is installable from the browser.
 
+### 3a. Deploy to Cloudflare Workers (in parallel with Vercel)
+
+The same repo can be deployed to **both** Vercel and Cloudflare at the same
+time — every push to `main` builds on both platforms. Vercel keeps using the
+plain `next build`; Cloudflare uses the **OpenNext Cloudflare adapter**
+(`@opennextjs/cloudflare`) which converts the Next.js build into a Worker.
+
+**Why the first attempt failed.** Cloudflare *Pages* with framework preset
+"Next.js" uses `@cloudflare/next-on-pages`, which only supports the *Edge*
+runtime — this app's API routes (`web-push`, `sharp`, the Supabase service
+role) run on the Node runtime, and a Next.js 14 app with middleware + route
+handlers does not build there. The supported path today is **Cloudflare
+Workers + OpenNext** (Pages is not needed).
+
+Files that make it work (all ignored by Vercel):
+
+| File | Purpose |
+|---|---|
+| `wrangler.jsonc` | Worker config: name, `nodejs_compat`, static assets, self-service binding, the two daily **crons** |
+| `open-next.config.ts` | OpenNext adapter config (default no-op cache — the app is fully dynamic, no ISR, so no R2/KV/D1 bindings are needed) |
+| `cloudflare/worker.ts` | Thin custom Worker: re-uses the generated `fetch` handler and adds a `scheduled` handler that calls `/api/backup/cron` and `/api/notifications/dispatch` on the cron ticks (same schedule as `vercel.json`) |
+| `public/_headers` | Immutable cache headers for `/_next/static/*` |
+| `.dev.vars.example` | Template for local `wrangler` preview variables |
+| `src/app/branding/[kind]/[size]/route.ts` | `sharp` is loaded lazily — on Workers (no native addons) the icon route redirects to the source image instead of resizing it |
+
+npm scripts: `cf:build` (build only) · `cf:preview` (build + run locally in
+workerd) · `cf:deploy` (build + deploy) · `cf:upload` (build + upload a
+version without activating it).
+
+#### Option A — Git-connected (automatic, like Vercel)
+1. Cloudflare dashboard → **Workers & Pages → Create → Workers → Import a repository** → pick this GitHub repo.
+2. Build settings:
+   - **Build command**: `npm run cf:build`
+   - **Deploy command**: `npx wrangler deploy`
+   - Root directory: `/` · Node version: 20+ (default is fine)
+3. **Build variables** (Settings → Build → Variables and Secrets) — needed because `NEXT_PUBLIC_*` are inlined at build time:
+   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and the optional `NEXT_PUBLIC_*` branding variables (§ 4).
+4. **Runtime variables & secrets** (Settings → Variables and Secrets): the same `NEXT_PUBLIC_*` again plus the server secrets
+   `SUPABASE_SERVICE_ROLE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `CRON_SECRET` (optional, protects the cron routes — the scheduled handler sends it as `Authorization: Bearer`).
+5. Save & deploy. The Worker is served at `https://diocese-management.<account>.workers.dev`; add a custom domain under Settings → Domains & Routes.
+6. Production branch = `main` → both Vercel and Cloudflare redeploy on every merge. (Use only one of them for the crons if you don't want the daily jobs to run twice — remove `triggers.crons` from `wrangler.jsonc` or the `crons` from `vercel.json`. Both jobs are idempotent, so running twice is harmless, just redundant.)
+
+#### Option B — from your machine / CI
+```bash
+cp .dev.vars.example .dev.vars       # runtime vars for local preview
+npm run cf:preview                   # runs the Worker locally in workerd (http://localhost:8787)
+npx wrangler login
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY   # repeat for each secret
+npm run cf:deploy
+```
+
+Notes
+- **Verified in workerd** (local `wrangler dev` of the OpenNext build): middleware redirect `/` → `/login`, pages render (RTL), API route with `web-push` + `supabase-js` under `nodejs_compat`, `CRON_SECRET` 401/200, `/branding/icon/*` fallback + no-`sharp` redirect, `/manifest.json` redirect, `_headers` immutable caching, and both `scheduled` cron triggers (`curl "http://localhost:8787/__scheduled?cron=0+3+*+*+*"` with `wrangler dev --test-scheduled`).
+- **Worker size**: `wrangler` prints the compressed size on each deploy; the free plan allows 3 MiB, the paid plan 10 MiB. The server bundle is large (Next.js runtime + `xlsx`/`jspdf` are client-side, so they don't count) — if the free limit is exceeded, the $5/month Workers Paid plan removes the constraint.
+- **Timeouts**: `maxDuration = 60` is a Vercel setting; Workers have no wall-clock limit but 30 s CPU (paid: configurable). The cron routes do mostly I/O, so this is fine.
+- **Image optimizer**: `images.unoptimized = true` is already set, so `/_next/image` is never used on either platform.
+- **Supabase**: no change — both deployments talk to the same project. Add the Cloudflare URL to **Supabase → Authentication → URL Configuration → Redirect URLs** if you use magic links / OAuth.
+- The `.open-next/` and `.wrangler/` directories are build output and git-ignored.
+
 ### 4. PWA branding via Vercel environment variables (`src/lib/branding.ts`)
 The app name, app icon, diocese name and diocese logo are **not hard-coded**:
 they are read from environment variables so the same repo can be deployed for

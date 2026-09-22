@@ -1,0 +1,4 @@
+# Cloudflare Workers static-asset headers (ignored by Vercel — it applies the
+# same immutable policy to /_next/static automatically).
+/_next/static/*
+  Cache-Control: public,max-age=31536000,immutable

@@ -1,0 +1,45 @@
+// Cloudflare Workers configuration — used ONLY by the Cloudflare deployment
+// (`npm run cf:build` / `npm run cf:deploy`). Vercel ignores this file.
+//
+// The Next.js app is adapted for the Workers runtime by @opennextjs/cloudflare
+// (see open-next.config.ts). `main` points at our thin custom worker
+// (cloudflare/worker.ts) which re-uses the generated fetch handler and adds a
+// `scheduled` handler so the two daily crons of vercel.json also run here.
+//
+// Secrets (SUPABASE_SERVICE_ROLE_KEY, VAPID_PRIVATE_KEY, CRON_SECRET …) must
+// NOT be put in this file: set them in the Cloudflare dashboard
+// (Workers & Pages → <worker> → Settings → Variables and Secrets) or with
+// `npx wrangler secret put NAME`. NEXT_PUBLIC_* variables are inlined at build
+// time — set them as *build* variables in Workers Builds (Settings → Build →
+// Variables and Secrets) AND as runtime variables.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "diocese-management",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2025-12-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      // Self-reference service binding required by the OpenNext adapter
+      // (ISR / revalidation). The service name must equal the worker name.
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "diocese-management"
+    }
+  ],
+  // The same daily jobs registered for Vercel in vercel.json.
+  // (UTC — 02:30 scheduled backups · 03:00 notifications dispatch)
+  "triggers": {
+    "crons": ["30 2 * * *", "0 3 * * *"]
+  },
+  "observability": {
+    "enabled": true
+  },
+  // Non-secret runtime variables. Override per environment in the dashboard.
+  "vars": {
+    "NEXTJS_ENV": "production"
+  }
+}

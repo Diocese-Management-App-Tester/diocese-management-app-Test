@@ -7,9 +7,28 @@
 // When nothing is configured — or the remote image cannot be fetched — the
 // request is redirected to the bundled icon in /public/icons so the app never
 // shows a broken image.
+//
+// Cloudflare Workers: `sharp` is a native Node addon and cannot run in the
+// Workers runtime (OpenNext strips it from the bundle). It is therefore
+// loaded lazily; when it is unavailable the request is redirected to the
+// configured source image as-is (browsers scale PWA icons themselves), so
+// the branding still works on both Vercel (resized PNG) and Cloudflare.
 import { NextResponse, type NextRequest } from 'next/server';
-import sharp from 'sharp';
 import { BRANDING, ICON_SIZES, bundledIcon, type IconSize } from '@/lib/branding';
+
+type SharpModule = typeof import('sharp');
+let sharpPromise: Promise<SharpModule | null> | undefined;
+const loadSharp = (): Promise<SharpModule | null> => {
+  if (!sharpPromise) {
+    // Indirect specifier keeps webpack/esbuild from failing the build when the
+    // package is absent; on Vercel/Node it resolves to the real module.
+    const name = 'sharp';
+    sharpPromise = import(/* webpackIgnore: true */ name)
+      .then((m: { default?: SharpModule } & SharpModule) => (m.default ?? m) as SharpModule)
+      .catch(() => null);
+  }
+  return sharpPromise;
+};
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,6 +66,14 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const src = sourceFor(params.kind);
   if (!src) return fallback(req, size);
+
+  const sharp = await loadSharp();
+  if (!sharp) {
+    // No native image library in this runtime (Cloudflare Workers): hand the
+    // original image to the browser. Cached like the rendered variant — the
+    // URL carries the branding hash so a change still busts every cache.
+    return NextResponse.redirect(src, { status: 307, headers: CACHE_HEADERS });
+  }
 
   try {
     const res = await fetch(src, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
