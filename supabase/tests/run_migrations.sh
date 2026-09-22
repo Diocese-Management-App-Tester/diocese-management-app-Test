@@ -7,11 +7,13 @@ PSQL="psql -h ${PGHOST:-/tmp} -p ${PGPORT:-5433} -U ${PGUSER:-postgres} -v ON_ER
 $PSQL -d postgres -c "drop database if exists app;" >/dev/null
 $PSQL -d postgres -c "create database app;" >/dev/null
 $PSQL -d app -f supabase/tests/local_shim.sql >/dev/null
-LAST=${1:-99}
+# optional limit: a legacy number (51) or a full version (20260922120000);
+# timestamped files (YYYYMMDDHHMMSS_*) always sort after the legacy 00NN ones
+LAST=${1:-99999999999999}
 for f in supabase/migrations/*.sql; do
-  b=$(basename "$f"); n=${b:0:4}
-  [ "$n" = "0002" ] && continue          # bootstrap owner needs a real auth user
-  [ $((10#$n)) -gt $LAST ] && break
+  b=$(basename "$f"); v=${b%%_*}; n=${b:0:4}
+  [ "$v" = "0002" ] && continue          # bootstrap owner needs a real auth user
+  [ $((10#$v)) -gt $((10#$LAST)) ] && break
   if [ "$n" = "0005" ]; then             # enum value must be added outside the file's transaction
     $PSQL -d app -c "alter type public.approval_status add value if not exists 'suspended';" >/dev/null 2>&1 || true
     sed "/alter type public.approval_status add value/d" "$f" > /tmp/_m.sql; src=/tmp/_m.sql

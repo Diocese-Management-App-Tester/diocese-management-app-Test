@@ -151,7 +151,7 @@ export interface BackupFile {
   counts: Record<string, number>;
 }
 
-export type BackupProgress = { phase: 'dump' | 'stage' | 'delete' | 'apply' | 'auth' | 'done'; table?: string; done: number; total: number; message?: string };
+export type BackupProgress = { phase: 'dump' | 'stage' | 'delete' | 'apply' | 'fixup' | 'auth' | 'done'; table?: string; done: number; total: number; message?: string };
 
 export type RestoreMode = 'merge' | 'replace';
 export const RESTORE_MODE_LABELS: Record<RestoreMode, { label: string; desc: string }> = {
@@ -166,13 +166,32 @@ const MESSAGES: Record<string, string> = {
   bad_format: 'هذا الملف ليس نسخة احتياطية من التطبيق',
   no_tables: 'اختر جدولاً واحدًا على الأقل',
   job_not_found: 'انتهت جلسة الاسترجاع — أعد المحاولة',
+  job_closed: 'انتهت جلسة الاسترجاع — أعد المحاولة',
   not_configured: 'الخادم غير مُهيّأ (SUPABASE_SERVICE_ROLE_KEY)',
   network: 'تعذر الاتصال بالخادم',
 };
+/** Postgres errors the owner may still meet → Arabic explanation + the raw text. */
+function translatePgError(raw: string): string | null {
+  const fk = raw.match(/insert or update on table "(\w+)" violates foreign key constraint "(\w+)"/);
+  if (fk) {
+    return `سجلات «${tableLabel(fk[1])}» تشير إلى سجل غير موجود في قاعدة البيانات (${fk[2]}). ` +
+      'استرجع «الهيكل» و«الخدام» و«حسابات الدخول» مع هذا الجدول في نفس العملية، أو حدّث قاعدة البيانات إلى آخر إصدار (migration 20260922).';
+  }
+  const uq = raw.match(/duplicate key value violates unique constraint "(\w+)"/);
+  if (uq) return `تعارض في قيمة فريدة (${uq[1]}) — يوجد سجل آخر بنفس الكود / الاسم. استخدم «استبدال» أو احذف السجل المكرر أولاً.`;
+  const nn = raw.match(/null value in column "(\w+)" of relation "(\w+)" violates not-null constraint/);
+  if (nn) return `عمود «${nn[1]}» في «${tableLabel(nn[2])}» لا يقبل فراغًا — النسخة من إصدار أقدم من قاعدة البيانات.`;
+  if (/function public\.backup_restore_fixup/.test(raw) && /does not exist/.test(raw)) {
+    return 'قاعدة البيانات تحتاج تحديثًا — شغّل migration 20260922_backup_restore_fk_order ثم أعد المحاولة.';
+  }
+  return null;
+}
 export function backupErrorMessage(e: unknown): string {
   const raw = typeof e === 'string' ? e : (e as { message?: string })?.message ?? '';
   const key = raw.split(':')[0].trim();
   if (MESSAGES[key]) return MESSAGES[key] + (raw.includes(':') ? ` (${raw.split(':').slice(1).join(':')})` : '');
+  const pg = translatePgError(raw);
+  if (pg) return `${pg}\n${raw}`;
   return raw || 'حدث خطأ غير متوقع';
 }
 
@@ -302,9 +321,20 @@ export interface RestoreOptions {
   restoreAuth: boolean;     // → /api/backup/auth-restore (server, service role)
   onProgress?: (p: BackupProgress) => void;
 }
+export interface RestoreTableResult {
+  upserted?: number;
+  deleted?: number;
+  detached?: number;            // replace: references to deleted rows set to null
+  deferred?: number;            // nullable FK values inserted as null first (parent not there yet)
+  resolved?: number;            // …re-attached once the parent arrived
+  unresolved?: number;          // …parent never arrived → stays null
+  unresolved_samples?: { pk: Record<string, unknown>; column: string; value: unknown }[];
+  skipped?: number;             // rows whose NOT NULL parent outside public (auth.users) is missing
+  skipped_samples?: unknown[];
+}
 export interface RestoreResult {
   jobId: string;
-  tables: Record<string, { upserted?: number; deleted?: number }>;
+  tables: Record<string, RestoreTableResult>;
   auth?: { created: number; updated: number; failed: number; errors: string[] };
   skipped: string[];        // tables in the file the DB does not know
 }
@@ -318,13 +348,31 @@ export async function restoreBackup(supabase: SupabaseClient, opts: RestoreOptio
 
   const columns = Object.fromEntries(tables.map((t) => [t, opts.file.tables[t].columns]));
   const totalRows = tables.reduce((s, t) => s + opts.file.tables[t].rows.length, 0);
-  // progress: stage (rows) + apply (rows) + auth
+  // progress: auth + stage (rows) + apply (rows)
   const total = totalRows * 2 + (opts.restoreAuth ? 1 : 0);
   let done = 0;
   const prog = (phase: BackupProgress['phase'], table?: string, message?: string) =>
     opts.onProgress?.({ phase, table, done: Math.min(done, total), total, message });
 
   const result: RestoreResult = { jobId: '', tables: {}, skipped };
+
+  // 0. login accounts FIRST — servant_enrollments.id → auth.users, so the
+  //    servants (and everything that points at them) need the accounts in place.
+  if (opts.restoreAuth && opts.file.auth_users?.length) {
+    prog('auth', undefined, 'استرجاع حسابات الدخول…');
+    try {
+      const res = await fetch('/api/backup/auth-restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: opts.file.auth_users }),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) throw new Error((data.error as string) ?? 'failed');
+      result.auth = data as unknown as RestoreResult['auth'];
+    } catch (e) {
+      throw new Error(`حسابات الدخول: ${backupErrorMessage(e)}`);
+    }
+    done += 1;
+  }
 
   if (tables.length > 0) {
     const { data: jid, error: e0 } = await supabase.rpc('backup_restore_begin', {
@@ -376,6 +424,12 @@ export async function restoreBackup(supabase: SupabaseClient, opts: RestoreOptio
         }
       }
 
+      // 5. re-attach the references that were deferred because their parent
+      //    row (a servant, a person …) came later in the order — FK cycles
+      const { error: e3 } = await supabase.rpc('backup_restore_fixup', { p_job: jobId });
+      if (e3) throw new Error(e3.message);
+      prog('fixup');
+
       const { data: fin, error: e2 } = await supabase.rpc('backup_restore_finish', { p_job: jobId, p_status: 'done' });
       if (e2) throw new Error(e2.message);
       result.tables = ((fin as { result?: RestoreResult['tables'] })?.result) ?? {};
@@ -385,24 +439,18 @@ export async function restoreBackup(supabase: SupabaseClient, opts: RestoreOptio
     }
   }
 
-  // 5. auth accounts (server route — Admin API)
-  if (opts.restoreAuth && opts.file.auth_users?.length) {
-    prog('auth', undefined, 'استرجاع حسابات الدخول…');
-    try {
-      const res = await fetch('/api/backup/auth-restore', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users: opts.file.auth_users }),
-      });
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) throw new Error((data.error as string) ?? 'failed');
-      result.auth = data as unknown as RestoreResult['auth'];
-    } catch (e) {
-      throw new Error(`حسابات الدخول: ${backupErrorMessage(e)}`);
-    }
-    done += 1;
-  }
   prog('done');
   return result;
+}
+
+/** Human summary of what a restore could not put back exactly (empty = perfect). */
+export function restoreWarnings(r: RestoreResult): string[] {
+  const out: string[] = [];
+  for (const [t, v] of Object.entries(r.tables)) {
+    if (v.skipped) out.push(`${tableLabel(t)}: ${v.skipped} سجل لم يُسترجع لأن حساب الدخول الخاص به غير موجود — استرجع «حسابات الدخول» مع هذا الجدول.`);
+    if (v.unresolved) out.push(`${tableLabel(t)}: ${v.unresolved} مرجع (مثل «أُنشئ بواسطة» / «آخر تعديل») يشير إلى خادم غير موجود في قاعدة البيانات — تُرك فارغًا.`);
+  }
+  return out;
 }
 
 // ---------- history / schedules (types mirror the tables) ----------

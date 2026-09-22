@@ -12,12 +12,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import TableSelector from './TableSelector';
 import {
   AUTH_USERS_KEY, RESTORE_MODE_LABELS, backupErrorMessage, formatBytes, logBackupRun, parseBackup,
-  restoreBackup, tableLabel,
+  restoreBackup, restoreWarnings, tableLabel,
   type BackupFile, type BackupProgress, type BackupTableInfo, type RestoreMode, type RestoreResult,
 } from '@/lib/backup';
 
 const PHASE_LABELS: Record<BackupProgress['phase'], string> = {
-  dump: 'قراءة', stage: 'رفع البيانات', delete: 'حذف السجلات غير الموجودة في النسخة', apply: 'تطبيق', auth: 'حسابات الدخول', done: 'انتهى',
+  dump: 'قراءة', stage: 'رفع البيانات', delete: 'حذف السجلات غير الموجودة في النسخة', apply: 'تطبيق',
+  fixup: 'ربط المراجع بين الجداول', auth: 'حسابات الدخول', done: 'انتهى',
 };
 
 export default function RestoreModal({
@@ -80,10 +81,11 @@ export default function RestoreModal({
       const r = await restoreBackup(supabase, { file, tables, mode, restoreAuth, onProgress: setProgress });
       setResult(r);
       const counts = Object.fromEntries(Object.entries(r.tables).map(([k, v]) => [k, v.upserted ?? 0]));
+      const warnings = [...(r.auth?.errors ?? []), ...restoreWarnings(r)];
       if (runId) {
         await supabase.from('backup_runs').update({
-          status: r.auth && r.auth.failed > 0 ? 'partial' : 'done', row_counts: counts, finished_at: new Date().toISOString(),
-          error: r.auth?.errors?.length ? r.auth.errors.slice(0, 5).join(' | ') : null,
+          status: warnings.length > 0 ? 'partial' : 'done', row_counts: counts, finished_at: new Date().toISOString(),
+          error: warnings.length ? warnings.slice(0, 5).join(' | ') : null,
         }).eq('id', runId);
       }
       onDone();
@@ -125,6 +127,8 @@ export default function RestoreModal({
                     <span className="font-bold">{tableLabel(t)}</span>
                     <span className="tabular-nums text-slate-500">
                       {v.upserted ?? 0} سجل{v.deleted ? ` · حُذف ${v.deleted}` : ''}
+                      {v.skipped ? <span className="text-amber-600"> · تُجاوز {v.skipped}</span> : null}
+                      {v.unresolved ? <span className="text-amber-600"> · {v.unresolved} مرجع مفقود</span> : null}
                     </span>
                   </li>
                 ))}
@@ -142,6 +146,12 @@ export default function RestoreModal({
                   {result.auth.errors.slice(0, 5).map((e, i) => <p key={i} dir="ltr" className="truncate">{e}</p>)}
                 </div>
               ) : null}
+              {restoreWarnings(result).length > 0 && (
+                <div className="space-y-1 rounded-2xl bg-amber-50 px-4 py-3 text-[11px] text-amber-700">
+                  <p className="font-bold">اكتمل الاسترجاع مع ملاحظات:</p>
+                  {restoreWarnings(result).map((w, i) => <p key={i}>{w}</p>)}
+                </div>
+              )}
               {result.skipped.length > 0 && (
                 <p className="rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500">
                   جداول في الملف غير موجودة في قاعدة البيانات وتم تجاهلها: {result.skipped.join('، ')}
@@ -244,8 +254,8 @@ export default function RestoreModal({
             </div>
           )}
           {error && (
-            <p className="mt-3 flex items-start gap-2 rounded-2xl bg-red-50 px-4 py-3 text-xs font-bold text-red-600">
-              <TriangleAlert className="h-4 w-4 shrink-0" /> {error}
+            <p className="mt-3 flex items-start gap-2 whitespace-pre-line break-words rounded-2xl bg-red-50 px-4 py-3 text-xs font-bold text-red-600">
+              <TriangleAlert className="h-4 w-4 shrink-0" /> <span>{error}</span>
             </p>
           )}
         </div>
