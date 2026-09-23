@@ -19,7 +19,7 @@ import ScopePicker from '@/components/ScopePicker';
 import type { Church, Service, ClassRoom, Enrollment, Person, ScopeRef } from '@/lib/types';
 
 export default function PersonClassesModal({
-  person, churches, services, classes, onChanged, onClose,
+  person, churches, services, classes, onChanged, onClose, allowLast = false,
 }: {
   person: Person;
   churches: Church[];
@@ -27,6 +27,8 @@ export default function PersonClassesModal({
   classes: ClassRoom[];
   onChanged: () => void;
   onClose: () => void;
+  /** إدارة الأفراد (owner): the last class may go too — the person then simply has no enrollments */
+  allowLast?: boolean;
 }) {
   const [supabase] = useState(() => createClient());
   const [rows, setRows] = useState<Enrollment[]>([]);
@@ -75,7 +77,7 @@ export default function PersonClassesModal({
   };
 
   const remove = async (e: Enrollment) => {
-    if (rows.filter((r) => r.kind === 'child').length <= 1) {
+    if (!allowLast && rows.filter((r) => r.kind === 'child').length <= 1) {
       return setError('هذا آخر فصل للمخدوم — لحذفه نهائيًا استخدم «حذف»');
     }
     const ok1 = confirm(
