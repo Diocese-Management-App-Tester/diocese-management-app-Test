@@ -5,7 +5,10 @@
 // added here step by step; the first one is module access control.
 
 import Link from 'next/link';
-import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush, KeyRound } from 'lucide-react';
+import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush, KeyRound, Users } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { fetchOwnerPersonsCounts, type OwnerPersonsCounts } from '@/lib/owner-persons';
 import { usePermissions } from '@/lib/permissions-context';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
@@ -18,6 +21,9 @@ export default function OwnerHubPage() {
   const { customized, widgetsCustomized, names, label, codesCustomized } = useCustomization();
   const anyCustom = customized || widgetsCustomized || Object.keys(names).length > 0 || codesCustomized;
   const { profiles: permissionProfiles } = usePermissions();
+  const [supabase] = useState(() => createClient());
+  const [personsCounts, setPersonsCounts] = useState<OwnerPersonsCounts | null>(null);
+  useEffect(() => { fetchOwnerPersonsCounts(supabase).then(setPersonsCounts); }, [supabase]);
 
   return (
     <AppShell>
@@ -40,6 +46,28 @@ export default function OwnerHubPage() {
         <section id="owner-tools" className="mb-5">
           <h3 className="mb-2 text-sm font-extrabold text-slate-500">أدوات التحكم</h3>
           <div className="card !p-0 divide-y divide-indigo-50 overflow-hidden">
+            <Link
+              id="owner-persons-link"
+              href="/owner/persons"
+              className="flex items-center gap-3 px-4 py-3.5 hover:bg-indigo-50/50 transition"
+            >
+              <span className="rounded-xl bg-slate-50 p-2">
+                <Users className="h-5 w-5 text-gold-600" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-bold text-sm">إدارة الأفراد</span>
+                <span className="block text-xs text-slate-400 truncate">
+                  كل الأشخاص وتسجيلاتهم — تصفية · تحديد متعدد · إضافة إلى فصول · حذف
+                </span>
+              </span>
+              {personsCounts && (
+                <span className="badge bg-gold-100 text-gold-700 tabular-nums">
+                  {personsCounts.total} شخص{personsCounts.unenrolled ? ` · ${personsCounts.unenrolled} بدون تسجيل` : ''}
+                </span>
+              )}
+              <ChevronLeft className="h-4 w-4 text-slate-300" />
+            </Link>
+
             <Link
               id="owner-modules-link"
               href="/owner/modules"
