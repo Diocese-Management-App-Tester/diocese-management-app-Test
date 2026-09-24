@@ -11,7 +11,7 @@ import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import type { Church, Service, ClassRoom } from '@/lib/types';
 import type { CardTemplate } from '@/lib/card-types';
-import { DEFAULT_DESIGN, DEFAULT_PRINT_SETTINGS } from '@/lib/card-types';
+import { DEFAULT_DESIGN, DEFAULT_PRINT_SETTINGS, hasBack } from '@/lib/card-types';
 import BoundPrintTab from '@/components/cards/BoundPrintTab';
 import { useNavLabel } from '@/lib/customization-context';
 import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
@@ -142,7 +142,10 @@ export default function CardTemplatesPage() {
                 <IdCard className="h-6 w-6 text-primary-500" />
               </div>
               <Link href={`/settings/cards/${t.id}`} className="min-w-0 flex-1">
-                <p className="font-extrabold truncate">{t.name}</p>
+                <p className="flex items-center gap-1.5 font-extrabold truncate">
+                  <span className="truncate">{t.name}</span>
+                  {hasBack(t.design) && <span className="badge shrink-0 bg-violet-50 text-violet-600 !py-0 text-[10px]">وجه + ظهر</span>}
+                </p>
                 {scopeBadge(t) && <p className="mt-0.5 text-[11px] text-slate-400">{scopeBadge(t)}</p>}
               </Link>
               <button

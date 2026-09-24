@@ -91,16 +91,56 @@ export interface CardBackground {
   offsetY: number; // % of card height: 0 = centered, +down / -up
 }
 
+// ----- one face of the card (front or back) -----
+export type CardSide = 'front' | 'back';
+export const CARD_SIDE_LABELS: Record<CardSide, string> = { front: 'الوجه', back: 'الظهر' };
+
+export interface CardFace {
+  background: CardBackground;
+  border: { enabled: boolean; color: string; width: number }; // width mm
+  elements: CardElement[];
+  // mirror the whole face (useful for transfer / transparent media). Optional
+  // so designs saved before this feature keep loading — normalizeDesign fills.
+  flipH?: boolean; // mirror left ↔ right
+  flipV?: boolean; // mirror top ↔ bottom
+}
+
+// Back face: same engine as the front + an enabled switch. The card size
+// (width / height / corner radius) is shared with the front.
+export interface CardBack extends CardFace {
+  enabled: boolean;
+}
+
 // ----- whole design -----
-export interface CardDesign {
+// The top-level background / border / elements ARE the front face (kept flat
+// for backward compatibility with every stored template); the back lives in
+// `back` (optional in old rows — normalizeDesign always fills it).
+export interface CardDesign extends CardFace {
   version: 1;
   width: number; // mm
   height: number; // mm
   cornerRadius: number; // mm
-  background: CardBackground;
-  border: { enabled: boolean; color: string; width: number }; // width mm
-  elements: CardElement[];
+  back?: CardBack;
 }
+
+// does this design have a printable back?
+export const hasBack = (d: CardDesign | null | undefined): boolean => !!d?.back?.enabled;
+
+// The design of ONE face as a stand-alone CardDesign (same size), so every
+// renderer keeps taking a plain CardDesign. Front → the design itself.
+export const faceDesign = (d: CardDesign, side: CardSide): CardDesign => {
+  if (side === 'front') return d;
+  const b = d.back ?? DEFAULT_BACK;
+  return {
+    ...d,
+    background: b.background,
+    border: b.border,
+    elements: b.elements,
+    flipH: b.flipH ?? false,
+    flipV: b.flipV ?? false,
+    back: undefined,
+  };
+};
 
 // ----- print settings -----
 export type PaperSize = 'A4' | 'A3' | 'A5' | 'Letter' | 'custom';
@@ -121,9 +161,39 @@ export const V_ALIGN_LABELS: Record<VAlign, string> = {
   bottom: 'أسفل',
 };
 
+// ----- back-side printing -----
+// none      → front only (even when the design has a back)
+// separate  → a page of fronts followed by a page of backs (duplex printing)
+// beside    → back printed next to the front (same page, one row)
+// below     → back printed under the front (same page, one column)
+export type BackPrintMode = 'none' | 'separate' | 'beside' | 'below';
+export const BACK_MODE_LABELS: Record<BackPrintMode, string> = {
+  none: 'بدون ظهر',
+  separate: 'صفحة منفصلة (وجه ثم ظهر)',
+  beside: 'بجانب الوجه',
+  below: 'أسفل الوجه',
+};
+
+// How the back page is mirrored so it lands behind its front after the
+// paper is turned over: horizontal = the printer flips on the long edge
+// (usual for portrait), vertical = flip on the short edge.
+export type DuplexMirror = 'none' | 'horizontal' | 'vertical';
+export const DUPLEX_MIRROR_LABELS: Record<DuplexMirror, string> = {
+  horizontal: 'أفقي (قلب على الحافة الطويلة)',
+  vertical: 'رأسي (قلب على الحافة القصيرة)',
+  none: 'بدون انعكاس',
+};
+
 export interface CardPrintSettings {
   version: 1;
   paper: PaperSize;
+  // ----- back side (see BackPrintMode) — optional so old rows / profiles load -----
+  backMode?: BackPrintMode;
+  duplexMirror?: DuplexMirror; // separate mode only
+  backGap?: number; // mm between front and back (beside / below)
+  // mirror the WHOLE printed page (preview + print)
+  flipPageH?: boolean;
+  flipPageV?: boolean;
   // page center guide lines (previewed AND printed)
   centerLineV: boolean; // vertical center line of the page
   centerLineH: boolean; // horizontal center line of the page
@@ -283,6 +353,36 @@ export const newElement = (type: CardElementType, partial?: Partial<CardElement>
   ...partial,
 });
 
+// Empty, disabled back — every design gets one through normalizeDesign
+export const DEFAULT_BACK: CardBack = {
+  enabled: false,
+  background: {
+    color: '#ffffff', imageUrl: null, imageFit: 'cover', imageOpacity: 1,
+    zoom: 1, offsetX: 0, offsetY: 0,
+  },
+  border: { enabled: true, color: '#1e3a8a', width: 0.5 },
+  elements: [],
+  flipH: false,
+  flipV: false,
+};
+
+// A ready-made back for a new template (church name + free text + QR)
+export const sampleBack = (width: number, height: number): CardBack => ({
+  ...DEFAULT_BACK,
+  enabled: true,
+  elements: [
+    newElement('constant', {
+      field: 'church_name', x: 4, y: 4, w: width - 8, h: 8,
+      style: { ...DEFAULT_TEXT_STYLE, fontSize: 10, color: '#1e3a8a' },
+    }),
+    newElement('text', {
+      text: 'هذا الكارت ملك للكنيسة — في حالة العثور عليه يُرجى تسليمه', x: 4, y: 14, w: width - 8, h: 10,
+      style: { ...DEFAULT_TEXT_STYLE, fontSize: 7, bold: false, color: '#64748b' },
+    }),
+    newElement('qr', { x: width / 2 - 8, y: Math.max(26, height - 22), w: 16, h: 16, borderRadius: 0 }),
+  ],
+});
+
 // Standard CR80 ID-card size (like a credit card)
 export const DEFAULT_DESIGN: CardDesign = {
   version: 1,
@@ -294,6 +394,9 @@ export const DEFAULT_DESIGN: CardDesign = {
     zoom: 1, offsetX: 0, offsetY: 0,
   },
   border: { enabled: true, color: '#1e3a8a', width: 0.5 },
+  flipH: false,
+  flipV: false,
+  back: DEFAULT_BACK,
   elements: [
     newElement('logo', { x: 3, y: 3, w: 12, h: 12, borderRadius: 6 }),
     newElement('constant', {
@@ -332,6 +435,9 @@ export const DEFAULT_BIRTHDAY_DESIGN: CardDesign = {
     zoom: 1, offsetX: 0, offsetY: 0,
   },
   border: { enabled: true, color: '#db2777', width: 0.8 },
+  flipH: false,
+  flipV: false,
+  back: DEFAULT_BACK,
   elements: [
     newElement('logo', { x: 4, y: 4, w: 16, h: 16, borderRadius: 8 }),
     newElement('constant', {
@@ -387,7 +493,30 @@ export const DEFAULT_PRINT_SETTINGS: CardPrintSettings = {
   cutMarks: false,
   alignH: 'center',
   alignV: 'top',
+  backMode: 'separate',
+  duplexMirror: 'horizontal',
+  backGap: 4,
+  flipPageH: false,
+  flipPageV: false,
 };
+
+const normalizeElements = (els: CardElement[] | undefined, fallback: CardElement[]): CardElement[] =>
+  (els ?? fallback).map((el) => ({
+    ...newElement(el.type ?? 'text'),
+    ...el,
+    style: { ...DEFAULT_TEXT_STYLE, ...(el.style ?? {}) },
+  }));
+
+export const normalizeBack = (b: Partial<CardBack> | null | undefined): CardBack => ({
+  ...DEFAULT_BACK,
+  ...b,
+  enabled: !!b?.enabled,
+  background: { ...DEFAULT_BACK.background, ...(b?.background ?? {}) },
+  border: { ...DEFAULT_BACK.border, ...(b?.border ?? {}) },
+  elements: normalizeElements(b?.elements, []),
+  flipH: !!b?.flipH,
+  flipV: !!b?.flipV,
+});
 
 // merge stored JSON (may be partial / old) over defaults
 export const normalizeDesign = (d: Partial<CardDesign> | null | undefined): CardDesign => ({
@@ -395,11 +524,10 @@ export const normalizeDesign = (d: Partial<CardDesign> | null | undefined): Card
   ...d,
   background: { ...DEFAULT_DESIGN.background, ...(d?.background ?? {}) },
   border: { ...DEFAULT_DESIGN.border, ...(d?.border ?? {}) },
-  elements: (d?.elements ?? DEFAULT_DESIGN.elements).map((el) => ({
-    ...newElement(el.type ?? 'text'),
-    ...el,
-    style: { ...DEFAULT_TEXT_STYLE, ...(el.style ?? {}) },
-  })),
+  elements: normalizeElements(d?.elements, DEFAULT_DESIGN.elements),
+  flipH: !!d?.flipH,
+  flipV: !!d?.flipV,
+  back: normalizeBack(d?.back),
 });
 
 export const normalizePrint = (p: Partial<CardPrintSettings> | null | undefined): CardPrintSettings => ({
@@ -434,6 +562,11 @@ export const describePrintSettings = (s: CardPrintSettings, card?: { width: numb
   if (s.gapX || s.gapY) parts.push(`فراغ ${s.gapX}×${s.gapY}`);
   if (s.cutMarks) parts.push('قص');
   if (s.centerLineV || s.centerLineH) parts.push('منتصف');
+  const bm = s.backMode ?? 'separate';
+  if (bm === 'separate') parts.push('ظهر منفصل');
+  else if (bm === 'beside') parts.push('ظهر بجانب');
+  else if (bm === 'below') parts.push('ظهر أسفل');
+  if (s.flipPageH || s.flipPageV) parts.push('قلب صفحة');
   return parts.join(' · ');
 };
 

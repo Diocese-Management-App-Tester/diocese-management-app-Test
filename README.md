@@ -563,17 +563,69 @@ church / service / class (with "كل الـ..." options) without redesigning.
 - Per-element **box background** (color + opacity) and **stroke** (border that follows the element's rounded corners, color + width in mm)
 - **Lock aspect ratio** per element (resize handles + W/H inputs keep the ratio; QR defaults to locked)
 
+### Card back (ظهر الكارت) + flips — no migration needed
+Every template can carry a **back face** designed with the same engine as the
+front. Stored inside the existing `design` JSONB: the top-level
+`background / border / elements` **are the front** (unchanged, so every stored
+template keeps working); the back lives in `design.back = { enabled,
+background, border, elements, flipH, flipV }` (`normalizeDesign` fills it for
+old rows; `hasBack(design)`; `faceDesign(design, 'front' | 'back')` returns one
+face as a stand-alone `CardDesign` so every renderer keeps taking a plain
+design). Types in `src/lib/card-types.ts`, layout math in
+`src/lib/card-layout.ts`, shared print renderers in
+`src/components/cards/PrintSheet.tsx`.
+
+**Design tab** — the live preview shows **الوجه and الظهر next to each other**
+(same size, same zoom); the face being edited has a ring and is the
+interactive one (drag / handles), tapping the other face switches to it. A
+**وجهي الكارت** card has the **الوجه | الظهر** selector, «إضافة ظهر للكارت»
+(seeds a sample back: church name · free text · QR, with the front's border),
+«إلغاء الظهر», «نسخ الوجه إلى الظهر / نسخ الظهر إلى الوجه» (new element ids),
+«مسح عناصر الظهر». Every section below it (الخلفية · الإطار · العناصر ·
+inspector) works on the **selected face**; the card size is shared. The
+templates list shows a **«وجه + ظهر»** badge.
+
+**Flip (قلب) a face** — per face **قلب أفقي** (`flipH`) / **قلب رأسي**
+(`flipV`) mirror the whole face content (for transparent / thermal-transfer
+media). `CardCanvas` applies the mirror to the content layer only; the
+selection box, the handles and drag / resize deltas are mapped so the designer
+keeps working in the *seen* direction.
+
+**Print tab → ظهر الكارت** (`CardPrintSettings.backMode`, saved with the
+template and inside **ملفات الطباعة**):
+- **صفحة منفصلة (وجه ثم ظهر)** `separate` — a page of fronts is followed by a
+  page of backs; the back page is **mirrored about the page centre**
+  (`duplexMirror`: **أفقي** = flip on the long edge, usual for portrait ·
+  **رأسي** = short edge · **بدون انعكاس**) so each back lands behind its front
+  after duplexing. The preview shows both pages side by side; the page counter
+  reads «N كارت ← 2M صفحة (M وجه + M ظهر)».
+- **بجانب الوجه** `beside` — front (right) + back (left) in the same grid cell,
+  `backGap` mm between them (0 = fold line).
+- **أسفل الوجه** `below` — back under the front, same gap.
+- **بدون ظهر** `none` — front only even when the design has a back.
+A design without a back always prints as `none`. **قلب الصفحة كاملة**
+(`flipPageH` / `flipPageV`) mirrors everything printed (preview + sheet).
+Grid math: one cell = one *unit* (`unitDims`), `computeLayout()` gives
+`cols × rows`, `cellLeft/Top` and the mirrored `backCellLeft/Top`.
+The same panel (`BackPrintSettings`), preview (`PagePreview`) and hidden sheet
+(`PrintSheet`) are used by the designer print tab, the bound print page
+(`/settings/cards → الطباعة` — cell = the largest unit among the bound
+designs, `separate` when any printed design has a back), the **bulk print**
+tab (its preview shows front + back; `{{placeholders}}` on the back are
+detected too) and the **birthday-card** print tab.
+
 **Print tab**: paper size (A3/A4/A5/Letter/custom), orientation, 4 margins,
 horizontal & vertical gaps between cards, cut marks, **page center lines**
-(vertical / horizontal / both — shown in preview AND printed), live page preview
-with computed cols×rows layout — prints via a mm-exact hidden sheet (`@page`
-sized, browser print dialog).
+(vertical / horizontal / both — shown in preview AND printed), **back side
+mode + page flip** (above), live page preview with computed cols×rows layout
+— prints via a mm-exact hidden sheet (`@page` sized, browser print dialog).
 
 **ملفات الطباعة المحفوظة — saved print profiles (migration 0049)**: the bar at the
 top of every print tab (designer print tab · bound print page `/settings/cards →
 الطباعة` · birthday-card print tab) lists the profiles in table
 `card_print_profiles` — a **named copy of the print settings** (paper ·
-orientation · margins · gaps · alignment · cut marks · center lines).
+orientation · margins · gaps · alignment · cut marks · center lines · back
+mode / duplex mirror / page flip).
 **حفظ كملف** saves the current settings under a name + scope (church →
 service → class; the owner can save a **مشترك** profile with `church_id NULL`
 visible to everyone); **تطبيق** copies a profile into the template / page

@@ -1,20 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { Loader2, Printer, Search, CheckSquare, Square, Users, Inbox, Trash2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllEnrollments, cachedLookup } from '@/lib/queries';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import type { Church, Service, ClassRoom, EnrollmentWithPerson, CardPrintRequest } from '@/lib/types';
 import type { CardDesign, CardPrintSettings, CardTemplate, PaperSize, PaperOrientation } from '@/lib/card-types';
-import { PAPER_SIZES, paperDims, H_ALIGN_LABELS, V_ALIGN_LABELS } from '@/lib/card-types';
+import { PAPER_SIZES, H_ALIGN_LABELS, V_ALIGN_LABELS, BACK_MODE_LABELS } from '@/lib/card-types';
 import type { HAlign, VAlign } from '@/lib/card-types';
-import CardCanvas, { type CardConstantsData, type CardPersonData } from './CardCanvas';
+import { type CardConstantsData, type CardPersonData } from './CardCanvas';
 import PrintProfilesBar from './PrintProfilesBar';
-
-// CSS defines 1in = 96px and 1in = 25.4mm → exact physical scale for print
-const MM_TO_PX = 96 / 25.4;
+import { BackPrintSettings, PagePreview, PrintSheet, type SheetItem } from './PrintSheet';
+import { computeLayout, effectiveBackMode, paginate, sheetCount, unitDims } from '@/lib/card-layout';
 
 function Num({
   label, value, onChange, min = 0, max = 500, step = 1,
@@ -48,10 +46,7 @@ const enrollmentToCardData = (e: EnrollmentWithPerson): CardPersonData => ({
   image_url: e.person.image_url,
 });
 
-interface PrintItem {
-  key: string;
-  person: CardPersonData;
-  constants: CardConstantsData;
+interface PrintItem extends SheetItem {
   requestId?: string;
 }
 
@@ -231,7 +226,7 @@ export default function PrintTab({
     if (source === 'manual') {
       return scopedEnrollments
         .filter((e) => selected.has(e.id))
-        .map((e) => ({ key: e.id, person: enrollmentToCardData(e), constants: constantsFor(e) }));
+        .map((e) => ({ key: e.id, person: enrollmentToCardData(e), constants: constantsFor(e), design }));
     }
     // requested: checked requests, or ALL scoped requests when none checked
     const reqs = selectedReq.size > 0 ? scopedRequests.filter((r) => selectedReq.has(r.id)) : scopedRequests;
@@ -239,35 +234,28 @@ export default function PrintTab({
     reqs.forEach((r) => {
       const e = enrollmentById.get(r.enrollment_id);
       if (!e) return;
-      items.push({ key: r.id, person: enrollmentToCardData(e), constants: constantsFor(e), requestId: r.id });
+      items.push({ key: r.id, person: enrollmentToCardData(e), constants: constantsFor(e), requestId: r.id, design });
     });
     return items;
-  }, [source, scopedEnrollments, selected, selectedReq, scopedRequests, enrollmentById, constantsFor]);
+  }, [source, scopedEnrollments, selected, selectedReq, scopedRequests, enrollmentById, constantsFor, design]);
 
   const printCount = printItems.length;
 
-  // ---------- layout math ----------
-  const paper = paperDims(settings);
-  const usableW = paper.w - settings.marginRight - settings.marginLeft;
-  const usableH = paper.h - settings.marginTop - settings.marginBottom;
-  const cols = Math.max(0, Math.floor((usableW + settings.gapX) / (design.width + settings.gapX)));
-  const rows = Math.max(0, Math.floor((usableH + settings.gapY) / (design.height + settings.gapY)));
-  const perPage = cols * rows;
+  // ---------- layout math (shared with every print tab) ----------
+  // one grid cell = the printed unit: front alone, or front + back beside / below
+  const backMode = effectiveBackMode(design, settings);
+  const unit = unitDims(design, settings);
+  const layout = computeLayout(settings, unit.w, unit.h);
+  const { paper, cols, rows, perPage } = layout;
   const pages = perPage > 0 ? Math.ceil(Math.max(printCount, 1) / perPage) : 0;
-
-  // grid alignment inside the printable area (mm offsets added to margins)
-  const gridW = cols > 0 ? cols * design.width + (cols - 1) * settings.gapX : 0;
-  const gridH = rows > 0 ? rows * design.height + (rows - 1) * settings.gapY : 0;
+  const sheets = sheetCount(pages, backMode);
   const alignH = settings.alignH ?? 'center';
   const alignV = settings.alignV ?? 'top';
-  const offsetX = alignH === 'left' ? 0 : alignH === 'center' ? (usableW - gridW) / 2 : usableW - gridW;
-  const offsetY = alignV === 'top' ? 0 : alignV === 'center' ? (usableH - gridH) / 2 : usableH - gridH;
-  // physical left/top of cell (col, row) in mm
-  const cellLeft = (col: number) => settings.marginLeft + offsetX + col * (design.width + settings.gapX);
-  const cellTop = (row: number) => settings.marginTop + offsetY + row * (design.height + settings.gapY);
 
-  // preview scale (fit paper into ~330px width)
-  const previewScale = Math.min(330 / paper.w, 420 / paper.h);
+  // preview scale (fit paper into ~330px width; two pages side by side in separate mode)
+  const previewScale = backMode === 'separate'
+    ? Math.min(160 / paper.w, 260 / paper.h)
+    : Math.min(330 / paper.w, 420 / paper.h);
 
   const doPrint = () => {
     setPrinting(true);
@@ -285,14 +273,7 @@ export default function PrintTab({
   };
 
   // pages of items for print
-  const printPages = useMemo(() => {
-    if (perPage === 0) return [];
-    const out: PrintItem[][] = [];
-    for (let i = 0; i < printItems.length; i += perPage) {
-      out.push(printItems.slice(i, i + perPage));
-    }
-    return out;
-  }, [printItems, perPage]);
+  const printPages = useMemo(() => paginate(printItems, perPage), [printItems, perPage]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -438,77 +419,27 @@ export default function PrintTab({
 
         <div className="mt-3 rounded-xl bg-indigo-50/60 p-3 text-xs font-bold text-slate-600">
           التخطيط: <span className="text-primary-700">{cols} × {rows}</span> = {perPage} كارت في الصفحة
+          {backMode !== 'none' && <> · <span className="text-violet-700">{BACK_MODE_LABELS[backMode]}</span></>}
           {printCount > 0 && perPage > 0 && (
-            <> · {printCount} كارت ← <span className="text-primary-700">{pages} صفحة</span></>
+            <> · {printCount} كارت ← <span className="text-primary-700">{sheets} صفحة</span>{backMode === 'separate' && <span className="text-slate-400"> ({pages} وجه + {pages} ظهر)</span>}</>
           )}
           {perPage === 0 && <span className="text-red-500"> — الكارت أكبر من مساحة الورقة!</span>}
         </div>
       </section>
 
+      {/* ---------- back side + page flip ---------- */}
+      <BackPrintSettings settings={settings} onChange={set} design={design} />
+
       {/* ---------- page preview (frozen at top while scrolling) ---------- */}
-      <section className="card !p-3 sticky top-[76px] z-30 !shadow-lg order-first">
-        <p className="mb-2 text-xs font-extrabold text-slate-400">
-          معاينة الصفحة الأولى — {cols}×{rows} · {H_ALIGN_LABELS[alignH]} / {V_ALIGN_LABELS[alignV]}
-        </p>
-        <div className="flex justify-center overflow-x-auto py-1" dir="ltr">
-          <div
-            className="relative bg-white shadow-lg ring-1 ring-slate-200"
-            style={{ width: paper.w * previewScale, height: paper.h * previewScale }}
-          >
-            {/* margin guides */}
-            <div
-              className="absolute border border-dashed border-indigo-200"
-              style={{
-                top: settings.marginTop * previewScale,
-                bottom: settings.marginBottom * previewScale,
-                left: settings.marginLeft * previewScale,
-                right: settings.marginRight * previewScale,
-              }}
-            />
-            {/* page center lines */}
-            {settings.centerLineV && (
-              <div
-                className="absolute top-0 bottom-0 z-10 border-l border-dashed border-pink-400"
-                style={{ left: (paper.w / 2) * previewScale }}
-              />
-            )}
-            {settings.centerLineH && (
-              <div
-                className="absolute left-0 right-0 z-10 border-t border-dashed border-pink-400"
-                style={{ top: (paper.h / 2) * previewScale }}
-              />
-            )}
-            {perPage > 0 && Array.from({ length: perPage }).map((_, i) => {
-              const col = i % cols;
-              const row = Math.floor(i / cols);
-              const item = printItems[i];
-              return (
-                <div
-                  key={i}
-                  className="absolute"
-                  style={{
-                    left: cellLeft(col) * previewScale,
-                    top: cellTop(row) * previewScale,
-                  }}
-                >
-                  {item ? (
-                    <CardCanvas design={design} scale={previewScale} person={item.person} constants={item.constants} />
-                  ) : (
-                    <div
-                      className="border border-dashed border-slate-200 bg-slate-50/60"
-                      style={{
-                        width: design.width * previewScale,
-                        height: design.height * previewScale,
-                        borderRadius: design.cornerRadius * previewScale,
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
+      <PagePreview
+        items={printItems.slice(0, perPage)}
+        layout={layout}
+        settings={settings}
+        previewScale={previewScale}
+        placeholderDesign={design}
+        showBackPage={backMode === 'separate'}
+        title={<>معاينة الصفحة الأولى — {cols}×{rows} · {H_ALIGN_LABELS[alignH]} / {V_ALIGN_LABELS[alignV]}{backMode !== 'none' && <> · {BACK_MODE_LABELS[backMode]}</>}</>}
+      />
 
       {/* ---------- who to print ---------- */}
       <section className="card">
@@ -734,80 +665,21 @@ export default function PrintTab({
         className="btn-primary w-full flex items-center justify-center gap-2"
       >
         {printing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Printer className="h-5 w-5" />}
-        طباعة {printCount > 0 ? `(${printCount} كارت — ${pages} صفحة)` : ''}
+        طباعة {printCount > 0 ? `(${printCount} كارت — ${sheets} صفحة)` : ''}
       </button>
       <p className="pb-2 text-center text-[11px] font-bold text-slate-400">
         في نافذة الطباعة: اختر نفس مقاس الورق ({settings.paper === 'custom' ? 'مخصص' : settings.paper})
         واضبط الهوامش على «بلا / None» والمقياس على 100%.
+        {backMode === 'separate' && ' للطباعة على الوجهين: فعّل «طباعة على الوجهين / Duplex» أو اطبع الصفحات الفردية ثم أعد الورق واطبع الزوجية.'}
       </p>
 
       {/* ---------- hidden print sheet (portal to body) ---------- */}
-      {typeof document !== 'undefined' && createPortal(
-        <div id="card-print-root" dir="rtl">
-          <style>{`
-            #card-print-root { display: none; }
-            @media print {
-              body > *:not(#card-print-root) { display: none !important; }
-              #card-print-root { display: block !important; }
-              @page { size: ${paper.w}mm ${paper.h}mm; margin: 0; }
-              html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
-              .card-print-page {
-                width: ${paper.w}mm;
-                height: ${paper.h}mm;
-                position: relative;
-                overflow: hidden;
-                page-break-after: always;
-                break-after: page;
-              }
-              .card-print-page:last-child { page-break-after: auto; break-after: auto; }
-              .card-print-cell { position: absolute; }
-              .card-print-centerline { position: absolute; background: #94a3b8; }
-              * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            }
-          `}</style>
-          {printPages.map((pageItems, pi) => (
-            <div key={pi} className="card-print-page">
-              {settings.centerLineV && (
-                <div
-                  className="card-print-centerline"
-                  style={{ left: `${paper.w / 2}mm`, top: 0, width: '0.2mm', height: `${paper.h}mm` }}
-                />
-              )}
-              {settings.centerLineH && (
-                <div
-                  className="card-print-centerline"
-                  style={{ top: `${paper.h / 2}mm`, left: 0, height: '0.2mm', width: `${paper.w}mm` }}
-                />
-              )}
-              {pageItems.map((item, i) => {
-                const col = i % cols;
-                const row = Math.floor(i / cols);
-                return (
-                  <div
-                    key={item.key}
-                    className="card-print-cell"
-                    style={{
-                      left: `${cellLeft(col)}mm`,
-                      top: `${cellTop(row)}mm`,
-                      outline: settings.cutMarks ? '0.2mm solid #cbd5e1' : undefined,
-                      width: `${design.width}mm`,
-                      height: `${design.height}mm`,
-                    }}
-                  >
-                    <CardCanvas
-                      design={design}
-                      scale={MM_TO_PX}
-                      person={item.person}
-                      constants={item.constants}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>,
-        document.body
-      )}
+      <PrintSheet
+        pages={printPages}
+        layout={layout}
+        settings={settings}
+        backPages={backMode === 'separate'}
+      />
     </div>
   );
 }

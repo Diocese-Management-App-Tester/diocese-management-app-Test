@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, ChevronLeft, ChevronsRight, ChevronsLeft, Printer, ZoomIn, ZoomOut } from 'lucide-react';
 import type { CardDesign } from '@/lib/card-types';
+import { hasBack, faceDesign, CARD_SIDE_LABELS } from '@/lib/card-types';
 import type { CardConstantsData, CardPersonData } from './CardCanvas';
 import CardCanvas from './CardCanvas';
 import type { BulkColumn, BulkRow } from '@/lib/bulk-print';
@@ -65,10 +66,21 @@ export default function BulkPreviewPane({
           </div>
         </div>
 
-        <div className="flex justify-center overflow-auto py-2" dir="ltr" style={{ maxHeight: 420 }}>
-          <div className="shadow-lg ring-1 ring-slate-200" style={{ borderRadius: design.cornerRadius * scale }}>
-            <CardCanvas design={design} scale={scale} person={data.person} constants={data.constants} />
+        <div className="flex flex-wrap items-start justify-center gap-3 overflow-auto py-2" dir="rtl" style={{ maxHeight: 420 }}>
+          <div className="flex flex-col items-center gap-1">
+            {hasBack(design) && <span className="badge bg-slate-100 text-slate-500 !py-0">{CARD_SIDE_LABELS.front}</span>}
+            <div className="shadow-lg ring-1 ring-slate-200" style={{ borderRadius: design.cornerRadius * scale }} dir="ltr">
+              <CardCanvas design={design} scale={scale} person={data.person} constants={data.constants} />
+            </div>
           </div>
+          {hasBack(design) && (
+            <div className="flex flex-col items-center gap-1">
+              <span className="badge bg-slate-100 text-slate-500 !py-0">{CARD_SIDE_LABELS.back}</span>
+              <div className="shadow-lg ring-1 ring-slate-200" style={{ borderRadius: design.cornerRadius * scale }} dir="ltr">
+                <CardCanvas design={faceDesign(design, 'back')} scale={scale} person={data.person} constants={data.constants} />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* navigation */}
