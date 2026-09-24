@@ -11,7 +11,7 @@ import {
   Coins, PhoneCall, IdCard, ClipboardList, KeyRound, HeartHandshake, ShoppingBag, GraduationCap, Cake,
   MessageCircle, Video, Trophy, Tent, Bell, Settings, ClipboardCheck, Percent, Library, Database, LogIn,
   LogOut, Activity, Crown, FileSpreadsheet, Printer, ScanLine, Eye, Trash2, Pencil, Plus, Lock, Unlock,
-  Ban, CheckCircle2, XCircle, Pause, Play, ArrowLeftRight, Cog, History, Globe,
+  Ban, CheckCircle2, XCircle, Pause, Play, ArrowLeftRight, Cog, History, Globe, UsersRound,
 } from 'lucide-react';
 
 // ---------- row ----------
@@ -163,6 +163,8 @@ export const ACTIVITY_GROUPS: ActivityGroup[] = [
   { key: 'library_book', label: 'كتب المكتبة', icon: Library, color: 'text-lime-600', bg: 'bg-lime-50' },
   { key: 'library_lecture', label: 'محاضرات المكتبة', icon: Library, color: 'text-lime-600', bg: 'bg-lime-50' },
   { key: 'library_favorite', label: 'مفضلة المكتبة', icon: Library, color: 'text-lime-500', bg: 'bg-lime-50' },
+  { key: 'families', label: 'العائلات', icon: UsersRound, color: 'text-teal-700', bg: 'bg-teal-50' },
+  { key: 'family_members', label: 'أفراد العائلات', icon: UsersRound, color: 'text-teal-600', bg: 'bg-teal-50' },
   { key: 'backup', label: 'النسخ الاحتياطي', icon: Database, color: 'text-slate-700', bg: 'bg-slate-100' },
   { key: 'backup_schedule', label: 'جداول النسخ الاحتياطي', icon: Database, color: 'text-slate-600', bg: 'bg-slate-100' },
   { key: 'backup_restore_jobs', label: 'استرجاع النسخ', icon: Database, color: 'text-slate-700', bg: 'bg-slate-100' },
@@ -256,7 +258,7 @@ const NOUNS: Record<string, string> = {
   notification: 'إشعار', notification_automation: 'إشعار تلقائي', setting: 'إعداد', result_exam: 'امتحان نتائج',
   result_subject: 'مادة', result: 'درجة', grading: 'نظام تقدير', grading_grade: 'شريحة تقدير', library_subject: 'موضوع مكتبة',
   library_book: 'كتاب', library_lecture: 'محاضرة', library_favorite: 'مفضلة', backup: 'نسخة احتياطية',
-  backup_schedule: 'جدول نسخ', backup_restore_jobs: 'استرجاع نسخة',
+  backup_schedule: 'جدول نسخ', backup_restore_jobs: 'استرجاع نسخة', families: 'عائلة', family_members: 'فرد عائلة',
 };
 
 // ---------- column labels (for the diff view) ----------

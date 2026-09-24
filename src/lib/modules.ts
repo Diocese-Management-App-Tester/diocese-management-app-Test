@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, UsersRound, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports' | 'family';
 
 export interface AppModule {
   key: ModuleKey;
@@ -150,6 +150,15 @@ export const MODULES: AppModule[] = [
     icon: FileBarChart2,
     color: 'text-fuchsia-600',
     paths: ['/reports'],
+  },
+  {
+    key: 'family',
+    label: 'العائلات',
+    desc: 'عائلات من المخدومين والخدام: أضف الأفراد بمسح كود كل واحد (QR) — وعند مسح كود أي فرد في الماسح تظهر كل العائلة لاختيار الشخص والخدمة المطلوبة، مع التعرف على الخدمة التي حضرها اليوم',
+    href: '/family',
+    icon: UsersRound,
+    color: 'text-teal-700',
+    paths: ['/family'],
   },
 ];
 

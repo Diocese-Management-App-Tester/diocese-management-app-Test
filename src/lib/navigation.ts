@@ -62,7 +62,7 @@ const MODULE_ICON_NAMES: Record<string, string> = {
   cards: 'IdCard', shepherds: 'HeartHandshake', store: 'ShoppingBag', exams: 'GraduationCap',
   birthdays: 'Cake', messages: 'MessageCircle', online: 'Video', achievements: 'Trophy',
   occasions: 'Tent', notifications: 'Bell', results: 'ClipboardCheck', library: 'Library', activity: 'History',
-  reports: 'FileBarChart2',
+  reports: 'FileBarChart2', family: 'UsersRound',
 };
 
 const moduleDest = (m: AppModule): NavDestination => ({

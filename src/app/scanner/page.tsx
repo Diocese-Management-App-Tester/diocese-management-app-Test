@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   ScanLine, Camera, CameraOff, CheckCircle2, AlertCircle, Search, Star, Loader2, School,
   Check, X, Plus, Minus, Eye, Database, CalendarCheck, Calculator, History,
-  UserCheck, UserX, CircleDashed, Settings2, Ban,
+  UserCheck, UserX, CircleDashed, Settings2, Ban, UsersRound,
 } from 'lucide-react';
 import Link from 'next/link';
 import AppShell from '@/components/AppShell';
@@ -29,6 +29,9 @@ import { pickScopedDefault } from '@/lib/defaults';
 import { onBusTable } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
 import { nativeDetector, decodeVideoFrame } from '@/lib/qr-decode';
+import { useModuleVisible } from '@/lib/modules-context';
+import { lookupFamily, type FamilyLookup } from '@/lib/families';
+import FamilyScanPicker, { useAutoServiceSetting } from '@/components/family/FamilyScanPicker';
 
 // ---------- Scanner jobs — same system as the children page ----------
 // Attendance / points / data. Calls, messages and card printing don't make
@@ -134,6 +137,14 @@ export default function ScannerPage() {
   const [searchRows, setSearchRows] = useState<EnrollmentWithPerson[]>([]);
   const [searching, setSearching] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Family module (العائلات): when the scanned code belongs to a person WITH a
+  // family (or is a family code) the family picker opens instead of acting
+  // on the scanned person directly. Switchable from the control panel.
+  const familyModule = useModuleVisible('family');
+  const [familyMode, setFamilyMode] = useState(true);
+  const [autoService, setAutoService] = useAutoServiceSetting();
+  const [familyPick, setFamilyPick] = useState<FamilyLookup | null>(null);
 
   // Modals
   const [picker, setPicker] = useState<{ person: Person; options: EnrollmentWithPerson[] } | null>(null);
@@ -550,6 +561,23 @@ export default function ScannerPage() {
   const handleQr = useCallback(
     async (qrValue: string) => {
       const nationalId = qrValue.trim();
+
+      // ---- Family module: person with a family / family code → picker ----
+      if (familyModule && familyMode) {
+        try {
+          const fam = await lookupFamily(supabase, nationalId, cairoToday(now()));
+          if (fam.matched === 'family' || (fam.matched === 'person' && fam.family)) {
+            setResult(null);
+            setPicker(null);
+            setFamilyPick(fam);
+            return;
+          }
+          // matched a lone person (no family) → fall through to the normal flow
+        } catch {
+          // migration not applied / no permission → normal flow
+        }
+      }
+
       const { data, error } = await supabase.rpc('lookup_enrollments_by_national_id', {
         p_national_id: nationalId,
       });
@@ -579,14 +607,24 @@ export default function ScannerPage() {
       setResult(null);
       setPicker({ person: mine[0].person, options: mine });
     },
-    [supabase, inScope, scopeLabel, doJob]
+    [supabase, inScope, scopeLabel, doJob, familyModule, familyMode, now]
+  );
+
+  // A member / enrollment was chosen in the family picker → run the job on
+  // it and close the picker (same path as a single scan)
+  const pickFromFamily = useCallback(
+    async (e: EnrollmentWithPerson) => {
+      setFamilyPick(null);
+      await doJob(e);
+    },
+    [doJob]
   );
 
   // Keep the scanning loop pointed at the LATEST handler (job / mode may
   // change while the camera is running). While a modal is open the camera
   // keeps running but scans are ignored, so a second QR in frame can never
   // hijack the open modal.
-  const modalOpen = !!manualTarget || !!dataTarget || !!picker || !!logTarget || !!callTarget || numpadFor !== null;
+  const modalOpen = !!manualTarget || !!dataTarget || !!picker || !!logTarget || !!callTarget || numpadFor !== null || !!familyPick;
   const handleQrRef = useRef<(v: string) => Promise<void>>(handleQr);
   handleQrRef.current = modalOpen ? async () => {} : handleQr;
 
@@ -1048,6 +1086,33 @@ export default function ScannerPage() {
           )}
         </div>
 
+        {/* Family mode switch (العائلات) */}
+        {familyModule && (
+          <label
+            id="family-mode"
+            className={`mb-2 flex cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-bold transition ${
+              familyMode ? 'bg-teal-50 text-teal-700' : 'bg-slate-50 text-slate-500'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <UsersRound className="h-4 w-4 shrink-0" />
+              <span>
+                العائلات: عند مسح كود فرد من عائلة تظهر كل العائلة لاختيار الشخص والخدمة
+                <span className="block text-[10px] font-bold opacity-70">
+                  {autoService ? 'التعرف على الخدمة التي حضرها اليوم: مفعّل' : 'عند تعدد الخدمات يُسأل دائماً'}
+                </span>
+              </span>
+            </span>
+            <input
+              id="family-mode-switch"
+              type="checkbox"
+              className="h-5 w-5 shrink-0 accent-teal-600"
+              checked={familyMode}
+              onChange={(e) => { setFamilyMode(e.target.checked); setResult(null); }}
+            />
+          </label>
+        )}
+
         {/* Hints / warnings */}
         {attendanceForbidden && eventAvail && (
           <p id="event-time-warning" className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
@@ -1286,6 +1351,21 @@ export default function ScannerPage() {
           now={now}
           onRecorded={(day, fbId) => callFb.setRecorded(callTarget.id, day, fbId)}
           onClose={() => setCallTarget(null)}
+        />
+      )}
+
+      {/* ---------- Family picker (العائلات) ---------- */}
+      {familyPick && (
+        <FamilyScanPicker
+          lookup={familyPick}
+          inScope={inScope}
+          scopeLabel={scopeLabel}
+          serviceName={serviceName}
+          autoService={autoService}
+          onAutoServiceChange={setAutoService}
+          busyId={busyId}
+          onPick={pickFromFamily}
+          onClose={() => setFamilyPick(null)}
         />
       )}
 
