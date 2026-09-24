@@ -4,16 +4,17 @@
 // Tabs:
 //   العائلات  → every family visible to the caller (search), each with its
 //               members; create · edit · delete · show the family QR
-//   QR        → «إضافة أفراد بالمسح»: pick the family (or create one) then
-//               scan the members' individual codes one after the other
-// URL: /family?tab=list|qr[&family=<id>]
+//   إضافة أفراد → pick the family (or create one) then add members by
+//               scanning their codes · searching existing persons (name /
+//               phone / code) · creating a new person
+// URL: /family?tab=qr|list[&family=<id>]  (tab=qr kept for links)
 // The scanner (/scanner) resolves ANY member's code to the whole family.
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  UsersRound, QrCode, Plus, Search, Loader2, ArrowRight, ScanLine, ChevronDown, Info, Trash2, Lock,
+  UsersRound, Plus, Search, Loader2, ArrowRight, ScanLine, ChevronDown, Info, Trash2, Lock, UserPlus,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
@@ -25,7 +26,7 @@ import {
   type Family, type FamilyMemberWithPerson, type FamilyPermissions,
 } from '@/lib/families';
 import { FamilyCard, FamilyMemberRow, FamilyFormModal, FamilyCodeModal } from '@/components/family/FamilyBits';
-import AddMembersByQrPanel from '@/components/family/AddMembersByQrPanel';
+import AddMembersPanel from '@/components/family/AddMembersPanel';
 
 type Tab = 'list' | 'qr';
 
@@ -145,7 +146,7 @@ function FamilyModule() {
             <UsersRound className="h-5 w-5 text-teal-700" /> {pageName}
           </h2>
           <p className="mt-0.5 text-xs text-slate-500">
-            اجمع أفراد العائلة بأكوادهم — وعند مسح كود أي فرد في الماسح تظهر العائلة كلها لاختيار الشخص والخدمة
+            أنشئ العائلة بكودها، وأضف أفرادها بالمسح أو البحث أو إنشاء فرد جديد — وعند مسح كود أي فرد في الماسح تظهر العائلة كلها لاختيار الشخص والخدمة
           </p>
         </div>
         <Link href="/scanner" className="btn-secondary flex items-center gap-1.5 !py-2 !px-3 text-xs" title="الماسح">
@@ -163,7 +164,7 @@ function FamilyModule() {
       <div id="family-tabs" className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-teal-50 p-1">
         {([
           { key: 'list' as Tab, label: 'العائلات', icon: UsersRound },
-          { key: 'qr' as Tab, label: 'QR — إضافة أفراد', icon: QrCode },
+          { key: 'qr' as Tab, label: 'إضافة أفراد', icon: UserPlus },
         ]).map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
@@ -203,7 +204,7 @@ function FamilyModule() {
               <p className="font-bold text-slate-500">{families.length === 0 ? 'لا توجد عائلات بعد' : 'لا نتائج للبحث'}</p>
               {perms.manage && families.length === 0 && (
                 <button type="button" onClick={() => setForm({ open: true, family: null, thenQr: true })} className="btn-primary mt-4 inline-flex items-center gap-1.5 !py-2 !px-4 text-sm">
-                  <Plus className="h-4 w-4" /> أنشئ أول عائلة ثم امسح أكواد أفرادها
+                  <Plus className="h-4 w-4" /> أنشئ أول عائلة ثم أضف أفرادها
                 </button>
               )}
             </div>
@@ -230,7 +231,7 @@ function FamilyModule() {
                           <p className="mb-2 text-[11px] font-bold text-slate-500">{[f.address, f.notes].filter(Boolean).join(' · ')}</p>
                         )}
                         {ms.length === 0 ? (
-                          <p className="py-3 text-center text-xs font-bold text-slate-400">لا يوجد أفراد — {perms.manage ? 'اضغط زر الإضافة لمسح أكوادهم' : 'لم يُضَف أحد بعد'}</p>
+                          <p className="py-3 text-center text-xs font-bold text-slate-400">لا يوجد أفراد — {perms.manage ? 'اضغط «إضافة أفراد»' : 'لم يُضَف أحد بعد'}</p>
                         ) : (
                           <ul className="space-y-1.5">
                             {ms.map((m) => (
@@ -246,7 +247,7 @@ function FamilyModule() {
                         )}
                         {perms.manage && (
                           <button type="button" onClick={() => go('qr', f.id)} className="btn-secondary mt-3 flex w-full items-center justify-center gap-1.5 !py-2 text-sm">
-                            <QrCode className="h-4 w-4" /> إضافة أفراد بالمسح
+                            <UserPlus className="h-4 w-4" /> إضافة أفراد
                           </button>
                         )}
                       </div>
@@ -291,7 +292,7 @@ function FamilyModule() {
             </div>
 
             {qrFamily ? (
-              <AddMembersByQrPanel
+              <AddMembersPanel
                 key={qrFamily.id}
                 family={qrFamily}
                 members={membersOf.get(qrFamily.id) ?? []}
@@ -300,7 +301,7 @@ function FamilyModule() {
             ) : (
               <div className="card py-10 text-center">
                 <Info className="mx-auto mb-2 h-8 w-8 text-teal-300" />
-                <p className="text-sm font-bold text-slate-500">اختر عائلة من القائمة أو أنشئ عائلة جديدة — ثم امسح أكواد أفرادها واحداً بعد الآخر</p>
+                <p className="text-sm font-bold text-slate-500">اختر عائلة من القائمة أو أنشئ عائلة جديدة — ثم أضف أفرادها بمسح الكود أو البحث أو إنشاء فرد جديد</p>
               </div>
             )}
           </>

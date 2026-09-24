@@ -5,7 +5,7 @@
 // is for — and, when that person is enrolled in 2+ services, the service.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { EnrollmentWithPerson, Person } from '@/lib/types';
+import type { EnrollmentWithPerson, Gender, Person } from '@/lib/types';
 
 export interface Family {
   id: string;
@@ -205,3 +205,128 @@ export async function fetchFamilies(supabase: SupabaseClient): Promise<{ familie
 
 /** Human summary of a scanned enrollment's service for the picker rows. */
 export const memberCount = (n: number) => (n === 1 ? 'فرد واحد' : n === 2 ? 'فردان' : `${n} أفراد`);
+
+// ---------- v2 (20260924130000): user-set code · search · new member ----------
+
+export interface FamilyCodeLookup {
+  code: string;
+  /** neither a family nor a person has this code */
+  free: boolean;
+  family: { id: string; name: string } | null;
+  person: { id: string; name: string } | null;
+}
+
+/** Live check of a typed / scanned / generated family code. */
+export async function lookupFamilyCode(supabase: SupabaseClient, code: string): Promise<FamilyCodeLookup> {
+  const { data, error } = await supabase.rpc('family_code_lookup', { p_code: code.trim() });
+  if (error) throw error;
+  const r = (data ?? {}) as Partial<FamilyCodeLookup>;
+  return { code: r.code ?? code.trim(), free: !!r.free, family: r.family ?? null, person: r.person ?? null };
+}
+
+export interface PersonSearchHit {
+  person: Person;
+  /** the family he is in now (null = none) */
+  family: { id: string; name: string } | null;
+  /** his places inside the caller's scopes */
+  places: { church_id: string; service_id: string; class_id: string; kind?: 'child' | 'servant' }[];
+}
+
+/** Search persons by name / phone / code (≥ 2 chars) inside the caller's scopes. */
+export async function searchPersonsForFamily(supabase: SupabaseClient, query: string, limit = 30): Promise<PersonSearchHit[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const { data, error } = await supabase.rpc('family_search_persons', { p_query: q, p_limit: limit });
+  if (error) throw error;
+  return ((data ?? []) as PersonSearchHit[]).filter((h) => h.person);
+}
+
+const parseAddError = (error: { message?: string; details?: string; hint?: string }): FamilyAddOutcome => {
+  const msg = error.message ?? '';
+  const key = (Object.keys(FAMILY_ADD_ERROR_LABELS) as FamilyAddError[]).find((k) => msg.includes(k)) ?? 'failed';
+  return {
+    ok: false,
+    error: key,
+    otherFamily: key === 'in_other_family' && error.hint ? { id: error.hint, name: error.details ?? '' } : undefined,
+  };
+};
+
+/** Add an EXISTING person (picked from the search) by his id. */
+export async function addFamilyMemberById(
+  supabase: SupabaseClient, familyId: string, personId: string, relation: FamilyRelation | null, move = false,
+): Promise<FamilyAddOutcome> {
+  const { data, error } = await supabase.rpc('family_add_member', {
+    p_family: familyId, p_person: personId, p_relation: relation, p_move: move,
+  });
+  if (error) return parseAddError(error);
+  return { ok: true, result: data as FamilyAddResult };
+}
+
+export interface NewMemberInput {
+  name: string;
+  code: string | null;
+  gender: Gender | null;
+  birthdate: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  image_url: string | null;
+  /** optional place — every level required when a class is given */
+  church_id: string | null;
+  service_id: string | null;
+  class_id: string | null;
+  relation: FamilyRelation | null;
+}
+
+export type NewMemberError = FamilyAddError | 'name_required' | 'code_required' | 'code_taken' | 'invalid_scope' | 'invalid_gender';
+
+export const NEW_MEMBER_ERROR_LABELS: Record<NewMemberError, string> = {
+  ...FAMILY_ADD_ERROR_LABELS,
+  name_required: 'اكتب الاسم',
+  code_required: 'الكود مطلوب عندما لا يُسجَّل الشخص في فصل',
+  code_taken: 'هذا الكود كود عائلة — لا يمكن استخدامه لشخص',
+  invalid_scope: 'اختر الكنيسة والخدمة والفصل معاً',
+  invalid_gender: 'النوع غير صالح',
+};
+
+export interface NewMemberResult extends FamilyAddResult {
+  person_created: boolean;
+  enrollment_id: string | null;
+  already_enrolled: boolean;
+}
+
+export type NewMemberOutcome =
+  | { ok: true; result: NewMemberResult }
+  | { ok: false; error: NewMemberError; otherFamily?: { id: string; name: string } };
+
+/** Create the person (+ optional enrollment) and add him to the family in one transaction. */
+export async function addNewFamilyMember(
+  supabase: SupabaseClient, familyId: string, input: NewMemberInput, move = false,
+): Promise<NewMemberOutcome> {
+  const { data, error } = await supabase.rpc('family_add_new_member', {
+    p_family: familyId,
+    p_name: input.name.trim(),
+    p_national_id: input.code?.trim() || null,
+    p_gender: input.gender,
+    p_birthdate: input.birthdate,
+    p_phone: input.phone,
+    p_address: input.address,
+    p_notes: input.notes,
+    p_image_url: input.image_url,
+    p_church: input.church_id,
+    p_service: input.service_id,
+    p_class: input.class_id,
+    p_relation: input.relation,
+    p_move: move,
+  });
+  if (error) {
+    const msg = error.message ?? '';
+    const key = (Object.keys(NEW_MEMBER_ERROR_LABELS) as NewMemberError[]).find((k) => msg.includes(k)) ?? 'failed';
+    return {
+      ok: false,
+      error: key,
+      otherFamily: key === 'in_other_family' && error.hint ? { id: error.hint, name: error.details ?? '' } : undefined,
+    };
+  }
+  return { ok: true, result: data as NewMemberResult };
+}

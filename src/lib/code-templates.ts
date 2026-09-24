@@ -30,7 +30,7 @@
 export const CODES_SETTING_KEY = 'codes';
 
 // ---------- generators (the places in the app that create codes) ----------
-export type CodeKind = 'person' | 'servant' | 'store_item' | 'ticket';
+export type CodeKind = 'person' | 'servant' | 'store_item' | 'ticket' | 'family';
 
 export interface CodeGeneratorDef {
   key: CodeKind;
@@ -60,6 +60,10 @@ export const CODE_GENERATORS: CodeGeneratorDef[] = [
   {
     key: 'ticket', label: 'كود تذكرة المناسبة', desc: 'كود التذكرة عند تسجيل مخدوم في مناسبة — تُولَّد في قاعدة البيانات',
     where: 'وحدة الفعاليات → تسجيل مشارك', legacyExample: 'T-4F7K9Q2M1B', serverSide: true,
+  },
+  {
+    key: 'family', label: 'كود العائلة', desc: 'كود العائلة (QR العائلة) — مسحه في الماسح يعرض كل أفراد العائلة',
+    where: 'وحدة العائلات → عائلة جديدة → توليد كود', legacyExample: 'F-4F7K9Q',
   },
 ];
 export const CODE_GENERATOR_BY_KEY: Record<CodeKind, CodeGeneratorDef> = Object.fromEntries(
@@ -214,6 +218,7 @@ export const DEFAULT_CODES: CodesConfig = {
     servant: { mode: 'legacy' },
     store_item: { mode: 'legacy' },
     ticket: { mode: 'legacy' },
+    family: { mode: 'legacy' },
   },
   scopes: EMPTY_SCOPES,
 };
@@ -250,6 +255,7 @@ export const legacyCode = (kind: CodeKind): string => {
   switch (kind) {
     case 'store_item': return `ST-${randomChars(6, 'alnum')}`;
     case 'ticket': return `T-${randomChars(10, 'hex')}`;
+    case 'family': return `F-${randomChars(6, 'alnum')}`;
     default: return `P-${randomChars(8, 'alnum')}`;
   }
 };
