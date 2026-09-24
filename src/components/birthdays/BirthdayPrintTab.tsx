@@ -8,20 +8,19 @@
 // printing, a `card_printed` greeting is logged for each child.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { ChevronRight, ChevronLeft, Loader2, Printer, Check, Square, CheckSquare, Cake } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import CardCanvas, { type CardConstantsData } from '@/components/cards/CardCanvas';
+import { type CardConstantsData } from '@/components/cards/CardCanvas';
 import PrintProfilesBar from '@/components/cards/PrintProfilesBar';
+import { BackPrintSettings, PagePreview, PrintSheet, type SheetItem } from '@/components/cards/PrintSheet';
 import type { CardDesign, CardPrintSettings, PaperSize, PaperOrientation } from '@/lib/card-types';
-import { PAPER_SIZES, paperDims, ARABIC_MONTHS } from '@/lib/card-types';
+import { PAPER_SIZES, ARABIC_MONTHS, BACK_MODE_LABELS } from '@/lib/card-types';
+import { computeLayout, effectiveBackMode, paginate, sheetCount, unitDims } from '@/lib/card-layout';
 import { ScopeSelectors, useScopeState, useStoreLookups } from '@/components/store/StoreBits';
 import { PersonAvatar, GreetingChips } from './BirthdayBits';
 import {
   type BirthdayRow, type BirthdayCardTemplate, fetchBirthdaysInMonth, logGreeting, rowToCardPerson, hasGreeting,
 } from '@/lib/birthdays';
-
-const MM_TO_PX = 96 / 25.4;
 
 function Num({ label, value, onChange, min = 0, max = 500, step = 0.5 }: {
   label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number;
@@ -104,30 +103,22 @@ export default function BirthdayPrintTab({
 
   const printItems = useMemo(() => (rows ?? []).filter((r) => selected.has(r.person_id)), [rows, selected]);
 
-  // ---------- layout math ----------
-  const paper = paperDims(settings);
-  const usableW = paper.w - settings.marginRight - settings.marginLeft;
-  const usableH = paper.h - settings.marginTop - settings.marginBottom;
-  const cols = Math.max(0, Math.floor((usableW + settings.gapX) / (design.width + settings.gapX)));
-  const rowsPer = Math.max(0, Math.floor((usableH + settings.gapY) / (design.height + settings.gapY)));
-  const perPage = cols * rowsPer;
+  // ---------- layout math (shared helpers) ----------
+  const backMode = effectiveBackMode(design, settings);
+  const unit = unitDims(design, settings);
+  const layout = computeLayout(settings, unit.w, unit.h);
+  const { paper, cols, rows: rowsPer, perPage } = layout;
   const pages = perPage > 0 ? Math.ceil(Math.max(printItems.length, 1) / perPage) : 0;
-  const gridW = cols > 0 ? cols * design.width + (cols - 1) * settings.gapX : 0;
-  const gridH = rowsPer > 0 ? rowsPer * design.height + (rowsPer - 1) * settings.gapY : 0;
-  const alignH = settings.alignH ?? 'center';
-  const alignV = settings.alignV ?? 'top';
-  const offsetX = alignH === 'left' ? 0 : alignH === 'center' ? (usableW - gridW) / 2 : usableW - gridW;
-  const offsetY = alignV === 'top' ? 0 : alignV === 'center' ? (usableH - gridH) / 2 : usableH - gridH;
-  const cellLeft = (col: number) => settings.marginLeft + offsetX + col * (design.width + settings.gapX);
-  const cellTop = (row: number) => settings.marginTop + offsetY + row * (design.height + settings.gapY);
-  const previewScale = Math.min(330 / paper.w, 420 / paper.h);
+  const sheets = sheetCount(pages, backMode);
+  const previewScale = backMode === 'separate'
+    ? Math.min(160 / paper.w, 260 / paper.h)
+    : Math.min(330 / paper.w, 420 / paper.h);
 
-  const printPages = useMemo(() => {
-    if (perPage === 0) return [] as BirthdayRow[][];
-    const out: BirthdayRow[][] = [];
-    for (let i = 0; i < printItems.length; i += perPage) out.push(printItems.slice(i, i + perPage));
-    return out;
-  }, [printItems, perPage]);
+  const sheetItems = useMemo<SheetItem[]>(
+    () => printItems.map((r) => ({ key: r.person_id, person: rowToCardPerson(r, year), constants: constantsFor(r), design })),
+    [printItems, year, constantsFor, design],
+  );
+  const printPages = useMemo(() => paginate(sheetItems, perPage), [sheetItems, perPage]);
 
   const [printing, setPrinting] = useState(false);
   const doPrint = () => {
@@ -243,71 +234,41 @@ export default function BirthdayPrintTab({
           </label>
         </div>
         <p className="mt-2 text-[11px] font-bold text-slate-400">
-          {cols} × {rowsPer} = {perPage} كارت في الصفحة · {printItems.length} كارت → {pages} صفحة
+          {cols} × {rowsPer} = {perPage} كارت في الصفحة{backMode !== 'none' && <> · {BACK_MODE_LABELS[backMode]}</>} · {printItems.length} كارت → {sheets} صفحة{backMode === 'separate' && <> ({pages} وجه + {pages} ظهر)</>}
         </p>
       </section>
 
+      {/* ---------- back side + page flip ---------- */}
+      <BackPrintSettings settings={settings} onChange={set} design={design} accent="pink" />
+
       {/* ---------- preview ---------- */}
-      <section className="card flex flex-col items-center">
-        <h3 className="mb-2 self-start text-sm font-extrabold text-slate-600">معاينة الصفحة الأولى</h3>
-        <div className="relative bg-white shadow-lg" style={{ width: paper.w * previewScale, height: paper.h * previewScale }}>
-          {settings.centerLineV && <div className="absolute bg-slate-300" style={{ left: (paper.w / 2) * previewScale, top: 0, width: 1, height: '100%' }} />}
-          {settings.centerLineH && <div className="absolute bg-slate-300" style={{ top: (paper.h / 2) * previewScale, left: 0, height: 1, width: '100%' }} />}
-          {(printPages[0] ?? []).map((r, i) => {
-            const col = i % cols; const row = Math.floor(i / cols);
-            return (
-              <div key={r.person_id} className="absolute overflow-hidden" style={{ left: cellLeft(col) * previewScale, top: cellTop(row) * previewScale, width: design.width * previewScale, height: design.height * previewScale, outline: settings.cutMarks ? '1px solid #cbd5e1' : undefined }}>
-                <CardCanvas design={design} scale={previewScale} person={rowToCardPerson(r, year)} constants={constantsFor(r)} />
-              </div>
-            );
-          })}
-          {printItems.length === 0 && <p className="absolute inset-0 flex items-center justify-center text-xs font-bold text-slate-300">اختر مخدومين للطباعة</p>}
-        </div>
-      </section>
+      <PagePreview
+        items={sheetItems.slice(0, perPage)}
+        layout={layout}
+        settings={settings}
+        previewScale={previewScale}
+        placeholderDesign={design}
+        showBackPage={backMode === 'separate'}
+        title={<>معاينة الصفحة الأولى{backMode !== 'none' && <> · {BACK_MODE_LABELS[backMode]}</>}{printItems.length === 0 && <span className="text-slate-300"> — اختر مخدومين للطباعة</span>}</>}
+      />
 
       <button id="bd-print-btn" onClick={doPrint} disabled={printing || printItems.length === 0}
         className="btn-primary flex items-center justify-center gap-2 !bg-gradient-to-l !from-pink-600 !to-rose-500 !py-3.5 text-base disabled:opacity-40">
         {printing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Printer className="h-5 w-5" />}
-        طباعة {printItems.length > 0 ? `(${printItems.length} كارت — ${pages} صفحة)` : ''}
+        طباعة {printItems.length > 0 ? `(${printItems.length} كارت — ${sheets} صفحة)` : ''}
       </button>
       <p className="pb-2 text-center text-[11px] font-bold text-slate-400">
         <Check className="mr-1 inline h-3 w-3" /> في نافذة الطباعة: نفس مقاس الورق ({settings.paper === 'custom' ? 'مخصص' : settings.paper})، الهوامش «بلا»، المقياس 100%. تُسجَّل «كارت مطبوع» لكل مخدوم بعد الطباعة.
       </p>
 
       {/* ---------- hidden print sheet ---------- */}
-      {typeof document !== 'undefined' && createPortal(
-        <div id="bd-cards-print-root" dir="rtl">
-          <style>{`
-            #bd-cards-print-root { display: none; }
-            @media print {
-              body > *:not(#bd-cards-print-root) { display: none !important; }
-              #bd-cards-print-root { display: block !important; }
-              @page { size: ${paper.w}mm ${paper.h}mm; margin: 0; }
-              html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
-              .bd-print-page { width: ${paper.w}mm; height: ${paper.h}mm; position: relative; overflow: hidden; page-break-after: always; break-after: page; }
-              .bd-print-page:last-child { page-break-after: auto; break-after: auto; }
-              .bd-print-cell { position: absolute; }
-              .bd-print-centerline { position: absolute; background: #94a3b8; }
-              * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            }
-          `}</style>
-          {printPages.map((pageItems, pi) => (
-            <div key={pi} className="bd-print-page">
-              {settings.centerLineV && <div className="bd-print-centerline" style={{ left: `${paper.w / 2}mm`, top: 0, width: '0.2mm', height: `${paper.h}mm` }} />}
-              {settings.centerLineH && <div className="bd-print-centerline" style={{ top: `${paper.h / 2}mm`, left: 0, height: '0.2mm', width: `${paper.w}mm` }} />}
-              {pageItems.map((r, i) => {
-                const col = i % cols; const row = Math.floor(i / cols);
-                return (
-                  <div key={r.person_id} className="bd-print-cell" style={{ left: `${cellLeft(col)}mm`, top: `${cellTop(row)}mm`, width: `${design.width}mm`, height: `${design.height}mm`, outline: settings.cutMarks ? '0.2mm solid #cbd5e1' : undefined }}>
-                    <CardCanvas design={design} scale={MM_TO_PX} person={rowToCardPerson(r, year)} constants={constantsFor(r)} />
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>,
-        document.body
-      )}
+      <PrintSheet
+        pages={printPages}
+        layout={layout}
+        settings={settings}
+        rootId="bd-cards-print-root"
+        backPages={backMode === 'separate'}
+      />
     </div>
   );
 }
