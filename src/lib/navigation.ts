@@ -29,7 +29,7 @@ import {
   Utensils, Timer, Hourglass, AlarmClock, CalendarCheck, CalendarHeart, CalendarClock, History, Repeat,
   Navigation, Route, Backpack, Wand2, Stars, Sunrise, Rainbow, Droplets, Snowflake, Umbrella, Tag, Tags,
   Percent, HandCoins, PiggyBank, Receipt, ScrollText, BookMarked, Library, Pen, Highlighter, Languages,
-  Volume2, Play, Mountain, Waves, Sailboat, Anchor, FileBarChart2, FileSpreadsheet,
+  Volume2, Play, Mountain, Waves, Sailboat, Anchor, FileBarChart2, FileSpreadsheet, DoorOpen,
   type LucideIcon,
 } from 'lucide-react';
 import { MODULES, OWNER_MODULE, type AppModule } from '@/lib/modules';
@@ -62,7 +62,7 @@ const MODULE_ICON_NAMES: Record<string, string> = {
   cards: 'IdCard', shepherds: 'HeartHandshake', store: 'ShoppingBag', exams: 'GraduationCap',
   birthdays: 'Cake', messages: 'MessageCircle', online: 'Video', achievements: 'Trophy',
   occasions: 'Tent', notifications: 'Bell', results: 'ClipboardCheck', library: 'Library', activity: 'History',
-  reports: 'FileBarChart2', family: 'UsersRound',
+  reports: 'FileBarChart2', family: 'UsersRound', access: 'DoorOpen',
 };
 
 const moduleDest = (m: AppModule): NavDestination => ({
@@ -104,7 +104,7 @@ export const ICON_LIBRARY: Record<string, LucideIcon> = {
   Utensils, Timer, Hourglass, AlarmClock, CalendarCheck, CalendarHeart, CalendarClock, History, Repeat,
   Navigation, Route, Backpack, Wand2, Stars, Sunrise, Rainbow, Droplets, Snowflake, Umbrella, Tag, Tags,
   Percent, HandCoins, PiggyBank, Receipt, ScrollText, BookMarked, Library, Pen, Highlighter, Languages,
-  Volume2, Play, Mountain, Waves, Sailboat, Anchor, FileBarChart2, FileSpreadsheet,
+  Volume2, Play, Mountain, Waves, Sailboat, Anchor, FileBarChart2, FileSpreadsheet, DoorOpen,
 };
 
 export const ICON_NAMES = Object.keys(ICON_LIBRARY);
