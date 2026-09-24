@@ -188,5 +188,90 @@ do $$ begin
   end if;
 end $$;
 
+-- ---------- F. v2: user-set code · code lookup · person search · add existing / new member ----------
+set local role authenticated;
+set local request.jwt.claim.sub = '00000000-0000-0000-0000-000000000003';
+set local request.jwt.claim.role = 'authenticated';
+do $$
+declare f uuid; r jsonb; hits jsonb;
+begin
+  -- a typed / scanned / generated code is kept
+  insert into public.families (code, name) values (' FAM-2026-001 ', 'عائلة بكود مختار') returning id into f;
+  if (select code from public.families where id = f) <> 'FAM-2026-001' then raise exception 'typed code must be kept (trimmed)'; end if;
+  -- a family code may not be a PERSON code
+  begin
+    insert into public.families (code, name) values ('KID-1', 'x');
+    raise exception 'person code must be refused as family code';
+  exception when others then if sqlerrm not like '%code_is_person%' then raise; end if; end;
+  -- duplicate family code
+  begin
+    insert into public.families (code, name) values ('FAM-2026-001', 'y');
+    raise exception 'duplicate family code must fail';
+  exception when unique_violation then null; end;
+
+  -- live lookup
+  r := public.family_code_lookup('FAM-2026-001');
+  if (r ->> 'free')::boolean or r -> 'family' ->> 'name' <> 'عائلة بكود مختار' then raise exception 'lookup must report the family: %', r; end if;
+  r := public.family_code_lookup('KID-1');
+  if (r ->> 'free')::boolean or r -> 'person' ->> 'name' <> 'مينا' then raise exception 'lookup must report the person: %', r; end if;
+  r := public.family_code_lookup('FREE-CODE');
+  if not (r ->> 'free')::boolean then raise exception 'unknown code must be free'; end if;
+
+  -- search: service manager of مدارس الأحد sees مينا / مريم / سارة, not يوسف (كنيسة ب)
+  hits := public.family_search_persons('مي');
+  if not exists (select 1 from jsonb_array_elements(hits) x where x -> 'person' ->> 'name' = 'مينا') then raise exception 'search must find مينا: %', hits; end if;
+  if exists (select 1 from jsonb_array_elements(hits) x where x -> 'person' ->> 'name' = 'يوسف') then raise exception 'search must not leak other church persons'; end if;
+  hits := public.family_search_persons('KID-2');
+  if jsonb_array_length(hits) <> 1 or hits -> 0 -> 'family' ->> 'name' <> 'عائلة مينا' then raise exception 'search by code must carry the family: %', hits; end if;
+  if jsonb_array_length(hits -> 0 -> 'places') <> 1 then raise exception 'search must carry scoped places'; end if;
+  if public.family_search_persons('مي', 1) is null or jsonb_array_length(public.family_search_persons('مي', 1)) <> 1 then raise exception 'limit'; end if;
+  if jsonb_array_length(public.family_search_persons('x')) <> 0 then raise exception 'short query → empty'; end if;
+
+  -- add an EXISTING person by id (search result) — he is in عائلة مينا → move
+  begin
+    perform public.family_add_member(f, '50000000-0000-0000-0000-000000000002');
+    raise exception 'must refuse without move';
+  exception when others then if sqlerrm not like '%in_other_family%' then raise; end if; end;
+  r := public.family_add_member(f, '50000000-0000-0000-0000-000000000002', 'daughter', true);
+  if r -> 'moved_from' ->> 'name' <> 'عائلة مينا' then raise exception 'move by id failed: %', r; end if;
+
+  -- add a NEW person with an enrollment (فصل أ) in one call
+  r := public.family_add_new_member(f, 'أب جديد', 'NEW-DAD', 'male', '1980-01-01', '+201000000000', null, null, null,
+         '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001', 'father');
+  if not (r ->> 'person_created')::boolean or r ->> 'enrollment_id' is null then raise exception 'new member with class failed: %', r; end if;
+  if not exists (select 1 from public.enrollments e join public.persons p on p.id = e.person_id where p.national_id = 'NEW-DAD' and e.class_id = '30000000-0000-0000-0000-000000000001') then
+    raise exception 'enrollment must exist';
+  end if;
+  if (select relation from public.family_members m join public.persons p on p.id = m.person_id where p.national_id = 'NEW-DAD') <> 'father' then raise exception 'relation missing'; end if;
+
+  -- add a NEW bare person (no class) — code required
+  begin
+    perform public.family_add_new_member(f, 'أم بلا كود');
+    raise exception 'bare person needs a code';
+  exception when others then if sqlerrm not like '%code_required%' then raise; end if; end;
+  r := public.family_add_new_member(f, 'أم جديدة', 'NEW-MOM', 'female', p_relation => 'mother');
+  if not (r ->> 'person_created')::boolean or r ->> 'enrollment_id' is not null then raise exception 'bare new member failed: %', r; end if;
+  if exists (select 1 from public.enrollments e join public.persons p on p.id = e.person_id where p.national_id = 'NEW-MOM') then raise exception 'bare person must have no enrollment'; end if;
+  -- the family code itself can't be used as a person code
+  begin
+    perform public.family_add_new_member(f, 'x', 'FAM-2026-001');
+    raise exception 'family code as person code must fail';
+  exception when others then if sqlerrm not like '%code_taken%' then raise; end if; end;
+  -- name required
+  begin
+    perform public.family_add_new_member(f, '  ', 'Z');
+    raise exception 'name required';
+  exception when others then if sqlerrm not like '%name_required%' then raise; end if; end;
+
+  if (select count(*) from public.family_members where family_id = f) <> 3 then raise exception 'family must have 3 members'; end if;
+  -- the scanner sees the bare mother (no enrollments) as a listed member
+  r := public.family_lookup('NEW-MOM');
+  if r -> 'family' ->> 'name' <> 'عائلة بكود مختار' or jsonb_array_length(r -> 'members') <> 3 then raise exception 'lookup of bare member: %', r; end if;
+  -- and by the user-set family code
+  r := public.family_lookup('FAM-2026-001');
+  if r ->> 'matched' <> 'family' then raise exception 'family code lookup: %', r; end if;
+end $$;
+reset role;
+
 rollback;
 \echo FAMILIES TESTS PASSED
