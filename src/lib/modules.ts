@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, UsersRound, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, UsersRound, DoorOpen, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports' | 'family';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports' | 'family' | 'access';
 
 export interface AppModule {
   key: ModuleKey;
@@ -159,6 +159,15 @@ export const MODULES: AppModule[] = [
     icon: UsersRound,
     color: 'text-teal-700',
     paths: ['/family'],
+  },
+  {
+    key: 'access',
+    label: 'التحكم في الدخول',
+    desc: 'بوابات دخول بقواعد قابلة للتخصيص: امسح كود الشخص أو ابحث عنه فيظهر اسمه وصورته وحضوره ونقاطه مع «مسموح» أو «مرفوض» وكل قاعدة وهل تحققت — قواعد نقاط · حضور · مناسبات · نوع · عمر · تسجيل · امتحان · إنجاز · فعالية، تُربط بـ AND / OR ومجموعات، وقائمة مسموح لهم: أشخاص · فصل · خدمة · كنيسة',
+    href: '/access',
+    icon: DoorOpen,
+    color: 'text-emerald-700',
+    paths: ['/access'],
   },
 ];
 

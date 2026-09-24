@@ -13,7 +13,7 @@ import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
   QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
-  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer, UsersRound,
+  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer, UsersRound, DoorOpen,
 } from 'lucide-react';
 
 export interface PermissionGroup {
@@ -42,6 +42,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'activity', label: 'سجل النشاط', icon: History, color: 'text-slate-700' },
   { key: 'reports', label: 'تقارير وجداول', icon: FileBarChart2, color: 'text-fuchsia-600' },
   { key: 'family', label: 'العائلات', icon: UsersRound, color: 'text-teal-700' },
+  { key: 'access', label: 'التحكم في الدخول', icon: DoorOpen, color: 'text-emerald-700' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -116,6 +117,11 @@ export const PERMISSIONS: PermissionDef[] = [
   // and need a profile to build / edit families ----
   { key: 'family.view', group: 'family', label: 'عرض العائلات', desc: 'رؤية العائلات التي لها فرد في نطاقه، وظهور العائلة عند المسح (افتراضي لكل خادم يرى الوحدة)' },
   { key: 'family.manage', group: 'family', label: 'إدارة العائلات', desc: 'إنشاء عائلة وإضافة أفرادها بمسح الكود (QR) وتعديلها وحذفها' },
+
+  // ---- التحكم في الدخول — managers hold them all; class servants stand at
+  // the door by default and need a profile to configure events / rules ----
+  { key: 'access.check', group: 'access', label: 'التحقق عند البوابة', desc: 'مسح الكود أو البحث عن الشخص ورؤية مسموح / مرفوض وحالة كل قاعدة (افتراضي لكل خادم يرى الوحدة)' },
+  { key: 'access.manage', group: 'access', label: 'إدارة بوابات الدخول', desc: 'إنشاء وتعديل وحذف بوابات الدخول وقواعدها ومجموعاتها وقائمة المسموح لهم في نطاقه' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
@@ -169,6 +175,8 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'reports.templates': LayoutTemplate,
   'family.view': Eye,
   'family.manage': UsersRound,
+  'access.check': QrCode,
+  'access.manage': DoorOpen,
 };
 
 /** Resolve the key set from the grant rows + the profiles (owner ⇒ '*'). */
