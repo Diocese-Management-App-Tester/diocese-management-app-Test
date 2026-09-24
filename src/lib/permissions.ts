@@ -13,7 +13,7 @@ import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
   QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
-  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer,
+  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer, UsersRound,
 } from 'lucide-react';
 
 export interface PermissionGroup {
@@ -41,6 +41,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'library', label: 'المكتبة', icon: Library, color: 'text-lime-700' },
   { key: 'activity', label: 'سجل النشاط', icon: History, color: 'text-slate-700' },
   { key: 'reports', label: 'تقارير وجداول', icon: FileBarChart2, color: 'text-fuchsia-600' },
+  { key: 'family', label: 'العائلات', icon: UsersRound, color: 'text-teal-700' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -110,6 +111,11 @@ export const PERMISSIONS: PermissionDef[] = [
   // for a whole service / church follows `can_access` ----
   { key: 'reports.build', group: 'reports', label: 'إنشاء وتصدير التقارير', desc: 'اختيار البيانات والحقول وتصميم التقرير وتصديره PDF / Excel / طباعة (افتراضي لكل خادم يرى الوحدة)' },
   { key: 'reports.templates', group: 'reports', label: 'إدارة القوالب', desc: 'حفظ وتعديل وحذف قوالب التقارير في نطاقه' },
+
+  // ---- العائلات — managers hold them all; class servants view by default
+  // and need a profile to build / edit families ----
+  { key: 'family.view', group: 'family', label: 'عرض العائلات', desc: 'رؤية العائلات التي لها فرد في نطاقه، وظهور العائلة عند المسح (افتراضي لكل خادم يرى الوحدة)' },
+  { key: 'family.manage', group: 'family', label: 'إدارة العائلات', desc: 'إنشاء عائلة وإضافة أفرادها بمسح الكود (QR) وتعديلها وحذفها' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
@@ -161,6 +167,8 @@ export const PERMISSION_ICONS: Record<string, LucideIcon> = {
   'activity.view_all': Cog,
   'reports.build': Printer,
   'reports.templates': LayoutTemplate,
+  'family.view': Eye,
+  'family.manage': UsersRound,
 };
 
 /** Resolve the key set from the grant rows + the profiles (owner ⇒ '*'). */

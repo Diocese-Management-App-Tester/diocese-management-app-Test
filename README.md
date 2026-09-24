@@ -195,6 +195,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 - **Children** — **إدارة المخدومين → المخدومين** gets a **«الفصول»** action (`src/components/children/PersonClassesModal.tsx`): every class the child is in (across churches), **add him to several more at once** (`add_person_and_enroll` per class — same person by code, own attendance / points per class) or **remove one** (never the last — use «حذف»). Cards show a **«N فصول»** badge. The single **إضافة** form has **«فصول إضافية»** to enroll a new child in several classes in one go. Servant mirror rows are listed read-only there.
 
 ## Currently Completed Features
+- ✅ **العائلات (20260924120000)**: family module — `/family`. A family groups persons (children / servants) **by their individual codes (QR)**: create the family (name · phone · address · notes, an auto **family code `F-XXXXXX`** with its own QR), then **QR → إضافة أفراد**: pick the family and scan card after card (or type the code) with a pre-selected relation (أب · أم · ابن · ابنة …) — a person belongs to ONE family; scanning someone who is in another family asks «نقل؟». On the **scanner**, when the scanned code belongs to a person WITH a family (or is a family code) the **family picker** opens: **all codes / persons of the family** with their relation, «الممسوح» badge, in-scope services and **«حضر اليوم: …»**; tapping a person sends **that person's code / enrollment to the selected job** (attendance · points · data). When the person is enrolled in **2+ services / classes** a second step asks **which service**; the service he already attended today is highlighted («حضر اليوم هنا») and with **«التعرف على الخدمة تلقائياً»** on (default) it is chosen without asking. A «العائلات» switch in the scanner control panel turns the behaviour off. Permissions `family.view` (default) · `family.manage` (managers, or via a profile); RLS = module grant + a family is visible when the caller created it or ≥ 1 member is enrolled in his scope. See § Family module.
 - ✅ **تقارير وجداول (0050)**: report builder module — pick a data source (المخدومون · سجل الحضور · سجل النقاط · الافتقاد · نتائج الامتحانات · الخدام), scope + filters, then EXACTLY the fields to export (select · reorder · rename · width · align · row filters · sort) with a live preview; a mm-exact page designer (title · text · logo · image · table that flows over pages · SVG charts · lines · boxes · header / footer · page numbers · portrait / landscape per page); export PDF (rasterized pages, perfect Arabic RTL) · Excel (the chosen columns only) · print; save the design as a template (`report_templates`, scoped) and re-run it with a new church / service / class / period
 - ✅ **شخص واحد في أماكن متعددة (0045)**: الخادم يخدم في عدة كنائس / خدمات / فصول (`servant_scopes` + `my_scopes()` + `set_servant_scopes`) — يختارها في التسجيل ويعدّلها المدير من الطلبات / تعديل / إضافة عبر `ScopePicker`; المخدوم يُسجَّل في عدة فصول من «الفصول» أو من نموذج الإضافة
 - ✅ **النسخ الاحتياطي والاسترجاع (0044)**: owner-only page under الإعدادات → النشاط — backup asks what to back up (every DB table grouped in Arabic + servants' login accounts, «الكل» default) and downloads ONE JSON to the device; restore from a device file asks what to restore + دمج / استبدال, FK-ordered staged upsert with triggers off; scheduled backups (daily / weekly / monthly, Cairo hour, keep last N) run by Vercel Cron into the private `backups` bucket and are downloadable from the history
@@ -311,6 +312,7 @@ servant_scopes       servant_id → servant_enrollments · church_id · service_
 | `/child/occasions` | child portal — occasions board with my registration status |
 | `/activity` | activity log module — tabs السجل (live timeline, 10/100/1000 per dig, keyset «تعمّق أكثر») · بالمستخدم · بالعملية · نظرة عامة (+ owner retention / prune); `?tab=&actor=&kind=&action=&group=&person=&batch=` |
 | `/reports` | reports & tables module — 4-step wizard (البيانات → الحقول والمعاينة → التصميم → التصدير PDF / Excel / طباعة) · `?tab=templates` saved templates · `?template=<id>` opens a template |
+| `/family` | family module — العائلات list (search by family / code / member), members with relation, create · edit · delete, family QR · `?tab=qr&family=<id>` add members by scanning their codes |
 | `/child/occasions/[id]` | child portal — occasion detail: «أنا مشارك», cancel, e-ticket QR, my checklist, notifications |
 
 ## Data Models & Storage
@@ -901,6 +903,36 @@ document — a cron can `load()` + render server-side), more sources.
 `supabase/migrations/0050_report_templates.sql` · `src/lib/reports/*` ·
 `src/components/reports/{ReportBits,DataStep,FieldsStep,DesignStep,ExportStep,ReportPageView,ReportChart,TemplatesPanel}.tsx`
 · `src/app/reports/{layout,page}.tsx`.
+
+## Family module — migration 20260924120000 (وحدة العائلات)
+`supabase/migrations/20260924120000_families.sql` · test `supabase/tests/families_test.sql`
+
+**Why** — brothers and sisters (and their parents who serve) arrive together. One card scanned should be enough to reach **any member of the family** and act on the right person in the right service.
+
+### Data
+```
+families        id · code (F-XXXXXX, unique, auto — the family QR) · name · phone · address · notes · audit
+family_members  family_id → families · person_id → persons (UNIQUE: a person is in ONE family) · relation
+```
+`relation` ∈ father · mother · son · daughter · brother · sister · grandfather · grandmother · husband · wife · other (`RELATION_LABELS` in `src/lib/families.ts`).
+
+### Flow
+1. **العائلات → + عائلة** — name (phone · address · notes optional). The code is generated by the DB (`family_new_code()`, no 0/O/1/I) and shown as a QR («كود العائلة» → copy · share).
+2. **العائلات → QR — إضافة أفراد** (`/family?tab=qr&family=<id>`, `AddMembersByQrPanel`) — choose the family (or «جديدة»), pick the relation for the next scans, then **scan each member's card** (`QrScanner`, camera or gallery) or type the code → RPC **`family_add_member_by_code(family, code, relation, move)`**. Outcomes: added ✔ · `already_member` · `person_not_found` · **`in_other_family`** → «نقل إلى هنا؟» (re-called with `p_move = true`, DETAIL carries the other family's name). A session log lists every scan.
+3. **الماسح** — `handleQr` first calls **`family_lookup(code, day)`** (person code OR family code). If the person has a family (or a family code was scanned) → **`FamilyScanPicker`**:
+   - **Step 1 — أفراد العائلة**: every member (avatar · name · relation · code · «الممسوح»), his in-scope services and **«حضر اليوم: خدمة أ · خدمة ب»** (from `attendance_log.attended_on = working day`). Members outside the selected church / service / class (or with no enrollment the servant can reach) are greyed «خارج النطاق المختار».
+   - **Step 2 — اختر الخدمة** (only when that person has **2+ in-scope enrollments**): the enrollment list; the one **attended today** is highlighted «حضر اليوم هنا». With **«التعرف على الخدمة تلقائياً»** (persisted in `localStorage`, default on) a single recognised service is chosen without asking.
+   - The chosen enrollment goes to **`doJob(e)`** — exactly the same path as a single scan (attendance / points / data, same guards, same archive entry).
+   - A lone person (no family) or an unknown code falls through to the classic `lookup_enrollments_by_national_id` flow. The **«العائلات» switch** in the scanner control panel disables the family detour (default on when the module is granted).
+
+### Permissions & RLS
+- `family_can(key)` = `module_visible('family')` AND (owner / church manager / service manager OR key = `family.view` OR `has_permission(key)`). `family_permissions()` → `{view, manage}` for the UI.
+- `family_visible(id)` = owner · creator · or ≥ 1 member enrolled where `can_access`. Members of other churches are still **listed** by `family_lookup` (name + code — the family is complete) but their enrollments are filtered by `can_access`, so nothing can be done on them from a foreign scope.
+- Tables are realtime + audited (`activity_audited_tables` extended: `families`, `family_members`). A global `module_access` grant is seeded (like `cards`) — the owner narrows it from وحدة المالك → صلاحيات الوحدات.
+
+### Files
+`src/lib/families.ts` (types · `lookupFamily` · `addFamilyMemberByCode` · …) · `src/app/family/{layout,page}.tsx` ·
+`src/components/family/{FamilyBits,AddMembersByQrPanel,FamilyScanPicker}.tsx` · scanner hook-in in `src/app/scanner/page.tsx`.
 
 ## Statistics Architecture — migration 0020
 The الإحصائيات tab (`src/app/stats/page.tsx`) never downloads raw rows; every
