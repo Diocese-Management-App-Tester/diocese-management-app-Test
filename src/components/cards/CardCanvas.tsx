@@ -6,9 +6,12 @@ import { User, Landmark } from 'lucide-react';
 import type {
   CardDesign,
   CardElement,
+  CardPrintSettings,
+  CardSide,
   ImageFit,
 } from '@/lib/card-types';
-import { ageFromBirthdate, ARABIC_MONTHS, isImageElement } from '@/lib/card-types';
+import { ageFromBirthdate, ARABIC_MONTHS, isImageElement, faceDesign } from '@/lib/card-types';
+import { unitDims, unitFaces } from '@/lib/card-layout';
 
 // ---------- data fed into a card ----------
 export interface CardPersonData {
@@ -310,6 +313,19 @@ export default function CardCanvas({
 }: CardCanvasProps) {
   const interactive = !!onSelect;
   const bg = design.background;
+  // whole-face mirror (design.flipH / flipV) — applied to the content layer
+  // only; the selection box / handles are drawn in mirrored screen positions
+  // so the designer keeps working on a flipped face.
+  const flipX = !!design.flipH;
+  const flipY = !!design.flipV;
+  const sx = flipX ? -1 : 1; // pointer delta sign → design delta
+  const sy = flipY ? -1 : 1;
+  const flipTransform = flipX || flipY
+    ? `${flipX ? 'scaleX(-1)' : ''} ${flipY ? 'scaleY(-1)' : ''}`.trim()
+    : undefined;
+  // screen (visual) left / top of an element box, honoring the mirror
+  const visLeft = (el: CardElement) => (flipX ? design.width - el.x - el.w : el.x) * scale;
+  const visTop = (el: CardElement) => (flipY ? design.height - el.y - el.h : el.y) * scale;
 
   // finer snap when zoomed in for precise placement
   const snap = (v: number) => {
@@ -328,8 +344,8 @@ export default function CardCanvas({
     const origX = el.x;
     const origY = el.y;
     const move = (ev: PointerEvent) => {
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
+      const dx = (sx * (ev.clientX - startX)) / scale;
+      const dy = (sy * (ev.clientY - startY)) / scale;
       onMove(el.id, snap(origX + dx), snap(origY + dy));
     };
     const up = () => {
@@ -352,8 +368,8 @@ export default function CardCanvas({
     const ratio = orig.h > 0 ? orig.w / orig.h : 1;
     const locked = !!el.lockAspect;
     const move = (ev: PointerEvent) => {
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
+      const dx = (sx * (ev.clientX - startX)) / scale;
+      const dy = (sy * (ev.clientY - startY)) / scale;
       let { x, y, w, h } = orig;
       if (handle.includes('e')) w = orig.w + dx;
       if (handle.includes('s')) h = orig.h + dy;
@@ -398,15 +414,27 @@ export default function CardCanvas({
     window.addEventListener('pointerup', up);
   };
 
-  // handle position (as CSS) around the selected element's box
+  // handle position (as CSS) around the selected element's box — the
+  // semantic handle ('w' = design left edge) is drawn where that edge is SEEN
   const handlePos = (el: CardElement, h: HandleId): CSSProperties => {
-    const L = el.x * scale;
-    const T = el.y * scale;
+    const L = visLeft(el);
+    const T = visTop(el);
     const W = el.w * scale;
     const H = el.h * scale;
-    const cx = h.includes('w') ? L : h.includes('e') ? L + W : L + W / 2;
-    const cy = h.includes('n') ? T : h.includes('s') ? T + H : T + H / 2;
+    const west = flipX ? h.includes('e') : h.includes('w');
+    const east = flipX ? h.includes('w') : h.includes('e');
+    const north = flipY ? h.includes('s') : h.includes('n');
+    const south = flipY ? h.includes('n') : h.includes('s');
+    const cx = west ? L : east ? L + W : L + W / 2;
+    const cy = north ? T : south ? T + H : T + H / 2;
     return { left: cx - 5, top: cy - 5 };
+  };
+  // mirror the cursor too so it matches the visual direction
+  const handleCursor = (h: HandleId, cursor: string): string => {
+    if (flipX === flipY) return cursor; // both or none → diagonals unchanged
+    if (cursor === 'nwse-resize') return 'nesw-resize';
+    if (cursor === 'nesw-resize') return 'nwse-resize';
+    return cursor;
   };
 
   const selEl = interactive ? design.elements.find((e) => e.id === selectedId) ?? null : null;
@@ -429,40 +457,46 @@ export default function CardCanvas({
         boxSizing: 'border-box',
       }}
     >
-      {bg.imageUrl && (
+      {/* content layer — mirrored as a whole when flipH / flipV are on */}
+      <div style={{ position: 'absolute', inset: 0, transform: flipTransform }}>
+        {bg.imageUrl && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: `url(${bg.imageUrl})`,
+              opacity: bg.imageOpacity,
+              ...(bg.imageFit === 'custom' ? customBgCss(bg) : fitToCss(bg.imageFit)),
+            }}
+          />
+        )}
+        {design.elements.map((el) => (
+          <div
+            key={el.id}
+            onPointerDown={(e) => startDrag(e, el)}
+            style={interactive ? { cursor: 'move', touchAction: 'none' } : undefined}
+          >
+            <ElementView el={el} scale={scale} person={person} constants={constants} />
+          </div>
+        ))}
+      </div>
+
+      {/* selection box (screen only, drawn in visual coordinates) */}
+      {selEl && (
         <div
           style={{
             position: 'absolute',
-            inset: 0,
-            backgroundImage: `url(${bg.imageUrl})`,
-            opacity: bg.imageOpacity,
-            ...(bg.imageFit === 'custom' ? customBgCss(bg) : fitToCss(bg.imageFit)),
+            left: visLeft(selEl) - 2,
+            top: visTop(selEl) - 2,
+            width: selEl.w * scale + 4,
+            height: selEl.h * scale + 4,
+            border: '2px dashed #6366f1',
+            borderRadius: 4,
+            pointerEvents: 'none',
+            zIndex: 55,
           }}
         />
       )}
-      {design.elements.map((el) => (
-        <div
-          key={el.id}
-          onPointerDown={(e) => startDrag(e, el)}
-          style={interactive ? { cursor: 'move', touchAction: 'none' } : undefined}
-        >
-          <ElementView el={el} scale={scale} person={person} constants={constants} />
-          {interactive && selectedId === el.id && (
-            <div
-              style={{
-                position: 'absolute',
-                left: el.x * scale - 2,
-                top: el.y * scale - 2,
-                width: el.w * scale + 4,
-                height: el.h * scale + 4,
-                border: '2px dashed #6366f1',
-                borderRadius: 4,
-                pointerEvents: 'none',
-              }}
-            />
-          )}
-        </div>
-      ))}
 
       {/* free-transform resize handles on the selected element (screen only) */}
       {selEl && onResize && (
@@ -479,7 +513,7 @@ export default function CardCanvas({
                 background: '#fff',
                 border: '2px solid #6366f1',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                cursor: h.cursor,
+                cursor: handleCursor(h.id, h.cursor),
                 touchAction: 'none',
                 zIndex: 60,
                 ...handlePos(selEl, h.id),
@@ -518,6 +552,76 @@ export default function CardCanvas({
           />
         </>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// CardUnit — everything printed for ONE person in ONE grid cell:
+// the front alone, or front + back side by side / one under the other
+// (settings.backMode 'beside' / 'below'). Faces are positioned by the
+// shared layout helpers so previews and the mm-exact print sheet agree.
+// `side` forces a single face (used for the separate back page).
+// ============================================================
+export function CardUnit({
+  design, settings, scale, person, constants, side, cutMarks,
+}: {
+  design: CardDesign;
+  settings: CardPrintSettings;
+  scale: number; // px per mm
+  person?: CardPersonData;
+  constants: CardConstantsData;
+  side?: CardSide; // force one face
+  cutMarks?: boolean; // thin outline around each face
+}) {
+  const dims = unitDims(design, settings);
+  const faces = side ? [{ side, dx: 0, dy: 0 }] : unitFaces(design, settings);
+  const w = side ? design.width : dims.w;
+  const h = side ? design.height : dims.h;
+  return (
+    <div style={{ position: 'relative', width: w * scale, height: h * scale, flexShrink: 0 }}>
+      {faces.map((f) => (
+        <div
+          key={f.side}
+          style={{
+            position: 'absolute',
+            left: f.dx * scale,
+            top: f.dy * scale,
+            outline: cutMarks ? `${Math.max(0.2 * scale, 0.5)}px solid #cbd5e1` : undefined,
+          }}
+        >
+          <CardCanvas design={faceDesign(design, f.side)} scale={scale} person={person} constants={constants} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// dashed placeholder for an empty cell (same footprint as CardUnit)
+export function CardUnitPlaceholder({
+  design, settings, scale, side,
+}: {
+  design: CardDesign; settings: CardPrintSettings; scale: number; side?: CardSide;
+}) {
+  const dims = unitDims(design, settings);
+  const faces = side ? [{ side, dx: 0, dy: 0 }] : unitFaces(design, settings);
+  const w = side ? design.width : dims.w;
+  const h = side ? design.height : dims.h;
+  return (
+    <div style={{ position: 'relative', width: w * scale, height: h * scale }}>
+      {faces.map((f) => (
+        <div
+          key={f.side}
+          className="absolute border border-dashed border-slate-200 bg-slate-50/60"
+          style={{
+            left: f.dx * scale,
+            top: f.dy * scale,
+            width: design.width * scale,
+            height: design.height * scale,
+            borderRadius: design.cornerRadius * scale,
+          }}
+        />
+      ))}
     </div>
   );
 }

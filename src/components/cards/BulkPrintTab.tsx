@@ -9,15 +9,16 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Hash, ClipboardPaste, FileSpreadsheet, Table2, Link2, Eye, Printer, Plus, Trash2, X,
   ChevronRight, ChevronLeft, ChevronsRight, ChevronsLeft, CheckSquare, Square, Copy, Check,
   Wand2, Loader2, AlertTriangle, Braces, RotateCcw, Type, Columns3,
 } from 'lucide-react';
 import type { CardDesign, CardPrintSettings, CardTemplate, PaperSize, PaperOrientation } from '@/lib/card-types';
-import { PAPER_SIZES, paperDims, newElement, DEFAULT_TEXT_STYLE, normalizePrint } from '@/lib/card-types';
-import CardCanvas, { type CardConstantsData } from './CardCanvas';
+import { PAPER_SIZES, newElement, DEFAULT_TEXT_STYLE, normalizePrint, BACK_MODE_LABELS } from '@/lib/card-types';
+import { type CardConstantsData } from './CardCanvas';
+import { BackPrintSettings, PagePreview, PrintSheet, type SheetItem } from './PrintSheet';
+import { computeLayout, effectiveBackMode, paginate, sheetCount, unitDims } from '@/lib/card-layout';
 import SourcePanel from './BulkSourcePanel';
 import PreviewPane from './BulkPreviewPane';
 import {
@@ -27,8 +28,6 @@ import {
   loadBulkState, saveBulkState, clearBulkState,
 } from '@/lib/bulk-print';
 
-// CSS defines 1in = 96px and 1in = 25.4mm → exact physical scale for print
-const MM_TO_PX = 96 / 25.4;
 const PAGE_SIZE = 50; // table rows per page
 
 type Step = 'data' | 'connect' | 'preview' | 'print';
@@ -293,33 +292,25 @@ export default function BulkPrintTab({
     return idx.map((i) => rows[i - 1]).filter(Boolean);
   }, [printMode, rows, selected, rangeText, total]);
 
-  // ---------- page layout math (same formulas as the designer's print tab) ----------
-  const paper = paperDims(localPrint);
-  const usableW = paper.w - localPrint.marginRight - localPrint.marginLeft;
-  const usableH = paper.h - localPrint.marginTop - localPrint.marginBottom;
-  const cols = Math.max(0, Math.floor((usableW + localPrint.gapX) / (design.width + localPrint.gapX)));
-  const rowsPerPage = Math.max(0, Math.floor((usableH + localPrint.gapY) / (design.height + localPrint.gapY)));
-  const maxPerPage = cols * rowsPerPage;
+  // ---------- page layout math (shared helpers — same as the designer's print tab) ----------
+  const backMode = effectiveBackMode(design, localPrint);
+  const unit = unitDims(design, localPrint);
+  const layout = computeLayout(localPrint, unit.w, unit.h);
+  const { paper, cols, rows: rowsPerPage, perPage: maxPerPage } = layout;
   const perPage = maxPerPage > 0 ? Math.min(maxPerPage, Math.max(1, perPageLimit ?? maxPerPage)) : 0;
   const printCount = printRows.length;
   const pages = perPage > 0 ? Math.ceil(printCount / perPage) : 0;
+  const sheets = sheetCount(pages, backMode);
+  const previewScale = backMode === 'separate'
+    ? Math.min(145 / paper.w, 240 / paper.h)
+    : Math.min(300 / paper.w, 380 / paper.h);
 
-  const gridW = cols > 0 ? cols * design.width + (cols - 1) * localPrint.gapX : 0;
-  const gridH = rowsPerPage > 0 ? rowsPerPage * design.height + (rowsPerPage - 1) * localPrint.gapY : 0;
-  const alignH = localPrint.alignH ?? 'center';
-  const alignV = localPrint.alignV ?? 'top';
-  const offsetX = alignH === 'left' ? 0 : alignH === 'center' ? (usableW - gridW) / 2 : usableW - gridW;
-  const offsetY = alignV === 'top' ? 0 : alignV === 'center' ? (usableH - gridH) / 2 : usableH - gridH;
-  const cellLeft = (col: number) => localPrint.marginLeft + offsetX + col * (design.width + localPrint.gapX);
-  const cellTop = (row: number) => localPrint.marginTop + offsetY + row * (design.height + localPrint.gapY);
-  const previewScale = Math.min(300 / paper.w, 380 / paper.h);
-
-  const printPages = useMemo(() => {
-    if (perPage === 0) return [] as BulkRow[][];
-    const out: BulkRow[][] = [];
-    for (let i = 0; i < printRows.length; i += perPage) out.push(printRows.slice(i, i + perPage));
-    return out;
-  }, [printRows, perPage]);
+  // items of the print set with their rendered data (design shared)
+  const sheetItems = useMemo<SheetItem[]>(
+    () => printRows.map((r) => { const d = cardFor(r); return { key: r.id, person: d.person, constants: d.constants, design }; }),
+    [printRows, cardFor, design],
+  );
+  const printPages = useMemo(() => paginate(sheetItems, perPage), [sheetItems, perPage]);
 
   const doPrint = () => {
     if (!printCount || !perPage) return;
@@ -732,41 +723,25 @@ export default function BulkPrintTab({
                 <div className="mt-3 rounded-xl bg-emerald-50/70 p-3 text-xs font-bold text-slate-600">
                   مقاس الكارت <span className="text-emerald-800" dir="ltr">{design.width}×{design.height} مم</span> (من القالب، لا يتغير) ·
                   التخطيط <span className="text-emerald-800">{cols} × {rowsPerPage}</span> = {perPage} كارت/صفحة
-                  {printCount > 0 && perPage > 0 && <> · <span className="text-emerald-800">{printCount} كارت ← {pages} صفحة</span></>}
+                  {backMode !== 'none' && <> · <span className="text-violet-700">{BACK_MODE_LABELS[backMode]}</span></>}
+                  {printCount > 0 && perPage > 0 && <> · <span className="text-emerald-800">{printCount} كارت ← {sheets} صفحة</span>{backMode === 'separate' && <span className="text-slate-400"> ({pages} وجه + {pages} ظهر)</span>}</>}
                   {maxPerPage === 0 && <span className="text-red-500"> — الكارت أكبر من مساحة الورقة!</span>}
                 </div>
               </section>
 
+              {/* back side + page flip (local to this print run) */}
+              <BackPrintSettings settings={localPrint} onChange={setP} design={design} accent="emerald" />
+
               {/* first page preview */}
-              <section className="card !p-3">
-                <p className="mb-2 text-xs font-extrabold text-slate-400">معاينة الصفحة الأولى من {pages}</p>
-                <div className="flex justify-center overflow-x-auto py-1" dir="ltr">
-                  <div className="relative bg-white shadow-lg ring-1 ring-slate-200" style={{ width: paper.w * previewScale, height: paper.h * previewScale }}>
-                    <div
-                      className="absolute border border-dashed border-indigo-200"
-                      style={{
-                        top: localPrint.marginTop * previewScale, bottom: localPrint.marginBottom * previewScale,
-                        left: localPrint.marginLeft * previewScale, right: localPrint.marginRight * previewScale,
-                      }}
-                    />
-                    {perPage > 0 && Array.from({ length: maxPerPage }).map((_, i) => {
-                      const col = i % cols;
-                      const row = Math.floor(i / cols);
-                      const r = i < perPage ? printRows[i] : undefined;
-                      const data = r ? cardFor(r) : null;
-                      return (
-                        <div key={i} className="absolute" style={{ left: cellLeft(col) * previewScale, top: cellTop(row) * previewScale }}>
-                          {data ? (
-                            <CardCanvas design={design} scale={previewScale} person={data.person} constants={data.constants} />
-                          ) : (
-                            <div className="border border-dashed border-slate-200 bg-slate-50/60" style={{ width: design.width * previewScale, height: design.height * previewScale, borderRadius: design.cornerRadius * previewScale }} />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </section>
+              <PagePreview
+                items={sheetItems.slice(0, perPage)}
+                layout={layout}
+                settings={localPrint}
+                previewScale={previewScale}
+                placeholderDesign={design}
+                showBackPage={backMode === 'separate'}
+                title={<>معاينة الصفحة الأولى من {sheets}{backMode !== 'none' && <> · {BACK_MODE_LABELS[backMode]}</>}</>}
+              />
 
               <button
                 onClick={doPrint}
@@ -774,7 +749,7 @@ export default function BulkPrintTab({
                 className="btn-primary w-full flex items-center justify-center gap-2 !from-emerald-600 !to-emerald-500"
               >
                 {printing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Printer className="h-5 w-5" />}
-                {printing ? 'جارٍ تجهيز الصفحات…' : `طباعة ${printCount > 0 ? `(${printCount} كارت — ${pages} صفحة)` : ''}`}
+                {printing ? 'جارٍ تجهيز الصفحات…' : `طباعة ${printCount > 0 ? `(${printCount} كارت — ${sheets} صفحة)` : ''}`}
               </button>
               <p className="pb-2 text-center text-[11px] font-bold text-slate-400">
                 في نافذة الطباعة: اختر نفس مقاس الورق ({localPrint.paper === 'custom' ? 'مخصص' : localPrint.paper}) واضبط الهوامش على «بلا / None» والمقياس على 100%.
@@ -786,52 +761,15 @@ export default function BulkPrintTab({
       )}
 
       {/* ---------- hidden print sheet (mounted only while printing) ---------- */}
-      {printing && typeof document !== 'undefined' && createPortal(
-        <div id="bulk-print-root" dir="rtl">
-          <style>{`
-            #bulk-print-root { position: fixed; left: -100000px; top: 0; }
-            @media print {
-              body > *:not(#bulk-print-root) { display: none !important; }
-              #bulk-print-root { display: block !important; position: static !important; left: 0 !important; }
-              @page { size: ${paper.w}mm ${paper.h}mm; margin: 0; }
-              html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
-              .bulk-print-page {
-                width: ${paper.w}mm; height: ${paper.h}mm; position: relative; overflow: hidden;
-                page-break-after: always; break-after: page;
-              }
-              .bulk-print-page:last-child { page-break-after: auto; break-after: auto; }
-              .bulk-print-cell { position: absolute; }
-              .bulk-print-centerline { position: absolute; background: #94a3b8; }
-              * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            }
-          `}</style>
-          {printPages.map((pageRowsP, pi) => (
-            <div key={pi} className="bulk-print-page">
-              {localPrint.centerLineV && <div className="bulk-print-centerline" style={{ left: `${paper.w / 2}mm`, top: 0, width: '0.2mm', height: `${paper.h}mm` }} />}
-              {localPrint.centerLineH && <div className="bulk-print-centerline" style={{ top: `${paper.h / 2}mm`, left: 0, height: '0.2mm', width: `${paper.w}mm` }} />}
-              {pageRowsP.map((r, i) => {
-                const col = i % cols;
-                const row = Math.floor(i / cols);
-                const data = cardFor(r);
-                return (
-                  <div
-                    key={r.id}
-                    className="bulk-print-cell"
-                    style={{
-                      left: `${cellLeft(col)}mm`, top: `${cellTop(row)}mm`,
-                      width: `${design.width}mm`, height: `${design.height}mm`,
-                      outline: localPrint.cutMarks ? '0.2mm solid #cbd5e1' : undefined,
-                    }}
-                  >
-                    <CardCanvas design={design} scale={MM_TO_PX} person={data.person} constants={data.constants} />
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>,
-        document.body,
-      )}
+      <PrintSheet
+        pages={printPages}
+        layout={layout}
+        settings={localPrint}
+        rootId="bulk-print-root"
+        mounted={printing}
+        hide="offscreen"
+        backPages={backMode === 'separate'}
+      />
     </div>
   );
 }

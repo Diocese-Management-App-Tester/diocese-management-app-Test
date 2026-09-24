@@ -319,7 +319,9 @@ export const PLACEHOLDER_RE = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
 export const placeholdersInDesign = (design: CardDesign): string[] => {
   const found = new Set<string>();
-  design.elements.forEach((el) => {
+  // front + (enabled) back elements
+  const els = [...design.elements, ...(design.back?.enabled ? design.back.elements : [])];
+  els.forEach((el) => {
     [el.text ?? '', el.label ?? ''].forEach((s) => {
       const re = new RegExp(PLACEHOLDER_RE.source, 'g');
       let m: RegExpExecArray | null;

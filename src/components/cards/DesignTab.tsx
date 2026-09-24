@@ -5,15 +5,18 @@ import {
   Plus, Trash2, Upload, X, ChevronUp, ChevronDown, Loader2,
   Type, User, QrCode, Landmark, ImagePlus, TextCursorInput, Image as ImageIcon,
   ZoomIn, ZoomOut, Maximize, Lock, LockOpen, Church, Users,
+  FlipHorizontal2, FlipVertical2, Copy, RotateCcw, ArrowLeftRight,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { uploadPhoto } from '@/lib/upload';
 import type {
   CardDesign, CardElement, CardElementType, CardVariableField, CardConstantField, ImageFit, TextAlign,
+  CardSide, CardFace, CardBack,
 } from '@/lib/card-types';
 import {
   newElement, VARIABLE_FIELDS, BIRTHDAY_VARIABLE_FIELDS, CONSTANT_FIELDS, ELEMENT_TYPE_LABELS,
-  IMAGE_FIT_LABELS, FONT_FAMILIES, isImageElement,
+  IMAGE_FIT_LABELS, FONT_FAMILIES, isImageElement, faceDesign, normalizeBack, sampleBack,
+  DEFAULT_BACK, CARD_SIDE_LABELS,
 } from '@/lib/card-types';
 import CardCanvas, { SAMPLE_PERSON, type CardConstantsData, type CardPersonData } from './CardCanvas';
 
@@ -110,17 +113,26 @@ export default function DesignTab({
   const bgFileRef = useRef<HTMLInputElement>(null);
   const imgFileRef = useRef<HTMLInputElement>(null);
 
-  const selected = design.elements.find((e) => e.id === selectedId) ?? null;
+  // ---------- which face is being edited (الوجه / الظهر) ----------
+  const [side, setSide] = useState<CardSide>('front');
+  const back: CardBack = normalizeBack(design.back);
+  const backEnabled = back.enabled;
+  // the face under edit as a stand-alone design (same size) — all the
+  // background / border / element controls below work on `face`
+  const face: CardDesign = side === 'front' ? design : faceDesign(design, 'back');
+  const selected = face.elements.find((e) => e.id === selectedId) ?? null;
 
   // preview zoom for precise placement (1x .. 6x)
   const [previewZoom, setPreviewZoom] = useState(1);
   const zoomIn = () => setPreviewZoom((z) => Math.min(6, Math.round((z + 0.5) * 2) / 2));
   const zoomOut = () => setPreviewZoom((z) => Math.max(1, Math.round((z - 0.5) * 2) / 2));
 
-  // preview scale: fit card into ~340px width, capped height so the sticky bar stays compact
+  // preview scale: both faces fit side by side into ~340px, capped height so
+  // the sticky bar stays compact (one face when the back is off)
+  const facesShown = backEnabled ? 2 : 1;
   const baseScale = useMemo(
-    () => Math.min(340 / design.width, 190 / design.height),
-    [design.width, design.height]
+    () => Math.min((340 - (facesShown - 1) * 12) / (design.width * facesShown), 190 / design.height),
+    [design.width, design.height, facesShown]
   );
   const scale = baseScale * previewZoom;
 
@@ -130,30 +142,70 @@ export default function DesignTab({
 
   // ---------- mutators ----------
   const set = (patch: Partial<CardDesign>) => onChange({ ...design, ...patch });
+  // patch the FACE under edit (front = the design itself, back = design.back)
+  const setFace = (patch: Partial<CardFace>) => {
+    if (side === 'front') set(patch);
+    else set({ back: { ...back, ...patch } });
+  };
   const setBg = (patch: Partial<CardDesign['background']>) =>
-    set({ background: { ...design.background, ...patch } });
+    setFace({ background: { ...face.background, ...patch } });
   const setBorder = (patch: Partial<CardDesign['border']>) =>
-    set({ border: { ...design.border, ...patch } });
+    setFace({ border: { ...face.border, ...patch } });
+  const setBack = (patch: Partial<CardBack>) => set({ back: { ...back, ...patch } });
+
+  // switch side (selection belongs to one face)
+  const switchSide = (s: CardSide) => { setSide(s); setSelectedId(null); setShowAddMenu(false); };
+
+  // enable the back: seed it with a sample (or the front's background when it is a colour)
+  const enableBack = () => {
+    const seeded = back.elements.length ? { ...back, enabled: true } : {
+      ...sampleBack(design.width, design.height),
+      border: { ...design.border },
+      background: { ...design.background, imageUrl: null },
+    };
+    set({ back: seeded });
+    switchSide('back');
+  };
+  const disableBack = () => {
+    setBack({ enabled: false });
+    if (side === 'back') switchSide('front');
+  };
+  const clearBack = () => {
+    if (!confirm('مسح كل عناصر الظهر؟')) return;
+    setBack({ ...DEFAULT_BACK, enabled: true, border: { ...design.border } });
+    setSelectedId(null);
+  };
+  // copy the other face's background + border + elements (new ids) into this face
+  const copyFromOtherSide = () => {
+    const src = side === 'front' ? faceDesign(design, 'back') : design;
+    if (!confirm(`نسخ ${CARD_SIDE_LABELS[side === 'front' ? 'back' : 'front']} إلى ${CARD_SIDE_LABELS[side]}؟ سيحل محل التصميم الحالي.`)) return;
+    setFace({
+      background: { ...src.background },
+      border: { ...src.border },
+      elements: src.elements.map((e) => ({ ...e, id: `el_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` })),
+    });
+    setSelectedId(null);
+  };
 
   const updateEl = (id: string, patch: Partial<CardElement>) =>
-    set({ elements: design.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) });
+    setFace({ elements: face.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) });
   const updateElStyle = (id: string, patch: Partial<CardElement['style']>) =>
-    set({
-      elements: design.elements.map((e) =>
+    setFace({
+      elements: face.elements.map((e) =>
         e.id === id ? { ...e, style: { ...e.style, ...patch } } : e
       ),
     });
   const removeEl = (id: string) => {
-    set({ elements: design.elements.filter((e) => e.id !== id) });
+    setFace({ elements: face.elements.filter((e) => e.id !== id) });
     if (selectedId === id) setSelectedId(null);
   };
   const moveLayer = (id: string, dir: -1 | 1) => {
-    const idx = design.elements.findIndex((e) => e.id === id);
+    const idx = face.elements.findIndex((e) => e.id === id);
     const to = idx + dir;
-    if (idx < 0 || to < 0 || to >= design.elements.length) return;
-    const arr = [...design.elements];
+    if (idx < 0 || to < 0 || to >= face.elements.length) return;
+    const arr = [...face.elements];
     [arr[idx], arr[to]] = [arr[to], arr[idx]];
-    set({ elements: arr });
+    setFace({ elements: arr });
   };
 
   const addElement = (type: CardElementType, field?: CardVariableField | CardConstantField) => {
@@ -163,7 +215,7 @@ export default function DesignTab({
       x: Math.max(2, design.width / 2 - 15),
       y: Math.max(2, design.height / 2 - 5),
     });
-    set({ elements: [...design.elements, el] });
+    setFace({ elements: [...face.elements, el] });
     setSelectedId(el.id);
     setShowAddMenu(false);
   };
@@ -231,30 +283,53 @@ export default function DesignTab({
             </button>
           </div>
         </div>
+        {/* front + back next to each other; the face under edit is interactive */}
         <div
           className={`overflow-auto py-1 ${previewZoom === 1 ? 'flex justify-center' : ''}`}
           style={{ maxHeight: previewZoom === 1 ? undefined : 260 }}
-          dir="ltr"
+          dir="rtl"
         >
           <div
-            className="shadow-lg"
-            style={{
-              borderRadius: design.cornerRadius * scale,
-              width: 'fit-content',
-              margin: previewZoom === 1 ? undefined : '0 auto',
-            }}
+            className="flex items-start gap-3"
+            style={{ width: 'fit-content', margin: previewZoom === 1 ? undefined : '0 auto' }}
           >
-            <CardCanvas
-              design={design}
-              scale={scale}
-              constants={constants}
-              person={samplePerson ?? SAMPLE_PERSON}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              onMove={(id, x, y) => updateEl(id, { x, y })}
-              onResize={(id, patch) => updateEl(id, patch)}
-              showCenterLines={showCenterLines}
-            />
+            {(backEnabled ? (['front', 'back'] as CardSide[]) : (['front'] as CardSide[])).map((s) => {
+              const active = s === side;
+              const fd = faceDesign(design, s);
+              return (
+                <div key={s} className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => switchSide(s)}
+                    className={`badge !py-0.5 transition ${active ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                  >
+                    {CARD_SIDE_LABELS[s]}
+                    {(fd.flipH || fd.flipV) && <span className="mr-1 opacity-80">⇄</span>}
+                  </button>
+                  <div
+                    onClick={() => !active && switchSide(s)}
+                    className={`shadow-lg transition ${active ? 'ring-2 ring-primary-400 ring-offset-2' : 'cursor-pointer opacity-70 hover:opacity-100'}`}
+                    style={{ borderRadius: design.cornerRadius * scale, width: 'fit-content' }}
+                    dir="ltr"
+                  >
+                    {active ? (
+                      <CardCanvas
+                        design={fd}
+                        scale={scale}
+                        constants={constants}
+                        person={samplePerson ?? SAMPLE_PERSON}
+                        selectedId={selectedId}
+                        onSelect={setSelectedId}
+                        onMove={(id, x, y) => updateEl(id, { x, y })}
+                        onResize={(id, patch) => updateEl(id, patch)}
+                        showCenterLines={showCenterLines}
+                      />
+                    ) : (
+                      <CardCanvas design={fd} scale={scale} constants={constants} person={samplePerson ?? SAMPLE_PERSON} />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
         {/* live distance from card center for the selected element */}
@@ -264,6 +339,102 @@ export default function DesignTab({
             أفقي <span dir="ltr">{centerDx(selected) > 0 ? '+' : ''}{centerDx(selected)}</span> مم
             · رأسي <span dir="ltr">{centerDy(selected) > 0 ? '+' : ''}{centerDy(selected)}</span> مم
           </p>
+        )}
+      </section>
+
+      {/* ---------- side selector: الوجه / الظهر + flip ---------- */}
+      <section className="card">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-extrabold text-slate-600">وجهي الكارت</h3>
+          {backEnabled ? (
+            <button onClick={disableBack} className="badge bg-red-50 text-red-500 hover:bg-red-100 transition !py-1">
+              <X className="ml-1 inline h-3 w-3" /> إلغاء الظهر
+            </button>
+          ) : (
+            <button onClick={enableBack} className="btn-primary !py-1.5 !px-3 flex items-center gap-1 text-xs">
+              <Plus className="h-3.5 w-3.5" /> إضافة ظهر للكارت
+            </button>
+          )}
+        </div>
+        <div className="flex rounded-2xl bg-slate-50 p-1">
+          {(['front', 'back'] as CardSide[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => (s === 'back' && !backEnabled ? enableBack() : switchSide(s))}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-extrabold transition ${
+                side === s ? 'bg-primary-600 text-white shadow' : 'text-slate-500 hover:bg-white'
+              } ${s === 'back' && !backEnabled ? 'opacity-60' : ''}`}
+            >
+              {s === 'front' ? '🪪' : '🔄'} {CARD_SIDE_LABELS[s]}
+              {s === 'back' && !backEnabled && <span className="text-[10px] font-bold opacity-80">(غير مفعّل)</span>}
+              {s === 'back' && backEnabled && <span className="badge !py-0 bg-white/20 text-current">{back.elements.length}</span>}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] font-bold text-slate-400">
+          {side === 'front'
+            ? 'تعمل كل الإعدادات أدناه (الخلفية · الإطار · العناصر) على الوجه.'
+            : 'تعمل كل الإعدادات أدناه على الظهر — نفس المقاس ونفس أنواع العناصر (بيانات · QR · شعارات · نص). طريقة طباعة الظهر تُختار في تبويب الطباعة.'}
+        </p>
+
+        {/* mirror the face */}
+        <div className="mt-3 border-t border-indigo-50 pt-3">
+          <p className="mb-1.5 text-[11px] font-extrabold text-slate-500">
+            قلب (انعكاس) {CARD_SIDE_LABELS[side]} — للطباعة على ورق شفاف / ورق نقل حراري
+          </p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setFace({ flipH: !face.flipH })}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-extrabold transition ${
+                face.flipH ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-slate-200 text-slate-400 hover:bg-slate-50'
+              }`}
+            >
+              <FlipHorizontal2 className="h-4 w-4" /> قلب أفقي
+            </button>
+            <button
+              onClick={() => setFace({ flipV: !face.flipV })}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border py-2 text-xs font-extrabold transition ${
+                face.flipV ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-slate-200 text-slate-400 hover:bg-slate-50'
+              }`}
+            >
+              <FlipVertical2 className="h-4 w-4" /> قلب رأسي
+            </button>
+            {(face.flipH || face.flipV) && (
+              <button
+                onClick={() => setFace({ flipH: false, flipV: false })}
+                aria-label="إلغاء القلب"
+                className="rounded-xl border border-slate-200 px-3 text-slate-400 hover:bg-slate-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {(face.flipH || face.flipV) && (
+            <p className="mt-1.5 text-[11px] font-bold text-amber-600">
+              ⚠️ هذا الوجه يُطبع معكوساً — السحب وتغيير الحجم في المعاينة يتبعان الاتجاه الظاهر.
+            </p>
+          )}
+        </div>
+
+        {/* back tools */}
+        {backEnabled && (
+          <div className="mt-3 flex flex-wrap gap-1.5 border-t border-indigo-50 pt-3">
+            <button onClick={copyFromOtherSide} className="badge bg-slate-100 text-slate-600 hover:bg-slate-200 transition !py-1.5">
+              <Copy className="ml-1 inline h-3 w-3" />
+              نسخ {CARD_SIDE_LABELS[side === 'front' ? 'back' : 'front']} إلى {CARD_SIDE_LABELS[side]}
+            </button>
+            <button
+              onClick={() => switchSide(side === 'front' ? 'back' : 'front')}
+              className="badge bg-slate-100 text-slate-600 hover:bg-slate-200 transition !py-1.5"
+            >
+              <ArrowLeftRight className="ml-1 inline h-3 w-3" /> الانتقال إلى {CARD_SIDE_LABELS[side === 'front' ? 'back' : 'front']}
+            </button>
+            {side === 'back' && (
+              <button onClick={clearBack} className="badge bg-red-50 text-red-500 hover:bg-red-100 transition !py-1.5">
+                <Trash2 className="ml-1 inline h-3 w-3" /> مسح عناصر الظهر
+              </button>
+            )}
+          </div>
         )}
       </section>
 
@@ -295,9 +466,9 @@ export default function DesignTab({
 
       {/* ---------- background ---------- */}
       <section className="card">
-        <h3 className="mb-2 text-sm font-extrabold text-slate-600">الخلفية</h3>
+        <h3 className="mb-2 text-sm font-extrabold text-slate-600">الخلفية <span className="text-slate-300">— {CARD_SIDE_LABELS[side]}</span></h3>
         <div className="grid grid-cols-2 gap-2">
-          <ColorInput label="لون الخلفية" value={design.background.color} onChange={(v) => setBg({ color: v })} />
+          <ColorInput label="لون الخلفية" value={face.background.color} onChange={(v) => setBg({ color: v })} />
           <div>
             <span className="mb-0.5 block text-[11px] font-bold text-slate-500">صورة الخلفية</span>
             <input
@@ -307,7 +478,7 @@ export default function DesignTab({
               className="hidden"
               onChange={(e) => e.target.files?.[0] && uploadBg(e.target.files[0])}
             />
-            {design.background.imageUrl ? (
+            {face.background.imageUrl ? (
               <div className="flex items-center gap-2">
                 <button onClick={() => bgFileRef.current?.click()} className="btn-secondary !py-2 !px-3 flex-1 text-xs flex items-center justify-center gap-1">
                   {uploadingBg ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
@@ -325,14 +496,14 @@ export default function DesignTab({
             )}
           </div>
         </div>
-        {design.background.imageUrl && (
+        {face.background.imageUrl && (
           <>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="mb-0.5 block text-[11px] font-bold text-slate-500">طريقة العرض</span>
                 <select
                   className="input-field !py-2 !px-2.5 !text-sm"
-                  value={design.background.imageFit}
+                  value={face.background.imageFit}
                   onChange={(e) => setBg({ imageFit: e.target.value as ImageFit | 'custom' })}
                 >
                   {Object.entries(IMAGE_FIT_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -341,11 +512,11 @@ export default function DesignTab({
               </label>
               <label className="block">
                 <span className="mb-0.5 block text-[11px] font-bold text-slate-500">
-                  شفافية الصورة ({Math.round(design.background.imageOpacity * 100)}%)
+                  شفافية الصورة ({Math.round(face.background.imageOpacity * 100)}%)
                 </span>
                 <input
                   type="range" min={0.05} max={1} step={0.05}
-                  value={design.background.imageOpacity}
+                  value={face.background.imageOpacity}
                   onChange={(e) => setBg({ imageOpacity: Number(e.target.value) })}
                   className="mt-3 w-full accent-primary-600"
                 />
@@ -353,7 +524,7 @@ export default function DesignTab({
             </div>
 
             {/* free transform: zoom in/out + move/crop until the final look */}
-            {design.background.imageFit === 'custom' && (
+            {face.background.imageFit === 'custom' && (
               <div className="mt-2 rounded-xl bg-indigo-50/60 p-3">
                 <p className="mb-2 text-[11px] font-extrabold text-slate-500">
                   تحكم حر في الخلفية — كبّر وصغّر وحرّك حتى تصل للشكل النهائي (ما يخرج عن حدود الكارت يُقص)
@@ -361,11 +532,11 @@ export default function DesignTab({
                 <label className="block">
                   <span className="mb-0.5 flex items-center justify-between text-[11px] font-bold text-slate-500">
                     <span>الزووم</span>
-                    <span dir="ltr">{Math.round((design.background.zoom ?? 1) * 100)}%</span>
+                    <span dir="ltr">{Math.round((face.background.zoom ?? 1) * 100)}%</span>
                   </span>
                   <input
                     type="range" min={0.2} max={5} step={0.01}
-                    value={design.background.zoom ?? 1}
+                    value={face.background.zoom ?? 1}
                     onChange={(e) => setBg({ zoom: Number(e.target.value) })}
                     className="w-full accent-primary-600"
                   />
@@ -374,11 +545,11 @@ export default function DesignTab({
                   <label className="block">
                     <span className="mb-0.5 flex items-center justify-between text-[11px] font-bold text-slate-500">
                       <span>تحريك أفقي</span>
-                      <span dir="ltr">{design.background.offsetX ?? 0}%</span>
+                      <span dir="ltr">{face.background.offsetX ?? 0}%</span>
                     </span>
                     <input
                       type="range" min={-200} max={200} step={1}
-                      value={design.background.offsetX ?? 0}
+                      value={face.background.offsetX ?? 0}
                       onChange={(e) => setBg({ offsetX: Number(e.target.value) })}
                       className="w-full accent-primary-600"
                       dir="ltr"
@@ -387,11 +558,11 @@ export default function DesignTab({
                   <label className="block">
                     <span className="mb-0.5 flex items-center justify-between text-[11px] font-bold text-slate-500">
                       <span>تحريك رأسي</span>
-                      <span dir="ltr">{design.background.offsetY ?? 0}%</span>
+                      <span dir="ltr">{face.background.offsetY ?? 0}%</span>
                     </span>
                     <input
                       type="range" min={-200} max={200} step={1}
-                      value={design.background.offsetY ?? 0}
+                      value={face.background.offsetY ?? 0}
                       onChange={(e) => setBg({ offsetY: Number(e.target.value) })}
                       className="w-full accent-primary-600"
                       dir="ltr"
@@ -413,16 +584,16 @@ export default function DesignTab({
           <label className="mb-2 flex items-center gap-2 text-xs font-extrabold text-slate-600">
             <input
               type="checkbox"
-              checked={design.border.enabled}
+              checked={face.border.enabled}
               onChange={(e) => setBorder({ enabled: e.target.checked })}
               className="h-4 w-4 accent-primary-600"
             />
             إطار حول الكارت
           </label>
-          {design.border.enabled && (
+          {face.border.enabled && (
             <div className="grid grid-cols-2 gap-2">
-              <ColorInput label="لون الإطار" value={design.border.color} onChange={(v) => setBorder({ color: v })} />
-              <Num label="سُمك الإطار" suffix="مم" value={design.border.width} min={0.1} max={5} step={0.1} onChange={(v) => setBorder({ width: v })} />
+              <ColorInput label="لون الإطار" value={face.border.color} onChange={(v) => setBorder({ color: v })} />
+              <Num label="سُمك الإطار" suffix="مم" value={face.border.width} min={0.1} max={5} step={0.1} onChange={(v) => setBorder({ width: v })} />
             </div>
           )}
         </div>
@@ -431,7 +602,7 @@ export default function DesignTab({
       {/* ---------- elements list ---------- */}
       <section className="card">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-slate-600">العناصر ({design.elements.length})</h3>
+          <h3 className="text-sm font-extrabold text-slate-600">عناصر {CARD_SIDE_LABELS[side]} ({face.elements.length})</h3>
           <div className="relative">
             <button onClick={() => setShowAddMenu((v) => !v)} className="btn-primary !py-1.5 !px-3 flex items-center gap-1 text-xs">
               <Plus className="h-3.5 w-3.5" /> إضافة عنصر
@@ -498,7 +669,7 @@ export default function DesignTab({
         </div>
 
         <ul className="space-y-1.5">
-          {[...design.elements].reverse().map((el) => (
+          {[...face.elements].reverse().map((el) => (
             <li key={el.id}>
               <button
                 onClick={() => setSelectedId(el.id === selectedId ? null : el.id)}
@@ -516,8 +687,8 @@ export default function DesignTab({
               </button>
             </li>
           ))}
-          {design.elements.length === 0 && (
-            <li className="py-6 text-center text-xs font-bold text-slate-300">لا توجد عناصر — أضف عنصراً</li>
+          {face.elements.length === 0 && (
+            <li className="py-6 text-center text-xs font-bold text-slate-300">لا توجد عناصر في {CARD_SIDE_LABELS[side]} — أضف عنصراً</li>
           )}
         </ul>
       </section>
