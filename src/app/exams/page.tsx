@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, Search, Loader2, GraduationCap, ChevronLeft, ListChecks, Users, Trophy, Clock, Info, Copy, Shuffle,
+  Plus, Search, Loader2, GraduationCap, ChevronLeft, ListChecks, Users, Trophy, Clock, Copy, Shuffle,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { ExamsHeader, StatusBadge, Toast, scopeLabel } from '@/components/exams/ExamBits';
@@ -101,6 +101,7 @@ export default function ExamsHubPage() {
       <ExamsHeader
         back="/settings"
         badge={<span className="badge bg-violet-100 text-violet-700 tabular-nums">{exams.length}</span>}
+        info="أنشئ امتحان اختيار من متعدد، أضف الأسئلة مع الإجابة الصحيحة والدرجة والوقت، وحدد شرط النجاح والنقاط — ثم انشره ليظهر للمخدومين في بوابتهم. النتائج تظهر هنا لحظياً."
         actions={
           <button id="exam-new" type="button" onClick={() => setForm(true)} className="btn-primary flex items-center gap-1.5 !py-2 !px-3 text-sm !from-violet-600 !to-violet-500">
             <Plus className="h-4 w-4" /> امتحان جديد
@@ -111,11 +112,6 @@ export default function ExamsHubPage() {
       {migrationMissing && (
         <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MIGRATION_HINT}</p>
       )}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-violet-50 px-4 py-3 text-xs font-bold text-violet-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        أنشئ امتحان اختيار من متعدد، أضف الأسئلة مع الإجابة الصحيحة والدرجة والوقت، وحدد شرط النجاح والنقاط — ثم انشره ليظهر للمخدومين في بوابتهم. النتائج تظهر هنا لحظياً.
-      </p>
 
       <section id="exams-stats" className="mb-3 grid grid-cols-4 gap-2">
         {[

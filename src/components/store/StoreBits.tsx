@@ -15,6 +15,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { cachedLookup, ALL } from '@/lib/queries';
 import type { Church, Service, ClassRoom } from '@/lib/types';
 import { useNavLabel } from '@/lib/customization-context';
+import InfoTip from '@/components/InfoTip';
 
 const TABS = [
   { href: '/store/pos', label: 'الكاشير', icon: ScanLine, id: 'store-tab-pos' },
@@ -22,7 +23,7 @@ const TABS = [
   { href: '/store/archive', label: 'الأرشيف', icon: Archive, id: 'store-tab-archive' },
 ];
 
-export function StoreHeader({ title, badge }: { title?: string; badge?: React.ReactNode }) {
+export function StoreHeader({ title, badge, info }: { title?: string; badge?: React.ReactNode; info?: React.ReactNode }) {
   const path = usePathname();
   const name = useNavLabel('store');
   return (
@@ -36,6 +37,7 @@ export function StoreHeader({ title, badge }: { title?: string; badge?: React.Re
           {name}
           {title && <span className="text-slate-400 font-bold text-sm">· {title}</span>}
           {badge}
+          {info && <InfoTip title={name}>{info}</InfoTip>}
         </h2>
       </section>
       <nav id="store-tabs" className="mb-3 grid grid-cols-3 gap-2">

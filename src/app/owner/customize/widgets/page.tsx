@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  LayoutGrid, ChevronUp, ChevronDown, Trash2, Plus, Info, RectangleHorizontal, Square, Pencil, RotateCcw, Lock, Users,
+  LayoutGrid, ChevronUp, ChevronDown, Trash2, Plus, RectangleHorizontal, Square, Pencil, RotateCcw, Lock, Users,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
@@ -92,7 +92,10 @@ export default function CustomizeWidgetsPage() {
   return (
     <AppShell>
       <OwnerGate>
-        <EditorHeader back="/owner/customize" icon={LayoutGrid} title="ودجات الرئيسية" badge={`${items.length} ودجة`} />
+        <EditorHeader
+          back="/owner/customize" icon={LayoutGrid} title="ودجات الرئيسية" badge={`${items.length} ودجة`}
+          info="رتّب الودجات بالأسهم، غيّر الحجم (عرض كامل / نصف) أو العنوان، واحذف ما لا تريده. الودجة المرتبطة بوحدة لا تظهر إلا لمن فُعِّلت له الوحدة، والودجات الخاصة بالمسؤولين لا تظهر لخدام الفصول."
+        />
 
         {/* ---------- miniature preview ---------- */}
         <section id="widgets-preview" className="mb-4 overflow-hidden rounded-2xl border border-indigo-100 bg-slate-100 shadow-card">
@@ -113,14 +116,6 @@ export default function CustomizeWidgetsPage() {
             })}
           </div>
         </section>
-
-        <p className="mb-4 flex items-start gap-2 rounded-2xl bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            رتّب الودجات بالأسهم، غيّر الحجم (عرض كامل / نصف) أو العنوان، واحذف ما لا تريده. الودجة المرتبطة بوحدة لا تظهر إلا
-            لمن فُعِّلت له الوحدة، والودجات الخاصة بالمسؤولين لا تظهر لخدام الفصول.
-          </span>
-        </p>
 
         {/* ---------- current layout ---------- */}
         {loading ? null : (

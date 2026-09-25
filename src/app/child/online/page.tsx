@@ -7,7 +7,7 @@
 
 import Link from 'next/link';
 import {
-  Video, Clock, User, Play, ChevronLeft, Radio, CalendarClock, CheckCircle2, XCircle, ShieldCheck, Info, GraduationCap, Star,
+  Video, Clock, User, Play, ChevronLeft, Radio, CalendarClock, CheckCircle2, XCircle, ShieldCheck, GraduationCap, Star,
 } from 'lucide-react';
 import ChildShell, { useChildOnline } from '@/components/child/ChildShell';
 import { EmptyState, PageTitle, fmtDateTime, fmtTime } from '@/components/child/ChildBits';
@@ -31,7 +31,7 @@ function OnlineContent() {
 
   return (
     <>
-      <PageTitle icon={<Video className="h-5 w-5 text-red-600" />} title="الفصول الأونلاين" sub="ادخل الفصل المباشر وأبقَ الصفحة مفتوحة — الحضور يُحسب من وقتك وردودك على فحوص الانتباه" />
+      <PageTitle icon={<Video className="h-5 w-5 text-red-600" />} title="الفصول الأونلاين" info="ادخل الفصل المباشر وأبقَ الصفحة مفتوحة — الحضور يُحسب من وقتك وردودك على فحوص الانتباه. أثناء الفصل يرسل الخادم «فحص انتباه» — نافذة تظهر لك وعليك الضغط عليها خلال المهلة. تُحسب حاضراً إذا حققت نسبة الوقت وعدد الفحوص المطلوبة." />
 
       {classes === null && <div className="card py-10 text-center text-sm font-bold text-slate-400">جارٍ التحميل…</div>}
       {classes && classes.length === 0 && <EmptyState text="لا توجد فصول أونلاين لك الآن" />}
@@ -55,12 +55,6 @@ function OnlineContent() {
         </section>
       )}
 
-      {classes && classes.length > 0 && (
-        <p className="mt-4 flex items-start gap-2 px-1 text-[11px] font-bold text-slate-400">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          أثناء الفصل يرسل الخادم «فحص انتباه» — نافذة تظهر لك وعليك الضغط عليها خلال المهلة. تُحسب حاضراً إذا حققت نسبة الوقت وعدد الفحوص المطلوبة.
-        </p>
-      )}
     </>
   );
 }

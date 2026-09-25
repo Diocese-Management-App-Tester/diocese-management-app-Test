@@ -12,9 +12,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
   Bell, Send, Clock, Users, UserCog, Church, Layers, School, HeartHandshake, UserCheck, Globe,
-  ImagePlus, X, Search, Check, Loader2, Link2, Info, CalendarClock, Eye,
+  ImagePlus, X, Search, Check, Loader2, Link2, CalendarClock, Eye,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
+import InfoTip from '@/components/InfoTip';
 import { NotifHeader, Toast } from '@/components/notifications/NotifBits';
 import { ScopeSelectors, useScopeState, useStoreLookups } from '@/components/store/StoreBits';
 import { ChatAvatar, compressImage } from '@/components/messages/ChatBits';
@@ -273,8 +274,8 @@ export default function NewNotificationPage() {
         )}
 
         {kind === 'group' && (
-          <p className="mb-3 flex items-start gap-1.5 rounded-xl bg-teal-50 px-3 py-2 text-[11px] font-bold text-teal-800">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> يصل الإشعار إلى المخدومين الذين اخترتهم في مجموعتك من وحدة الأشابين
+          <p className="mb-3 flex items-center gap-1 px-1 text-[11px] font-bold text-teal-700">
+            الإرسال لمجموعتي <InfoTip size="xs" title="مجموعتي" tone="text-teal-500 hover:bg-teal-50">يصل الإشعار إلى المخدومين الذين اخترتهم في مجموعتك من وحدة الأشابين.</InfoTip>
           </p>
         )}
 

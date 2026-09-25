@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Plus, Loader2, Copy, Trash2, Star, StarOff, ChevronLeft, IdCard, Printer, X, Info,
+  Plus, Loader2, Copy, Trash2, Star, StarOff, ChevronLeft, IdCard, Printer, X,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
@@ -84,7 +84,7 @@ export default function BirthdayCardsPage() {
 
   return (
     <AppShell>
-      <BirthdayHeader title="كروت التهنئة" />
+      <BirthdayHeader title="كروت التهنئة" info="نفس محرك تصميم الكروت مع بيانات إضافية لعيد الميلاد (السن الجديدة · يوم وشهر العيد · نقاط الهدية). القالب الأقرب لنطاق المخدوم (فصل ← خدمة ← كنيسة) هو الذي يُستخدم لكارته." />
       {migrationMissing && <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MIGRATION_HINT}</p>}
 
       {printCtx && (
@@ -93,11 +93,6 @@ export default function BirthdayCardsPage() {
           لطباعة كروت مواليد <b>{ARABIC_MONTHS[printCtx.month - 1]} {printCtx.year}</b>: اختر قالباً ← تبويب «الطباعة» يعرض أطفال الشهر جاهزين للطباعة.
         </p>
       )}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-pink-50 px-4 py-3 text-xs font-bold text-pink-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        نفس محرك تصميم الكروت مع بيانات إضافية لعيد الميلاد (السن الجديدة · يوم وشهر العيد · نقاط الهدية). القالب الأقرب لنطاق المخدوم (فصل ← خدمة ← كنيسة) هو الذي يُستخدم لكارته.
-      </p>
 
       <div className="mb-3 flex justify-end">
         <button id="bd-add-template" onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-1.5 !px-4 !py-2 text-sm">

@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Plus, Search, Loader2, Megaphone, Users, UserCog, ChevronLeft, Image as ImageIcon, Info } from 'lucide-react';
+import { Plus, Search, Loader2, Megaphone, Users, UserCog, ChevronLeft, Image as ImageIcon } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { MessagesHeader, ChatAvatar, UnreadDot, EmptyChat } from '@/components/messages/ChatBits';
 import { useAuth } from '@/lib/auth-context';
@@ -83,6 +83,7 @@ export default function MessagesInboxPage() {
       <MessagesHeader
         back="/settings"
         badge={inbox && inbox.total_unread > 0 ? <UnreadDot n={inbox.total_unread} /> : undefined}
+        info="المخدوم يكتب من بوابته فتظهر رسالته هنا لكل خدام فصله وخدمته وكنيسته. أنت ترسل لمخدوم أو لمجموعة أو لفصل / خدمة / كنيسة كاملة حسب صلاحيتك، وللخدام التابعين لك."
         actions={
           <Link id="msg-new" href="/messages/new" className="btn-primary flex items-center gap-1.5 !py-2 !px-3 text-sm !from-sky-600 !to-sky-500">
             <Plus className="h-4 w-4" /> رسالة جديدة
@@ -93,11 +94,6 @@ export default function MessagesInboxPage() {
       {migrationMissing && (
         <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MESSAGES_MIGRATION_HINT}</p>
       )}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-sky-50 px-4 py-3 text-xs font-bold text-sky-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        المخدوم يكتب من بوابته فتظهر رسالته هنا لكل خدام فصله وخدمته وكنيسته. أنت ترسل لمخدوم أو لمجموعة أو لفصل / خدمة / كنيسة كاملة حسب صلاحيتك، وللخدام التابعين لك.
-      </p>
 
       {/* Announcements bucket */}
       <Link id="msg-broadcasts" href="/messages/b" className="card mb-3 flex items-center gap-3 !p-3 transition hover:bg-violet-50/60">
