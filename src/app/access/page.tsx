@@ -407,13 +407,14 @@ function EventAdmin({
           {(sub === 'rules' || sub === 'all') && (
             <section id="access-rules-section" className="card mb-3 !p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="flex items-center gap-1.5 text-sm font-extrabold"><ListChecks className="h-4 w-4 text-primary-600" /> القواعد <span className="text-xs font-bold text-slate-400">— {rulesSummary(cfg.rules)}</span></h3>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold text-slate-600">المستوى الأعلى: {OP_LABELS[event.root_op]}</span>
-              </div>
-              <HintBox>
+                <h3 className="flex items-center gap-1.5 text-sm font-extrabold"><ListChecks className="h-4 w-4 text-primary-600" /> القواعد <span className="text-xs font-bold text-slate-400">— {rulesSummary(cfg.rules)}</span>
+                  <HintBox title="القواعد">
                 كل قاعدة شرط واحد. المستوى الأعلى يربط القواعد والمجموعات بـ <b>{event.root_op === 'and' ? 'و' : 'أو'}</b> (يُغيَّر من تعديل البوابة).
                 أضف <b>مجموعة</b> لربط عدة شروط بـ «أو» داخل «و» أو العكس — والمجموعات تتداخل. القاعدة المتوقفة تُهمل.
-              </HintBox>
+                  </HintBox>
+                </h3>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold text-slate-600">المستوى الأعلى: {OP_LABELS[event.root_op]}</span>
+              </div>
               <div className="mt-3">
                 <RuleTree
                   rules={cfg.rules} groups={cfg.groups} rootOp={event.root_op} lookups={lookups} showStatus={false} idPrefix="cfg"

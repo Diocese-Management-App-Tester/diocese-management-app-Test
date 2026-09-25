@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Hash, Info, ChevronDown, ChevronUp, Church, Layers, School, Search, Sparkles, Settings2, History, Wand2, RotateCcw,
+  Hash, ChevronDown, ChevronUp, Church, Layers, School, Search, Sparkles, Settings2, History, Wand2, RotateCcw,
   type LucideIcon,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
@@ -211,16 +211,10 @@ export default function CustomizeCodesPage() {
   return (
     <AppShell>
       <OwnerGate>
-        <EditorHeader back="/owner/customize" icon={Hash} title="نظام الأكواد" badge={codesCustomized ? 'مخصص' : undefined} />
-
-        <p className="mb-4 flex items-start gap-2 rounded-2xl bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            صمّم شكل الأكواد التي يولّدها التطبيق: أجزاء متتابعة (بادئة · الوقت · تاريخ · عشوائي · اختصار الكنيسة أو
-            الخدمة أو الفصل) بينها فاصل. يمكن تطبيق <b>نظام واحد على الكل</b> أو تصميم كل كود على حدة أو إبقاء{' '}
-            <b>الطريقة الأصلية</b>. الأكواد المولّدة سابقاً لا تتغير.
-          </span>
-        </p>
+        <EditorHeader
+          back="/owner/customize" icon={Hash} title="نظام الأكواد" badge={codesCustomized ? 'مخصص' : undefined}
+          info={<>صمّم شكل الأكواد التي يولّدها التطبيق: أجزاء متتابعة (بادئة · الوقت · تاريخ · عشوائي · اختصار الكنيسة أو الخدمة أو الفصل) بينها فاصل. يمكن تطبيق <b>نظام واحد على الكل</b> أو تصميم كل كود على حدة أو إبقاء <b>الطريقة الأصلية</b>. الأكواد المولّدة سابقاً لا تتغير.</>}
+        />
 
         {loading ? null : (
           <>

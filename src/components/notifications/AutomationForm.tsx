@@ -5,7 +5,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { Zap, X, Users, UserCog, Info, ImagePlus, Eye, Loader2 } from 'lucide-react';
+import { Zap, X, Users, UserCog, ImagePlus, Eye, Loader2 } from 'lucide-react';
+import InfoTip from '@/components/InfoTip';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ScopeSelectors, useScopeState } from '@/components/store/StoreBits';
 import { compressImage } from '@/components/messages/ChatBits';
@@ -123,11 +124,10 @@ export default function AutomationForm({ supabase, initial, churches, services, 
           <button type="button" onClick={onClose} aria-label="إغلاق" className="rounded-full p-1.5 hover:bg-slate-100"><X className="h-5 w-5" /></button>
         </div>
 
-        <p className="mb-1 text-[11px] font-extrabold text-slate-500">١ · الحدث (Trigger)</p>
-        <select id="auto-trigger" value={trigger} onChange={(e) => pickTrigger(e.target.value as TriggerKey)} className="input-field mb-1 appearance-none text-sm font-bold">
+        <p className="mb-1 flex items-center gap-1 text-[11px] font-extrabold text-slate-500">١ · الحدث (Trigger) <InfoTip size="xs" title={def.label}>{def.desc}</InfoTip></p>
+        <select id="auto-trigger" value={trigger} onChange={(e) => pickTrigger(e.target.value as TriggerKey)} className="input-field mb-3 appearance-none text-sm font-bold">
           {TRIGGERS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>
-        <p className="mb-3 flex items-start gap-1 text-[11px] font-bold text-slate-400"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {def.desc}</p>
 
         {def.config && (
           <div className="mb-3">

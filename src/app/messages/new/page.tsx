@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, UserCog, Megaphone, UserCheck, Search, Loader2, Check, Send, ImagePlus, X, Info } from 'lucide-react';
+import { Users, UserCog, Megaphone, UserCheck, Search, Loader2, Check, Send, ImagePlus, X } from 'lucide-react';
 import Image from 'next/image';
 import AppShell from '@/components/AppShell';
+import InfoTip from '@/components/InfoTip';
 import { MessagesHeader, ChatAvatar, Toast, compressImage } from '@/components/messages/ChatBits';
 import { ScopeSelectors, useScopeState, useStoreLookups } from '@/components/store/StoreBits';
 import { useAuth } from '@/lib/auth-context';
@@ -222,18 +223,17 @@ export default function NewMessagePage() {
             <ScopeSelectors idPrefix="new-scope" scope={scope} churches={churches} services={services} classes={classes} />
             <div className={`-mt-1 flex items-center justify-between rounded-xl px-3 py-2 text-xs font-bold ${scopeAllowed ? 'bg-violet-50 text-violet-800' : 'bg-amber-50 text-amber-700'}`}>
               <span className="flex items-center gap-1.5"><Megaphone className="h-4 w-4" /> {audienceLabel}</span>
-              <span className="tabular-nums">
+              <span className="flex items-center gap-1 tabular-nums">
                 {!scopeAllowed ? 'خارج صلاحيتك' : audience === null ? '…' : `${audience} ${target === 'children' ? 'مخدوم' : 'خادم'}`}
+                {!scopeAllowed && (
+                  <InfoTip size="xs" title="حدود الإرسال" tone="text-amber-600 hover:bg-amber-100">
+                    {profile?.role === 'church_manager' ? 'مدير الكنيسة يرسل لكنيسته أو لخدمة / فصل داخلها.' :
+                     profile?.role === 'service_manager' ? 'مسؤول الخدمة يرسل لخدمته أو لفصل داخلها.' :
+                     'خادم الفصل يرسل لفصله فقط. الإرسال لكل الكنائس لمالك التطبيق.'}
+                  </InfoTip>
+                )}
               </span>
             </div>
-            {!scopeAllowed && (
-              <p className="mt-2 flex items-start gap-1.5 text-[11px] font-bold text-slate-500">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                {profile?.role === 'church_manager' ? 'مدير الكنيسة يرسل لكنيسته أو لخدمة / فصل داخلها.' :
-                 profile?.role === 'service_manager' ? 'مسؤول الخدمة يرسل لخدمته أو لفصل داخلها.' :
-                 'خادم الفصل يرسل لفصله فقط. الإرسال لكل الكنائس لمالك التطبيق.'}
-              </p>
-            )}
           </>
         ) : (
           <>

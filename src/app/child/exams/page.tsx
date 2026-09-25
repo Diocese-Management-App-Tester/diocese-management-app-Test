@@ -9,7 +9,7 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import {
-  GraduationCap, Clock, ListChecks, Trophy, Star, Play, RotateCcw, Lock, CheckCircle2, XCircle, ChevronLeft, Timer, Info,
+  GraduationCap, Clock, ListChecks, Trophy, Star, Play, RotateCcw, Lock, CheckCircle2, XCircle, ChevronLeft, Timer, 
 } from 'lucide-react';
 import ChildShell from '@/components/child/ChildShell';
 import { EmptyState, PageTitle, usePortalList, fmtDateTime } from '@/components/child/ChildBits';
@@ -40,7 +40,7 @@ function ExamsContent() {
 
   return (
     <>
-      <PageTitle icon={<GraduationCap className="h-5 w-5 text-violet-600" />} title="الامتحانات" sub="امتحانات فصلك — كل سؤال له وقت محدد، ولا يمكن الرجوع للسؤال السابق" />
+      <PageTitle icon={<GraduationCap className="h-5 w-5 text-violet-600" />} title="الامتحانات" info="امتحانات فصلك — كل سؤال له وقت محدد، ولا يمكن الرجوع للسؤال السابق. عند بدء الامتحان يظهر لك سؤال واحد كل مرة مع عدّاد للوقت؛ اختر إجابتك واضغط «التالي» أو ينتقل تلقائياً عند انتهاء الوقت. إذا أُغلق التطبيق يمكنك المتابعة من حيث توقفت." />
 
       {error && <div className="card mb-3 text-center text-sm font-bold text-red-600">{error}</div>}
       {rows === null && !error && <div className="card py-10 text-center text-sm font-bold text-slate-400">جارٍ التحميل…</div>}
@@ -60,12 +60,6 @@ function ExamsContent() {
         </section>
       )}
 
-      {rows && rows.length > 0 && (
-        <p className="mt-4 flex items-start gap-2 px-1 text-[11px] font-bold text-slate-400">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          عند بدء الامتحان يظهر لك سؤال واحد كل مرة مع عدّاد للوقت؛ اختر إجابتك واضغط «التالي» أو ينتقل تلقائياً عند انتهاء الوقت. إذا أُغلق التطبيق يمكنك المتابعة من حيث توقفت.
-        </p>
-      )}
     </>
   );
 }

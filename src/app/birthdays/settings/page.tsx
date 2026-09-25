@@ -6,7 +6,7 @@
 // template from here; the gift NumPad opens on gift_points.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Save, Gift, MessageSquareText, Info, Globe, Church as ChurchIcon } from 'lucide-react';
+import { Loader2, Save, Gift, MessageSquareText, Globe, Church as ChurchIcon } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -90,13 +90,8 @@ export default function BirthdaySettingsPage() {
 
   return (
     <AppShell>
-      <BirthdayHeader title="الإعدادات" />
+      <BirthdayHeader title="الإعدادات" info="هدية النقاط الافتراضية ونص التهنئة الافتراضي. الإعداد على مستوى الكنيسة يغلب الإعداد العام. يستطيع كل خادم تعديل النص لنفسه من صفحة الشهر دون تغيير هذا الافتراضي." />
       {migrationMissing && <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MIGRATION_HINT}</p>}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-pink-50 px-4 py-3 text-xs font-bold text-pink-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        هدية النقاط الافتراضية ونص التهنئة الافتراضي. الإعداد على مستوى الكنيسة يغلب الإعداد العام. يستطيع كل خادم تعديل النص لنفسه من صفحة الشهر دون تغيير هذا الافتراضي.
-      </p>
 
       {rows === null ? (
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-pink-500" /></div>

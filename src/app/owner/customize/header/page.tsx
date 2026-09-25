@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  PanelTop, ChevronRight, ChevronLeft, Pencil, Trash2, Plus, Menu, Info, Link as LinkIcon, RotateCcw, X,
+  PanelTop, ChevronRight, ChevronLeft, Pencil, Trash2, Plus, Menu, Link as LinkIcon, RotateCcw, X,
 } from 'lucide-react';
 import Image from 'next/image';
 import AppShell from '@/components/AppShell';
@@ -109,7 +109,10 @@ export default function CustomizeHeaderPage() {
   return (
     <AppShell>
       <OwnerGate>
-        <EditorHeader back="/owner/customize" icon={PanelTop} title="أيقونات الهيدر" badge={`${items.length} / ${MAX_ITEMS}`} />
+        <EditorHeader
+          back="/owner/customize" icon={PanelTop} title="أيقونات الهيدر" badge={`${items.length} / ${MAX_ITEMS}`}
+          info="رتّب الأيقونات بالأسهم، غيّر أيقونة أي عنصر، احذف ما لا تريده وأضف روابط سريعة لأي صفحة أو وحدة. زر القائمة ثابت في النهاية. جرس الرسائل / الإشعارات يظهر فقط لمن لديه الوحدة."
+        />
 
         {/* ---------- live preview ---------- */}
         <section id="header-preview" className="mb-4 overflow-hidden rounded-2xl border border-indigo-100 bg-slate-100 shadow-card">
@@ -146,14 +149,6 @@ export default function CustomizeHeaderPage() {
             </div>
           </div>
         </section>
-
-        <p className="mb-4 flex items-start gap-2 rounded-2xl bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            رتّب الأيقونات بالأسهم، غيّر أيقونة أي عنصر، احذف ما لا تريده وأضف روابط سريعة لأي صفحة أو وحدة.
-            زر القائمة ثابت في النهاية. جرس الرسائل / الإشعارات يظهر فقط لمن لديه الوحدة.
-          </span>
-        </p>
 
         {/* ---------- items ---------- */}
         {loading ? null : items.length === 0 ? (

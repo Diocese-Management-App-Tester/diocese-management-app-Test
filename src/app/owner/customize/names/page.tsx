@@ -7,7 +7,7 @@
 // app_settings.names (realtime → all devices).
 
 import { useEffect, useMemo, useState } from 'react';
-import { Type, RotateCcw, Search, Info, type LucideIcon } from 'lucide-react';
+import { Type, RotateCcw, Search, type LucideIcon } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
 import { EditorHeader, SaveBar, KIND_LABEL } from '@/components/customize/shared';
@@ -83,15 +83,8 @@ export default function CustomizeNamesPage() {
           icon={Type}
           title="أسماء الصفحات والوحدات"
           badge={customCount ? `${customCount} مخصص` : undefined}
+          info={<>الاسم الذي تكتبه هنا يظهر في <b>كل مكان</b>: عنوان الصفحة نفسها، شريط المهام، القائمة الجانبية، الهيدر، وودجات الرئيسية. اترك الحقل فارغاً للاسم الافتراضي.</>}
         />
-
-        <p className="mb-4 flex items-start gap-2 rounded-2xl bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            الاسم الذي تكتبه هنا يظهر في <b>كل مكان</b>: عنوان الصفحة نفسها، شريط المهام، القائمة الجانبية،
-            الهيدر، وودجات الرئيسية. اترك الحقل فارغاً للاسم الافتراضي.
-          </span>
-        </p>
 
         <div className="relative mb-3">
           <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

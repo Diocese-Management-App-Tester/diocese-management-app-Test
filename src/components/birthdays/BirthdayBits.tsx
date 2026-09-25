@@ -15,6 +15,7 @@ import {
 import type { BirthdayGreeting, GreetingKind } from '@/lib/birthdays';
 import { GREETING_LABELS } from '@/lib/birthdays';
 import { useNavLabel } from '@/lib/customization-context';
+import InfoTip from '@/components/InfoTip';
 
 const TABS = [
   { href: '/birthdays', label: 'الشهر', icon: CalendarDays, id: 'bd-tab-month', exact: true },
@@ -22,7 +23,7 @@ const TABS = [
   { href: '/birthdays/settings', label: 'الإعدادات', icon: Settings, id: 'bd-tab-settings', exact: false },
 ];
 
-export function BirthdayHeader({ title, badge, hideTabs = false }: { title?: string; badge?: React.ReactNode; hideTabs?: boolean }) {
+export function BirthdayHeader({ title, badge, hideTabs = false, info }: { title?: string; badge?: React.ReactNode; hideTabs?: boolean; info?: React.ReactNode }) {
   const path = usePathname();
   const name = useNavLabel('birthdays');
   return (
@@ -36,6 +37,7 @@ export function BirthdayHeader({ title, badge, hideTabs = false }: { title?: str
           {name}
           {title && <span className="truncate text-sm font-bold text-slate-400">· {title}</span>}
           {badge}
+          {info && <InfoTip title={title ? `${name} · ${title}` : name}>{info}</InfoTip>}
         </h2>
       </section>
       {!hideTabs && (

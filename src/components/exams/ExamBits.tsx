@@ -11,10 +11,11 @@ import { ArrowRight, GraduationCap } from 'lucide-react';
 import { EXAM_STATUS_LABELS, EXAM_STATUS_STYLE, type ExamStatus } from '@/lib/exams';
 import { APP_TZ } from '@/lib/time';
 import { useNavLabel } from '@/lib/customization-context';
+import InfoTip from '@/components/InfoTip';
 
 export function ExamsHeader({
-  title, badge, back = '/exams', actions,
-}: { title?: string; badge?: React.ReactNode; back?: string; actions?: React.ReactNode }) {
+  title, badge, back = '/exams', actions, info,
+}: { title?: string; badge?: React.ReactNode; back?: string; actions?: React.ReactNode; info?: React.ReactNode }) {
   const name = useNavLabel('exams');
   return (
     <section className="mb-3 flex items-center gap-2">
@@ -25,6 +26,7 @@ export function ExamsHeader({
         <GraduationCap className="h-5 w-5 shrink-0 text-violet-600" />
         <span className="truncate">{title ?? name}</span>
         {badge}
+        {info && <InfoTip title={title ?? name}>{info}</InfoTip>}
       </h2>
       {actions}
     </section>

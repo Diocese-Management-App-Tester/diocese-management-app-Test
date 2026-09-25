@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, Search, Loader2, Video, ChevronLeft, Users, Clock, Info, CalendarClock, ShieldCheck, CheckCircle2, Radio,
+  Plus, Search, Loader2, Video, ChevronLeft, Users, Clock, CalendarClock, ShieldCheck, CheckCircle2, Radio,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { OnlineHeader, StatusBadge, PlatformBadge, scopeLabel, fmtDateTime, fmtTime } from '@/components/online/OnlineBits';
@@ -86,6 +86,7 @@ export default function OnlineHubPage() {
       <OnlineHeader
         back="/settings"
         badge={<span className="badge bg-red-100 text-red-700 tabular-nums">{rows.length}</span>}
+        info="أنشئ فصلاً بموعد ورابط بث، ثم اضغط «ابدأ» وقت الدرس. المخدومون يدخلون من بوابتهم؛ أرسل فحوص انتباه وأسئلة مباشرة، وعند «أنهِ» يُحسب الحضور تلقائياً بقواعد الفصل."
         actions={
           <button id="oc-new" type="button" onClick={() => setForm(true)} className="btn-primary flex items-center gap-1.5 !py-2 !px-3 text-sm !from-red-600 !to-red-500">
             <Plus className="h-4 w-4" /> فصل جديد
@@ -94,11 +95,6 @@ export default function OnlineHubPage() {
       />
 
       {migrationMissing && <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MIGRATION_HINT}</p>}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-red-50 px-4 py-3 text-xs font-bold text-red-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        أنشئ فصلاً بموعد ورابط بث، ثم اضغط «ابدأ» وقت الدرس. المخدومون يدخلون من بوابتهم؛ أرسل فحوص انتباه وأسئلة مباشرة، وعند «أنهِ» يُحسب الحضور تلقائياً بقواعد الفصل.
-      </p>
 
       <section id="oc-stats" className="mb-3 grid grid-cols-4 gap-2">
         {[

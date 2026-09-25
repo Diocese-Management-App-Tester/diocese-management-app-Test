@@ -4,10 +4,11 @@
 
 import Link from 'next/link';
 import { ArrowRight, Save, RotateCcw, Loader2, Check, type LucideIcon } from 'lucide-react';
+import InfoTip from '@/components/InfoTip';
 
 export function EditorHeader({
-  back, icon: Icon, title, badge,
-}: { back: string; icon: LucideIcon; title: string; badge?: string }) {
+  back, icon: Icon, title, badge, info,
+}: { back: string; icon: LucideIcon; title: string; badge?: string; info?: React.ReactNode }) {
   return (
     <section className="mb-4 flex items-center gap-2">
       <Link href={back} aria-label="رجوع" className="rounded-full p-1.5 hover:bg-slate-100">
@@ -17,6 +18,7 @@ export function EditorHeader({
         <Icon className="h-5 w-5 text-primary-600" />
         {title}
         {badge && <span className="badge bg-primary-100 text-primary-700">{badge}</span>}
+        {info && <InfoTip title={title}>{info}</InfoTip>}
       </h2>
     </section>
   );

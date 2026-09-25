@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { User, ListChecks } from 'lucide-react';
+import InfoTip from '@/components/InfoTip';
 import { APP_TZ } from '@/lib/time';
 import type { ChildPerson } from '@/lib/child-portal';
 
@@ -58,10 +59,10 @@ export function EmptyState({ text }: { text: string }) {
   );
 }
 
-export function PageTitle({ icon, title, sub }: { icon: React.ReactNode; title: string; sub?: string }) {
+export function PageTitle({ icon, title, sub, info }: { icon: React.ReactNode; title: string; sub?: string; info?: React.ReactNode }) {
   return (
     <section className="mb-4">
-      <h2 className="flex items-center gap-2 text-lg font-extrabold">{icon}{title}</h2>
+      <h2 className="flex items-center gap-2 text-lg font-extrabold">{icon}{title}{info && <InfoTip title={title}>{info}</InfoTip>}</h2>
       {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
     </section>
   );
