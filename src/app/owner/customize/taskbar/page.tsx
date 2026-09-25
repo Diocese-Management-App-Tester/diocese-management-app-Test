@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  PanelBottom, ChevronRight, ChevronLeft, Pencil, RotateCcw, Layers, Info, Menu, type LucideIcon,
+  PanelBottom, ChevronRight, ChevronLeft, Pencil, RotateCcw, Layers, Menu, type LucideIcon,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { OwnerGate } from '@/components/ModuleGate';
@@ -92,7 +92,10 @@ export default function CustomizeTaskbarPage() {
   return (
     <AppShell>
       <OwnerGate>
-        <EditorHeader back="/owner/customize" icon={PanelBottom} title="شريط المهام" badge={`${TASKBAR_SIZE} خانات`} />
+        <EditorHeader
+          back="/owner/customize" icon={PanelBottom} title="شريط المهام" badge={`${TASKBAR_SIZE} خانات`}
+          info={<>لكل خانة: اختر الوجهة (صفحة أساسية أو وحدة)، غيّر الأيقونة أو الاسم، وحرّك الترتيب بالأسهم. <b>الاسم الذي تكتبه هنا يغيّر اسم الصفحة / الوحدة في كل مكان</b> (عنوان الصفحة والقوائم). الخادم الذي لا تُفعَّل له وحدة موجودة في الشريط يرى بدلاً منها صفحة أساسية.</>}
+        />
 
         {/* ---------- live preview ---------- */}
         <section id="taskbar-preview" className="mb-4 overflow-hidden rounded-2xl border border-indigo-100 bg-slate-100 shadow-card">
@@ -120,15 +123,6 @@ export default function CustomizeTaskbarPage() {
             </div>
           </div>
         </section>
-
-        <p className="mb-4 flex items-start gap-2 rounded-2xl bg-indigo-50 px-4 py-3 text-xs font-bold text-indigo-700">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            لكل خانة: اختر الوجهة (صفحة أساسية أو وحدة)، غيّر الأيقونة أو الاسم، وحرّك الترتيب بالأسهم.
-            <b> الاسم الذي تكتبه هنا يغيّر اسم الصفحة / الوحدة في كل مكان</b> (عنوان الصفحة والقوائم).
-            الخادم الذي لا تُفعَّل له وحدة موجودة في الشريط يرى بدلاً منها صفحة أساسية.
-          </span>
-        </p>
 
         {/* ---------- 5 slots ---------- */}
         {loading ? null : (

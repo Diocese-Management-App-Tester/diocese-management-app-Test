@@ -18,9 +18,10 @@ import Link from 'next/link';
 import Image from 'next/image';
 import {
   HeartHandshake, ArrowRight, Search, Loader2, Plus, X, Check, Users, UserPlus,
-  Lock, ChevronDown, School, Info, Trash2,
+  Lock, ChevronDown, School, Trash2,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
+import InfoTip from '@/components/InfoTip';
 import { PersonAvatar } from '@/components/CallFeedback';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -224,6 +225,7 @@ export default function ShepherdsPage() {
           <HeartHandshake className="h-5 w-5 text-teal-600" />
           {pageName}
           <span id="my-group-count" className="badge bg-teal-100 text-teal-700 tabular-nums">{mine.length}</span>
+          <InfoTip title={pageName}>اختر المخدومين الذين تتابعهم بنفسك — يظهرون معًا من زر «مجموعتي» في صفحة المخدومين. المخدوم لا يكون إلا في مجموعة خادم واحد.</InfoTip>
         </h2>
       </section>
 
@@ -232,11 +234,6 @@ export default function ShepherdsPage() {
           ⚠️ الوحدة تحتاج تشغيل تحديث قاعدة البيانات <code dir="ltr">0025_shepherd_groups.sql</code> في Supabase أولاً.
         </p>
       )}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-teal-50 px-4 py-3 text-xs font-bold text-teal-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        اختر المخدومين الذين تتابعهم بنفسك — يظهرون معًا من زر «مجموعتي» في صفحة المخدومين. المخدوم لا يكون إلا في مجموعة خادم واحد.
-      </p>
 
       {/* ---------- Tabs ---------- */}
       <div id="shepherd-tabs" className="mb-3 grid grid-cols-2 gap-2">

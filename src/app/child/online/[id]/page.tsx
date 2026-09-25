@@ -16,9 +16,10 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
   Video, Play, LogOut, Loader2, BellRing, Clock, ShieldCheck, ListChecks, MessageCircle, GraduationCap,
-  CheckCircle2, XCircle, Radio, ChevronRight, Hand, Star, Wifi, Info, User, CalendarClock,
+  CheckCircle2, XCircle, Radio, ChevronRight, Hand, Star, Wifi, User, CalendarClock,
 } from 'lucide-react';
 import ChildShell from '@/components/child/ChildShell';
+import InfoTip from '@/components/InfoTip';
 import { fmtDateTime, fmtTime } from '@/components/child/ChildBits';
 import { StreamPlayer, PlatformBadge, elapsedLabel } from '@/components/online/OnlineBits';
 import LiveChat from '@/components/online/LiveChat';
@@ -390,8 +391,8 @@ function Room() {
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-extrabold text-slate-600 disabled:opacity-60">
             <LogOut className="h-4 w-4" /> خروج من الفصل
           </button>
-          <p className="flex items-start gap-1.5 px-1 text-[11px] font-bold text-slate-400">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> أبقِ هذه الصفحة مفتوحة وظاهرة — إغلاقها أو تركها في الخلفية طويلاً يُحسب خروجاً من الفصل.
+          <p className="flex items-center justify-center gap-1 px-1 text-[11px] font-bold text-slate-400">
+            أبقِ الصفحة مفتوحة <InfoTip size="xs" title="لماذا أبقيها مفتوحة؟">أبقِ هذه الصفحة مفتوحة وظاهرة — إغلاقها أو تركها في الخلفية طويلاً يُحسب خروجاً من الفصل.</InfoTip>
           </p>
         </>
       )}

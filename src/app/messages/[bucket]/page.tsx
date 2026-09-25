@@ -8,8 +8,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, Megaphone, Phone, ChevronUp, Users, Plus, Info } from 'lucide-react';
+import { Loader2, Megaphone, Phone, ChevronUp, Users, Plus } from 'lucide-react';
 import AppShell from '@/components/AppShell';
+import InfoTip from '@/components/InfoTip';
 import {
   MessagesHeader, ChatAvatar, MessageBubble, DayDivider, Composer, ImageViewer, Toast, EmptyChat,
 } from '@/components/messages/ChatBits';
@@ -154,9 +155,8 @@ export default function MessageThreadPage() {
         </p>
       )}
       {kind === 'staff' && header && header.can_write === false && (
-        <p className="mb-2 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          يمكنك القراءة فقط — هذا الخادم ليس تابعاً لك ولم يراسلك.
+        <p className="mb-2 flex items-center justify-center gap-1 text-[11px] font-bold text-amber-700">
+          للقراءة فقط <InfoTip size="xs" title="للقراءة فقط" tone="text-amber-600 hover:bg-amber-50">يمكنك القراءة فقط — هذا الخادم ليس تابعاً لك ولم يراسلك.</InfoTip>
         </p>
       )}
 

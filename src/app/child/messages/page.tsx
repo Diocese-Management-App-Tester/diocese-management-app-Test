@@ -8,7 +8,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { MessageCircle, ChevronLeft, Church, Image as ImageIcon, Info } from 'lucide-react';
+import { MessageCircle, ChevronLeft, Church, Image as ImageIcon } from 'lucide-react';
 import ChildShell, { useChildMessages } from '@/components/child/ChildShell';
 import { EmptyState, PageTitle } from '@/components/child/ChildBits';
 import { UnreadDot } from '@/components/messages/ChatBits';
@@ -30,13 +30,8 @@ function MessagesContent() {
       <PageTitle
         icon={<MessageCircle className="h-5 w-5 text-sky-600" />}
         title="الرسائل"
-        sub="اكتب لخدامك — يقرأ رسالتك كل خدام فصلك ويردّون عليك هنا"
+        info="اكتب لخدامك — يقرأ رسالتك كل خدام فصلك ويردّون عليك هنا. لكل فصل مسجَّل فيه محادثة واحدة. إعلانات الفصل والخدمة والكنيسة تظهر داخل المحادثة أيضاً."
       />
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-sky-50 px-4 py-3 text-xs font-bold text-sky-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        لكل فصل مسجَّل فيه محادثة واحدة. إعلانات الفصل والخدمة والكنيسة تظهر داخل المحادثة أيضاً.
-      </p>
 
       {conversations === null && <div className="card py-10 text-center text-sm font-bold text-slate-400">جارٍ التحميل…</div>}
       {conversations && conversations.length === 0 && (

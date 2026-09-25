@@ -8,7 +8,8 @@
 // min successful checks · min answers · check window · attendance points).
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Save, Loader2, CalendarClock, Link2, ShieldCheck, Star, GraduationCap, CalendarCheck, Info } from 'lucide-react';
+import { X, Save, Loader2, CalendarClock, Link2, ShieldCheck, Star, GraduationCap, CalendarCheck } from 'lucide-react';
+import InfoTip from '@/components/InfoTip';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { cachedLookup } from '@/lib/queries';
@@ -242,8 +243,7 @@ export default function ClassFormModal({
 
           {/* attendance rules */}
           <div className="rounded-2xl border-2 border-emerald-100 bg-emerald-50/40 p-3">
-            <p className="mb-1 flex items-center gap-1.5 text-xs font-extrabold text-emerald-800"><ShieldCheck className="h-4 w-4" /> قواعد الحضور (قابلة للتعديل لكل فصل)</p>
-            <p className="mb-2 flex items-start gap-1 text-[11px] font-bold text-emerald-700/80"><Info className="mt-0.5 h-3 w-3 shrink-0" /> يُعدّ المخدوم حاضراً إذا حقق كل الشروط معاً: نسبة الوقت، والفحوص الناجحة، وعدد الإجابات. الدخول وحده لا يكفي.</p>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-extrabold text-emerald-800"><ShieldCheck className="h-4 w-4" /> قواعد الحضور <InfoTip size="xs" title="قواعد الحضور" tone="text-emerald-600 hover:bg-emerald-100">قابلة للتعديل لكل فصل. يُعدّ المخدوم حاضراً إذا حقق كل الشروط معاً: نسبة الوقت، والفحوص الناجحة، وعدد الإجابات. الدخول وحده لا يكفي.</InfoTip></p>
             <div className="grid grid-cols-2 gap-2">
               <Field label="الحد الأدنى للوقت ٪">
                 <input id="oc-min-time" type="number" min={0} max={100} className="input-field" value={form.min_time_percent} onChange={(e) => set('min_time_percent', num(e.target.value, 0, 100, 60))} />

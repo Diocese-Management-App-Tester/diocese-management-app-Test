@@ -12,9 +12,10 @@
 import { useMemo } from 'react';
 import {
   CheckCircle2, XCircle, ShieldCheck, ShieldX, Hash, Star, CalendarCheck, Clock, DoorOpen, Ban, Power,
-  ListChecks, Users, Info, Layers, MinusCircle, ChevronDown,
+  ListChecks, Users, Layers, MinusCircle, ChevronDown,
 } from 'lucide-react';
 import { PersonAvatar } from '@/components/CallFeedback';
+import InfoTip from '@/components/InfoTip';
 import { GENDER_LABELS } from '@/lib/types';
 import {
   describeActual, describeRule, ruleKindLabel, DENY_REASON_LABELS, OP_SHORT, OP_LABELS,
@@ -360,10 +361,6 @@ export function HistoryList({ rows }: { rows: AccessCheckResult['history'] }) {
 // =====================================================================
 // Info hint box
 // =====================================================================
-export function HintBox({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="flex items-start gap-1.5 rounded-xl bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">
-      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> <span>{children}</span>
-    </p>
-  );
+export function HintBox({ children, title = 'توضيح' }: { children: React.ReactNode; title?: string }) {
+  return <InfoTip title={title}>{children}</InfoTip>;
 }

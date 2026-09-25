@@ -18,6 +18,7 @@ import { uploadPhoto } from '@/lib/upload';
 import { ROLE_LABELS } from '@/lib/types';
 import { fmtMsgTime, type ChatMessage } from '@/lib/chat';
 import { useNavLabel } from '@/lib/customization-context';
+import InfoTip from '@/components/InfoTip';
 
 export async function compressImage(file: File): Promise<Blob> {
   const url = URL.createObjectURL(file);
@@ -47,8 +48,8 @@ export async function compressImage(file: File): Promise<Blob> {
 }
 
 export function MessagesHeader({
-  title, sub, badge, back = '/messages', actions, icon,
-}: { title?: string; sub?: string; badge?: ReactNode; back?: string; actions?: ReactNode; icon?: ReactNode }) {
+  title, sub, badge, back = '/messages', actions, icon, info,
+}: { title?: string; sub?: string; badge?: ReactNode; back?: string; actions?: ReactNode; icon?: ReactNode; info?: ReactNode }) {
   const name = useNavLabel('messages');
   return (
     <section className="mb-3 flex items-center gap-2">
@@ -61,6 +62,7 @@ export function MessagesHeader({
           {!icon && <MessageCircle className="h-5 w-5 shrink-0 text-sky-600" />}
           <span className="truncate">{title ?? name}</span>
           {badge}
+          {info && <InfoTip title={title ?? name}>{info}</InfoTip>}
         </h2>
         {sub && <p className="truncate text-xs font-bold text-slate-400">{sub}</p>}
       </div>

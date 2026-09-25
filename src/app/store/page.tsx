@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Package, ScanLine, Archive, ChevronLeft, Info, Star } from 'lucide-react';
+import { Package, ScanLine, Archive, ChevronLeft, Star } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { StoreHeader } from '@/components/store/StoreBits';
 import { useAuth } from '@/lib/auth-context';
@@ -58,16 +58,11 @@ export default function StoreHubPage() {
 
   return (
     <AppShell>
-      <StoreHeader />
+      <StoreHeader info="نقطة بيع بالنقاط: المخدوم يستبدل رصيده من النقاط بأصناف من المخزون. كل عملية تُخصم من رصيده، تُحفظ كفاتورة في الأرشيف وتظهر له في صفحة النقاط ببوابة المخدوم." />
 
       {migrationMissing && (
         <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MIGRATION_HINT}</p>
       )}
-
-      <p className="mb-3 flex items-start gap-2 rounded-2xl bg-orange-50 px-4 py-3 text-xs font-bold text-orange-800">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        نقطة بيع بالنقاط: المخدوم يستبدل رصيده من النقاط بأصناف من المخزون. كل عملية تُخصم من رصيده، تُحفظ كفاتورة في الأرشيف وتظهر له في صفحة النقاط ببوابة المخدوم.
-      </p>
 
       <section id="store-stats" className="mb-4 grid grid-cols-4 gap-2">
         {[
