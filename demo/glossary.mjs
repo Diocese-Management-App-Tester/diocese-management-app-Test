@@ -1,0 +1,283 @@
+// demo/glossary.mjs — what every button / menu / control does, in Arabic and
+// English, matched by its visible label. Written from the README (module
+// sections + "Currently Completed Features") so the tour can explain each
+// control the explorer found. `explain(label)` → { ar, en } | null.
+// Order matters: the first matching rule wins.
+
+export const G = [
+  /* ---------------- app shell ---------------- */
+  [/^فتح القائمة$|^القائمة الجانبية$/, 'يفتح القائمة الجانبية: الصفحات الخمس الأساسية (الرئيسية · المخدومين · الماسح · الإحصائيات · الإعدادات) ثم قسم «الوحدات» الذي يعرض وحدة المالك (للمالك) والوحدات الممنوحة لنطاقك فقط، وفي الأسفل تسجيل الخروج. الترتيب يتبع «تخصيص التطبيق → شريط المهام»: كل ما ليس في الشريط السفلي يظهر هنا.',
+    'Opens the side menu: the five core pages (Home · Children · Scanner · Statistics · Settings) followed by the «Modules» section listing the owner module (owner only) and the modules granted to your scope, then Logout. Anything not placed in the bottom bar by «Customize → Taskbar» appears here.'],
+  [/^تغيير تاريخ العمل$|^تاريخ العمل$/, 'تاريخ العمل: التاريخ والوقت الذي تُسجَّل به كل عملية (حضور · نقاط · افتقاد). افتراضياً يطابق الساعة الحية؛ يمكنك تجميده على يوم آخر (أمس · اليوم · غداً أو تاريخ ووقت محددان) لتسجيل حضور يوم سابق مثلاً. التاريخ المجمّد يحدد أي تكرار للمناسبة يُحسب عليه الحضور ونتيجة الافتقاد.',
+    'Working date: the date/time stamped on every operation (attendance · points · call feedback). By default it follows the live clock; you can freeze it on another day (yesterday · today · tomorrow or an exact date/time), e.g. to record a previous day\'s attendance. The frozen date decides which event occurrence attendance and call feedback count against.'],
+  [/^اعتماد التاريخ$/, 'يعتمد التاريخ والوقت المختارين كـ«تاريخ عمل» ويظهر في الهيدر مع شارة «مجمّد».', 'Applies the chosen date/time as the working date; the header shows it with a «frozen» badge.'],
+  [/^(اليوم|أمس|غدا|غداً)$/, 'اختصار لضبط تاريخ العمل على هذا اليوم.', 'Shortcut that sets the working date to that day.'],
+  [/رسائل غير مقروءة|^الرسائل$/, 'جرس الرسائل (وحدة الرسائل): يعرض عدد الرسائل غير المقروءة ويفتح صندوق الوارد /messages — محادثات المخدومين والخدام ودلو الإعلانات.',
+    'Messages bell (Messages module): shows the unread count and opens the inbox /messages — children & staff conversations plus the announcements bucket.'],
+  [/^الإشعارات$/, 'جرس الإشعارات (وحدة الإشعارات): عدد الإشعارات غير المقروءة ويفتح الواردة /notifications/inbox.', 'Notifications bell (Notifications module): unread count; opens the inbox /notifications/inbox.'],
+  [/^تسجيل الخروج$/, 'ينهي الجلسة ويعود إلى صفحة الدخول. تُسجَّل عملية «خروج» في سجل النشاط.', 'Ends the session and returns to the login page; a «logout» row is written to the activity log.'],
+  [/^رجوع$|^عودة$/, 'يرجع إلى الصفحة السابقة.', 'Goes back to the previous page.'],
+  [/^إغلاق$|^إلغاء$/, 'يغلق النافذة بدون حفظ أي تغيير.', 'Closes the dialog without saving.'],
+  [/^حفظ$|^حفظ التغييرات$/, 'يحفظ التغييرات في قاعدة البيانات؛ تنعكس فوراً على كل الأجهزة (Realtime) وتُسجَّل في سجل النشاط.', 'Saves to the database; every device updates instantly (Realtime) and the change is written to the activity log.'],
+  [/^تحديث$|^إعادة التحميل$/, 'يعيد تحميل بيانات الصفحة من الخادم.', 'Reloads the page data from the server.'],
+  [/^بحث$|^ابحث/, 'بحث فوري بالاسم أو الهاتف أو الكود / الرقم القومي ضمن نطاقك.', 'Instant search by name, phone or code / national id within your scope.'],
+  [/^الفلاتر$/, 'يفتح لوحة الفلاتر: العنوان · أقل نقاط · أقل حضور · الحالة في المناسبة (حاضر / لم يُسجّل / غائب) · نتيجة الافتقاد (لم يُفتقد بعد / لم يُفتقد / كل نتيجة معرّفة). تعمل فوق نطاق الكنيسة → الخدمة → الفصل → المناسبة.',
+    'Opens the filter panel: address · min points · min attendance · status in the event (present / not recorded / absent) · call-feedback result (not yet called / not called / each defined feedback). Applies on top of the church → service → class → event scope.'],
+  [/^الترتيب/, 'يفتح خيارات الترتيب: بالاسم · النقاط · الحضور · آخر حضور · تاريخ الإضافة، تصاعدياً أو تنازلياً.', 'Opens the sort options: by name · points · attendance · last attendance · date added, ascending or descending.'],
+  [/^(كل الكنائس|اختر الكنيسة|الكنيسة)$/, 'محدد الكنيسة — المستوى الأول من النطاق (كنيسة → خدمة → فصل → مناسبة). «كل الكنائس» = بلا تصفية؛ المدير الذي له كنيسة واحدة يراه مقفولاً عليها.',
+    'Church selector — first level of the scope chain (church → service → class → event). «All churches» = no filter; a manager bound to one church sees it locked.'],
+  [/^(كل الخدمات|اختر الخدمة|الخدمة)$/, 'محدد الخدمة (مثل مدارس الأحد · الشباب). يتبع الكنيسة المختارة؛ الافتراضي «كل الخدمات».', 'Service selector (e.g. Sunday school · Youth). Cascades from the chosen church; default «All services».'],
+  [/^(كل الفصول|اختر الفصل|الفصل)$/, 'محدد الفصل داخل الخدمة. الخادم المرتبط بفصل واحد يراه مقفولاً.', 'Class selector inside the service. A servant bound to one class sees it locked.'],
+  [/^(اختر المناسبة|كل المناسبات|المناسبة)/, 'محدد المناسبة — المستوى الرابع (0022): الحضور والنقاط والافتقاد تُربَط بالمناسبة المختارة. تُختار «الافتراضية» تلقائياً حسب النطاق: فصل → خدمة → كنيسة (0048).',
+    'Event selector — 4th scope level (0022): attendance, points and calls are bound to the chosen event. The per-scope default is preselected most-specific first: class → service → church (0048).'],
+  [/^عرض مجموعتي فقط$|^مجموعتي/, 'زر «مجموعتي» (وحدة الأشابين): يحصر القائمة على المخدومين الذين اختارهم هذا الخادم في مجموعته. كل شيء آخر (المهام · الشارات · الفلاتر · الترتيب) يعمل كما هو. إن كانت المجموعة فارغة يظهر اختصار إلى /shepherds.',
+    '«My group» toggle (Shepherds module): narrows the list to the children this servant picked into his group. Jobs, badges, filters and sort keep working. An empty group offers a shortcut to /shepherds.'],
+  [/^إخفاء أدوات التحكم$|^إظهار أدوات التحكم$/, 'يطوي / يفتح لوحة التحكم (محددات النطاق + المهمة) لتوفير مساحة للقائمة أثناء العمل السريع.', 'Collapses / expands the control panel (scope selectors + job) to give the list more room during fast work.'],
+
+  /* ---------------- children page jobs & badges ---------------- */
+  [/^الحضور$/, 'المهمة «الحضور»: الضغط على مخدوم يسجّل حضوره في المناسبة المختارة (أو يزيله في وضع الإزالة). يُحترم يوم/وقت المناسبة وتُضاف نقاطها تلقائياً.',
+    'Job «Attendance»: tapping a child records his attendance in the selected event (or removes it in remove mode). The event day/time window is enforced and its points are added automatically.'],
+  [/^النقاط$/, 'المهمة «النقاط»: اختر السبب ثم الوضع (إضافة / خصم) — الضغط على مخدوم يطبّق قيمة السبب على رصيده مع سطر في سجل النقاط.',
+    'Job «Points»: pick the cause and the mode (add / deduct) — tapping a child applies the cause value to his balance and writes a points-log row.'],
+  [/^البيانات$/, 'المهمة «البيانات»: الضغط على مخدوم يفتح بياناته (عرض / تعديل / حذف حسب صلاحياتك).', 'Job «Data»: tapping a child opens his record (view / edit / delete as your permissions allow).'],
+  [/^وضع تسجيل الحضور$|^تسجيل حضور$/, 'يجعل الضغط على المخدوم يسجّل الحضور (✓).', 'Makes a tap on a child record attendance (✓).'],
+  [/^وضع إزالة الحضور$|^إزالة حضور$/, 'يجعل الضغط على المخدوم يزيل حضوراً سُجِّل بالخطأ (✕).', 'Makes a tap remove an attendance recorded by mistake (✕).'],
+  [/^وضع تسجيل الغياب$|^غائب$/, 'يسجّل «غائب» صريحاً للمخدوم في هذه المناسبة (يظهر في شارة الحالة وودجت المتابعة).', 'Records an explicit «absent» for this event (shown in the status badge and the follow-up widget).'],
+  [/^إضافة نقاط$/, 'وضع الإضافة: يطبّق قيمة السبب المختار بالموجب.', 'Add mode: applies the selected cause value positively.'],
+  [/^خصم نقاط$|^خصم$/, 'وضع الخصم: يطبّق قيمة السبب بالسالب.', 'Deduct mode: applies the cause value negatively.'],
+  [/^يدوي$/, 'نقاط يدوية: لوحة أرقام (NumPad) لكتابة القيمة بنفسك بدلاً من قيمة السبب.', 'Manual points: a NumPad to type the value yourself instead of the cause value.'],
+  [/^اتصال$/, 'يفتح تطبيق الهاتف برقم المخدوم/ولي الأمر ويسجّل «مكالمة» في سجل الافتقاد للمناسبة الحالية.', 'Opens the dialer with the child\'s / guardian\'s number and logs a «call» in the follow-up log for the current event.'],
+  [/^إرسال رسالة$|^رسالة$/, 'يفتح قنوات الرسالة: واتساب · SMS · «رسالة داخلية» (وحدة الرسائل) بنص القالب مع متغيرات الاسم والفصل.', 'Opens the message channels: WhatsApp · SMS · «in-app message» (Messages module) with the template text and name/class variables.'],
+  [/^عرض البيانات$/, 'يفتح نافذة بيانات المخدوم: الصورة · الكود/QR · الهاتف · العنوان · تاريخ الميلاد · الفصول · سجل الحضور والنقاط.', 'Opens the child\'s data sheet: photo · code/QR · phone · address · birthdate · enrollments · attendance & points history.'],
+  [/^الإنجازات$/, 'يمنح المخدوم إنجازاً «عادياً» يدوياً (وحدة الإنجازات) مع نقاطه؛ إنجازات «الحضور» تُمنح آلياً.', 'Manually awards a «normal» achievement (Achievements module) with its points; «attendance» achievements are awarded automatically.'],
+  [/^طلب طباعة كارت$|^طباعة كارت$/, 'يضيف المخدوم إلى طلبات طباعة الكروت (وحدة تصميم الكروت) ليُطبع بالقالب الافتراضي لنطاقه.', 'Adds the child to the card print requests (Card Designer module) to be printed with his scope\'s default template.'],
+  [/^سجل الحضور$/, 'شارة الحضور: عدد مرات الحضور؛ الضغط يفتح السجل الكامل (اليوم · المناسبة · الوقت · النقاط).', 'Attendance badge: number of attendances; tap opens the full log (day · event · time · points).'],
+  [/^سجل النقاط$/, 'شارة النقاط: الرصيد الحالي؛ الضغط يفتح سجل النقاط بالفلاتر (حضور · سبب · إستبدال · إنجاز · هدية).', 'Points badge: current balance; tap opens the points log with filters (attendance · cause · store · achievement · gift).'],
+  [/^(حاضر|لم يُسجّل|لم يسجل)$/, 'شارة الحالة في المناسبة المختارة ضمن نافذة يوم/وقت التكرار الحالي (حاضر / لم يُسجّل / غائب).', 'Status badge for the selected event within the current occurrence\'s day/time window (present / not recorded / absent).'],
+  [/^(لم يُفتقد بعد|لم يُفتقد|تم الرد|لم يرد|مسافر|مريض|رقم خطأ|تم الرد — سيحضر)$/, 'شارة نتيجة الافتقاد: تُلوَّن بالنتيجة المسجّلة لهذه الدورة؛ الضغط يفتح أزرار النتائج الملوّنة (+ اتصال · السجل · تراجع). «لم يُفتقد بعد» ما دامت الدورة مفتوحة، و«لم يُفتقد» بعد انتهائها بلا تسجيل.',
+    'Call-feedback badge: coloured by the result recorded for this cycle; tap opens the coloured result buttons (+ call · history · undo). «Not yet called» while the cycle is open, «Not called» once it closed with nothing recorded.'],
+  [/^(ابتدائي|إعدادي|ثانوي|شباب|حضانة|أولى|ثانية|ثالثة|رابعة|خامسة|سادسة)/, 'كارت فصل: اسم الفصل وعدد المخدومين؛ الضغط يفتحه ليعرض مخدوميه مع أزرار المهمة المختارة. الرقم = العدد الحالي بعد الفلاتر.',
+    'Class card: class name and child count; tap expands it to list the children with the selected job\'s buttons. The number = current count after filters.'],
+  [/^المخدومين$/, 'تبويب «المخدومين»: القائمة تعرض تسجيلات المخدومين.', 'Tab «Children»: the list shows child enrollments.'],
+  [/^الخدام$/, 'تبويب «الخدام»: نفس القائمة للخدام في نطاقك (0037) — حضور ونقاط وافتقاد للخدام أيضاً.', 'Tab «Servants»: the same list for the servants in your scope (0037) — attendance, points and calls work for servants too.'],
+];
+
+G.push(
+  /* ---------------- manage children / servants ---------------- */
+  [/^إضافة مخدوم$|^مخدوم جديد$/, 'يفتح نموذج إضافة مخدوم: الكود (كتابة / مسح / توليد حسب نظام الأكواد) · الاسم · الجنس · تاريخ الميلاد · الهاتف · العنوان · الصورة · الكنيسة → الخدمة → الفصل (يمكن عدة فصول) · كلمة مرور البوابة (افتراضي 000000). يكشف تكرار الرقم القومي.',
+    'Opens the add-child form: code (typed / scanned / generated by the code system) · name · gender · birthdate · phone · address · photo · church → service → class (several classes allowed) · portal password (default 000000). Detects duplicate national ids.'],
+  [/^فردي$/, 'إضافة فرد واحد بنموذج كامل.', 'Add one person with the full form.'],
+  [/^جماعي$|^استيراد$/, 'إضافة جماعية: لصق من Excel أو رفع ملف → مطابقة الأعمدة → معاينة → أكواد وكلمات مرور تلقائية (AUTO) → استيراد كدفعة واحدة في سجل النشاط، مع تصدير Excel ببيانات الدخول.',
+    'Bulk add: paste from Excel or upload a file → map columns → preview → automatic codes and passwords (AUTO) → import as one activity-log batch, with a credentials Excel export.'],
+  [/^طلبات الانضمام$|^الطلبات$/, 'طلبات الانضمام / الموافقات: من سجّل من البوابة أو رابط الدعوة ينتظر هنا؛ اعتماد (ينشئ التسجيل بالنطاق المطلوب) أو رفض بملاحظة.', 'Join / approval requests: whoever signed up from the portal or an invite link waits here; approve (creates the enrollment in the requested scope) or reject with a note.'],
+  [/^دعوة$|^رابط الدعوة$|^نسخ الرابط$/, 'دعوة: رابط + QR مقفول على كنيسة → خدمة → فصل مستوى المدير؛ من يفتحه يسجّل بنطاق محدد مسبقاً.', 'Invite: link + QR locked to the manager\'s church → service → class; whoever opens it signs up with the scope pre-filled.'],
+  [/^(إيقاف|إيقاف الكل|إيقاف نطاق كامل)$/, 'إيقاف: يعطّل الحساب/التسجيل بدون حذف (0043) — لا يظهر في الماسح ولا يمكنه الدخول؛ «إيقاف الكل» يطبّق على كل عقدة الشجرة.', 'Stop: disables the account/enrollment without deleting (0043) — invisible to the scanner and cannot log in; «Stop all» applies to the whole tree node.'],
+  [/^تفعيل$|^تفعيل الكل$/, 'يعيد تفعيل حساب / تسجيل موقوف.', 'Re-activates a stopped account / enrollment.'],
+  [/^(الكل|يعمل|موقوف)$/, 'فلتر الحالة: الكل / يعمل / موقوف.', 'Status filter: all / active / stopped.'],
+  [/^تعديل$/, 'يفتح نموذج التعديل (بما فيه نقل المخدوم إلى كنيسة / خدمة / فصل آخر، أو تعديل نطاقات الخادم عبر ScopePicker).', 'Opens the edit form (incl. moving a child to another church / service / class, or editing a servant\'s scopes with ScopePicker).'],
+  [/^حذف$/, 'حذف نهائي بعد تأكيد؛ يُسجَّل في سجل النشاط مع صورة البيانات قبل الحذف.', 'Permanent delete after confirmation; logged in the activity log with a snapshot of the data before deletion.'],
+  [/^تغيير كلمة المرور$|^إعادة تعيين كلمة المرور$/, 'الخادم نفسه يكتب القديمة + الجديدة + التأكيد؛ المدير الأعلى يعيد التعيين بدون القديمة (POST /api/servants/account).', 'The servant enters old + new + confirm; a superior resets without the old one (POST /api/servants/account).'],
+  [/^ملفات الصلاحيات$|^الصلاحيات$/, 'ملفات الصلاحيات: مجموعات مفاتيح دقيقة (عرض · إضافة · تعديل · حذف · اعتماد …) يبنيها المالك ويربطها بالخادم؛ الأزرار التي لا يملكها تُخفى والقاعدة ترفض الباقي (RLS).', 'Permission profiles: sets of fine-grained keys (view · add · edit · delete · approve …) built by the owner and attached to servants; buttons he lacks are hidden and the database refuses the rest (RLS).'],
+  /* ---------------- scanner ---------------- */
+  [/^الكاميرا$|^تشغيل الكاميرا$|^فتح الكاميرا$/, 'يشغّل الكاميرا لقراءة QR كارت المخدوم (BarcodeDetector أو jsQR)؛ عند القراءة تُنفَّذ المهمة المختارة فوراً على الشخص.', 'Starts the camera to read the child\'s card QR (BarcodeDetector or jsQR); on read the selected job is applied immediately.'],
+  [/^من الصورة$|^صورة من المعرض$/, 'يقرأ QR من صورة في المعرض.', 'Reads a QR from a gallery image.'],
+  [/^إدخال يدوي$|^كتابة الكود$/, 'كتابة الكود يدوياً أو البحث بالاسم ضمن النطاق بدل المسح.', 'Type the code manually or search by name within the scope instead of scanning.'],
+  [/^العائلات$/, 'مفتاح «العائلات»: عند مسح كود لشخص له عائلة (أو كود عائلة) يظهر مُنتقي العائلة بكل أفرادها وصلاتهم ومن حضر اليوم؛ الضغط على فرد يطبّق المهمة عليه.', '«Families» switch: scanning a code of a person with a family (or a family code) opens the family picker with all members, relations and who attended today; tapping a member applies the job to him.'],
+  [/^التعرف على الخدمة تلقائياً$/, 'عند تسجيل الشخص في أكثر من خدمة/فصل تُختار الخدمة التي حضر فيها اليوم تلقائياً.', 'When the person is enrolled in several services/classes the one he already attended today is chosen automatically.'],
+  [/^أرشيف العمليات$|^سجل العمليات$/, 'أرشيف عمليات المسح: كل عملية حضور / نقاط / بيانات بوقتها والفرق والرصيد بعدها.', 'Scan-operations archive: every attendance / points / data action with its time, delta and balance after.'],
+  /* ---------------- stats ---------------- */
+  [/^تصدير Excel$|^تصدير$|^Excel$/, 'تصدير Excel: ملف .xlsx بالبيانات المعروضة (في الإحصائيات 8 أوراق: الملخص · بالمناسبة · بالسبب · بالفصل · الزمن · الأيام · لوحة الشرف …).', 'Excel export: an .xlsx with the displayed data (Statistics: 8 sheets — summary · by event · by cause · by class · timeline · weekdays · leaderboard …).'],
+  [/^(7 أيام|30 يوم|90 يوم|365 يوم|7d|30d|90d|365d|مخصص)$/, 'فترة الرسم: 7 / 30 / 90 / 365 يوماً أو مدى مخصص؛ التجميع يوم / أسبوع / شهر.', 'Chart period: 7 / 30 / 90 / 365 days or a custom range; bucketed by day / week / month.'],
+  /* ---------------- settings & owner ---------------- */
+  [/^الملف الشخصي$|^تعديل الملف$/, 'الملف الشخصي: الاسم · الهاتف · الصورة · تغيير كلمة المرور.', 'Profile: name · phone · photo · password change.'],
+  [/^صلاحيات الوحدات$/, 'لكل وحدة قائمة «منح» كنيسة ← خدمة ← فصل (أي مستوى «الكل»)، إظهار للجميع / إخفاء عن الجميع، و«أشخاص محددون» لإظهارها لخدام بالاسم. مفروضة في قاعدة البيانات (module_visible).', 'Per module a list of grants church ← service ← class (any level «all»), show to everyone / hide from everyone, and «specific people» to show it to named servants. Enforced in the database (module_visible).'],
+  [/^إظهار للجميع$/, 'منحة عامة واحدة فتظهر الوحدة لكل الخدام.', 'One global grant so every servant sees the module.'],
+  [/^إخفاء عن الجميع$/, 'يحذف كل المنح فلا يرى الوحدة إلا المالك.', 'Removes every grant so only the owner sees the module.'],
+  [/^أشخاص محددون$/, 'خدام بالاسم تظهر لهم الوحدة أينما كانوا (module_access.servant_id).', 'Named servants who get the module wherever they are (module_access.servant_id).'],
+  [/^إضافة نطاق$|^منحة جديدة$/, 'يضيف منحة نطاق جديدة للوحدة.', 'Adds a new scope grant for the module.'],
+  [/^تخصيص التطبيق$/, 'شريط المهام · أيقونات الهيدر · ودجات الرئيسية · أسماء الصفحات · نظام الأكواد — تُخزَّن في app_settings وتُطبَّق على كل الأجهزة فوراً.', 'Taskbar · header icons · home widgets · page names · code system — stored in app_settings and applied to every device instantly.'],
+  [/^شريط المهام$/, 'الخانات الخمس في الشريط السفلي: الوجهة + أيقونة + اسم، قابلة لإعادة الترتيب مع معاينة حية.', 'The five bottom-bar slots: destination + icon + label, re-orderable with a live preview.'],
+  [/^أيقونات الهيدر$/, 'أيقونات الهيدر وترتيبها: تاريخ العمل · جرس الرسائل · جرس الإشعارات · روابط سريعة.', 'Header icons and order: working date · messages bell · notifications bell · quick links.'],
+  [/^ودجات الرئيسية$/, 'ودجات الرئيسية (19): إضافة / حذف / ترتيب، نصف أو كامل العرض، عنوان مخصص، معاينة مصغّرة.', 'Home widgets (19): add / remove / reorder, half or full width, custom heading, miniature preview.'],
+  [/^أسماء الصفحات/, 'إعادة تسمية أي صفحة أو وحدة؛ الاسم الجديد يُطبَّق في كل مكان.', 'Rename any page or module; applied everywhere.'],
+  [/^نظام الأكواد$/, 'تصميم الأكواد المولَّدة: أجزاء (نص ثابت · الوقت · التاريخ · عشوائي · اختصار الكنيسة/الخدمة/الفصل) + فاصل؛ نظام افتراضي ولكل مولّد تصميم خاص أو الطريقة الأصلية.', 'Design generated codes: parts (fixed text · time · date · random · church/service/class abbreviation) + separator; one default and per generator a custom template or the built-in method.'],
+  [/^إدارة الأفراد$/, 'كل أشخاص المنشأة وأماكنهم (نطاقات خادم / تسجيلات مخدوم)، تصحيح ودمج وأكواد.', 'Every person of the tenant with his places (servant scopes / child enrollments), fixes, merges and codes.'],
+  [/^النسخ الاحتياطي$|^نسخة احتياطية$|^تنزيل نسخة$/, 'اختر ما تنسخه (كل الجداول + حسابات الدخول، «الكل» افتراضياً) → ملف JSON واحد يُنزَّل على الجهاز.', 'Choose what to include (every table + login accounts, «all» by default) → one JSON file downloaded to the device.'],
+  [/^الاسترجاع$|^استرجاع$|^استعادة$/, 'استرجاع من ملف: اختر ما يُسترجع + دمج / استبدال؛ بترتيب المفاتيح الأجنبية مع تعطيل المشغّلات.', 'Restore from a file: choose what to restore + merge / replace; FK order with triggers off.'],
+  [/^النسخ المجدولة$|^جدولة$/, 'يومي / أسبوعي / شهري بساعة القاهرة، الاحتفاظ بآخر N، في حاوية backups الخاصة مع سجل.', 'Daily / weekly / monthly at a Cairo hour, keep last N, in the private backups bucket with history.'],
+  [/^إضافة كنيسة$|^كنيسة جديدة$/, 'ينشئ كنيسة (الاسم · الشعار) — قمة سلسلة النطاق.', 'Creates a church (name · logo) — top of the scope chain.'],
+  [/^إضافة خدمة$|^خدمة جديدة$/, 'ينشئ خدمة داخل كنيسة (الاسم · الصورة).', 'Creates a service inside a church (name · photo).'],
+  [/^إضافة فصل$|^فصل جديد$/, 'ينشئ فصلاً داخل خدمة (الاسم · الصورة).', 'Creates a class inside a service (name · photo).'],
+  [/^إضافة مناسبة$|^مناسبة جديدة$/, 'ينشئ مناسبة: النطاق · التكرار · يوم ووقت البداية والنهاية · نقاط الحضور · «افتراضية» لهذا النطاق.', 'Creates an event: scope · recurrence · start/end day & time · attendance points · «default» for this scope.'],
+  [/^إضافة سبب$|^سبب جديد$/, 'ينشئ سبب نقاط: الاسم · القيمة · النطاق · «افتراضي».', 'Creates a points cause: name · value · scope · «default».'],
+  [/^افتراضي(ة)?$|^افتراضي (الكنيسة|الخدمة|الفصل)$/, 'عنصر افتراضي واحد لكل نطاق بالضبط؛ الأكثر تحديداً يفوز عند الاختيار المسبق (0048).', 'Exactly one default per scope; the most specific wins for preselection (0048).'],
+  [/^إضافة نتيجة$|^نتيجة جديدة$/, 'ينشئ نتيجة افتقاد: الاسم · اللون · الأيقونة · النطاق حتى المناسبة؛ قابلة لإعادة الترتيب.', 'Creates a call-feedback preset: name · colour · icon · scope down to the event; reorderable.'],
+  [/^اعتماد$|^موافقة$|^قبول$/, 'يعتمد الطلب ويطبّقه ويُخطر صاحبه.', 'Approves and applies the request and notifies its owner.'],
+  [/^رفض$/, 'يرفض الطلب مع ملاحظة تظهر لصاحبه.', 'Rejects the request with a note shown to its owner.'],
+  /* ---------------- cards ---------------- */
+  [/^قالب جديد$|^إضافة قالب$/, 'ينشئ قالب كارت جديد (الاسم · النطاق · المقاس).', 'Creates a new card template (name · scope · size).'],
+  [/^تصميم$/, 'لوحة بالملليمتر، عناصر (نص · صورة · QR · شكل · متغيرات [الاسم] [الفصل] [الكود])، طبقات، محاذاة.', 'mm canvas, elements (text · image · QR · shape · variables [name] [class] [code]), layers, alignment.'],
+  [/^ظهر الكارت$/, 'تصميم ظهر الكارت مع قلب المعاينة.', 'Back-side design with a flip preview.'],
+  [/^طباعة جماعية$|^طباعة$/, 'اختيار المخدومين → ورقة A4 بملف طباعة (هوامش · أعمدة · مقاس) → معاينة → طباعة.', 'Pick children → A4 sheet with a print profile (margins · columns · size) → preview → print.'],
+  [/^معاينة$/, 'معاينة حية بالبيانات الحقيقية.', 'Live preview with real data.'],
+  /* ---------------- shepherds / store ---------------- */
+  [/^اختيار مخدومين$|^اختيار$/, 'قائمة بالنطاق والبحث؛ ＋ يضيف مخدوماً حراً، ✓ من هو معي، 🔒 من هو في مجموعة خادم آخر (المدير يستطيع تحريره).', 'Scoped searchable list; ＋ adds a free child, ✓ marks mine, 🔒 marks one taken by another servant (managers can free him).'],
+  [/^مجموعات الخدام$/, 'نظرة المدير: كل مجموعات الخدام في نطاقه بعدد أفرادها.', 'Manager overview: every servant group in scope with its size.'],
+  [/^المخزون$/, 'الأصناف (كود = ملصق QR · اسم · صورة · السعر بالنقاط · الكمية · متاح · النطاق) مع ± كمية سريع وطباعة ملصقات.', 'Items (code = QR label · name · picture · price in points · stock · active · scope) with quick ± stock and label printing.'],
+  [/^الكاشير$/, 'امسح كارت المخدوم أو ابحث عنه → سلة برصيده الحي → امسح ملصقات الأصناف أو اختر من الشبكة → مجموع ومتبقٍ لحظيان → إتمام العملية (لا يتجاوز الرصيد ولا الكمية).', 'Scan the child\'s card or search → basket with live balance → scan item labels or pick from the grid → live total & remaining → checkout (never beyond balance or stock).'],
+  [/^الأرشيف$|^أرشيف الفواتير$/, 'الفواتير باليوم مع البنود والرصيد قبل/بعد والكاشير؛ المسؤول يلغي فاتورة فتُسترد النقاط وتُعاد الكمية.', 'Bills by day with lines, balance before/after and cashier; a manager cancels → points refunded and stock restored.'],
+  [/^صنف جديد$|^إضافة صنف$/, 'ينشئ صنفاً جديداً في المخزون.', 'Creates a new inventory item.'],
+  [/^طباعة ملصقات$|^ملصقات QR$/, 'ملصقات QR للأصناف: 38×25 / 50×30 / 70×40 مم، نسخ = 1 / الكمية / مخصص.', 'QR labels: 38×25 / 50×30 / 70×40 mm, copies = 1 / stock / custom.'],
+  [/^إتمام العملية$/, 'store_checkout في معاملة واحدة — يخصم الرصيد ويقلّل الكمية ويحفظ الفاتورة.', 'store_checkout in one transaction — deducts the balance, decrements stock, saves the bill.'],
+  /* ---------------- exams ---------------- */
+  [/^امتحان جديد$|^إضافة امتحان$|^إنشاء امتحان$/, 'العنوان · النطاق · فترة الإتاحة · وقت ودرجة افتراضيان · شرط النجاح (٪ أو درجة) · نقاط النجاح والدرجة الكاملة · كل الأسئلة أو عدد عشوائي · ترتيب عشوائي · عدد المحاولات · ما يراه المخدوم بعد الانتهاء.', 'Title · scope · availability · default time & score · pass rule (% or score) · pass and full-score points · all or a random subset · shuffle · attempts · what the child sees afterwards.'],
+  [/^الأسئلة$/, 'إضافة / تعديل / ترتيب / تكرار / حذف (نص · صورة · 2–6 اختيارات · الصحيح · الدرجة · الوقت).', 'Add / edit / reorder / duplicate / delete (text · image · 2–6 choices · correct one · score · time).'],
+  [/^النتائج$/, 'كل من حلّ الامتحان بالدرجة والنسبة، فلتر ناجح / لم ينجح، ترتيب، تفاصيل كل إجابة، إلغاء محاولة، Excel.', 'Everyone who took the exam with score and %, pass/fail filter, sort, per-answer detail, cancel attempt, Excel.'],
+  [/^نشر$/, 'ينشر الامتحان فيظهر للمخدومين في بوابتهم خلال فترة الإتاحة.', 'Publishes the exam so children see it in their portal during the window.'],
+  [/^تكرار$|^نسخ$/, 'ينسخ العنصر بكل إعداداته كمسودة جديدة.', 'Duplicates the item with all its settings as a new draft.'],
+  [/^ابدأ الامتحان$|^ابدأ$/, 'سؤال واحد كل مرة مع عدّاد مرتبط بوقت السيرفر، لا رجوع، ثم النتيجة والنقاط.', 'One question at a time with a server-anchored countdown, no going back, then the result and points.'],
+  [/^التالي$/, 'ينتقل للسؤال التالي (تلقائياً عند انتهاء الوقت).', 'Next question (automatic when time runs out).'],
+  /* ---------------- birthdays ---------------- */
+  [/^تهنئة الجميع$/, 'يفتح محادثة كل مخدوم بدوره (واتساب / SMS) بالنص المكتوب مع تخطّي.', 'Opens each child\'s WhatsApp / SMS in turn with the written text, with skip.'],
+  [/^هدية للجميع$/, 'هدية نقاط لكل مواليد الشهر مرة واحدة في السنة.', 'Points gift to every birthday child of the month, once a year.'],
+  [/^هدية$|^هدية نقاط$/, 'هدية نقاط (NumPad) مرة واحدة في السنة؛ تُسجَّل في سجل النقاط.', 'Points gift (NumPad) once a year; written to the points log.'],
+  [/^كارت تهنئة$|^كارت$/, 'كارت من قالب أعياد الميلاد: معاينة → إرسال كصورة · تنزيل PNG 300dpi · طباعة.', 'Card from the birthday template: preview → share as image · 300 dpi PNG · print.'],
+  [/^واتساب$|^SMS$/, 'يرسل نص التهنئة بمتغيراته ([الاسم الأول] · [السن] · [تاريخ العيد] · [اسم الفصل]) ويسجّله.', 'Sends the greeting text with its variables and logs it.'],
+  [/^سجل التهاني$|^السجل$/, 'كل ما حدث لهذا العنصر مع تراجع.', 'Everything recorded for this item, with undo.'],
+  [/^ICS$|^تقويم$/, 'تقويم ICS بتذكير سنوي.', 'ICS calendar with a yearly reminder.'],
+  [/^طباعة كروت الشهر$/, 'يطبع كروت التهنئة لكل مواليد الشهر.', 'Prints greeting cards for every birthday of the month.'],
+  /* ---------------- messages / notifications ---------------- */
+  [/^رسالة جديدة$|^إنشاء رسالة$/, 'المخدومين / الخدام → مستلمون محددون أو إعلان لنطاق (فصل / خدمة / كنيسة / الكل — في حدود صلاحيتك) مع معاينة الجمهور.', 'Children / servants → selected recipients or a scope announcement (class / service / church / all — within your scope) with an audience preview.'],
+  [/^الإعلانات$/, 'دلو الإعلانات المستلمة أو المرسلة.', 'Announcements bucket.'],
+  [/^الواردة$/, 'الإشعارات المستلمة (غير المقروء / الكل)؛ الضغط يفتح الهدف.', 'Received notifications (unread / all); tap opens the target.'],
+  [/^إرسال$/, 'إشعار: عنوان · نص · الجمهور · جدولة · Push.', 'Notification: title · body · audience · schedule · push.'],
+  [/^تلقائي$|^الأتمتة$/, 'قواعد بأحداث (عيد ميلاد · غياب · اعتماد …) بقوالب، تفعيل / إيقاف.', 'Event-driven rules (birthday · absence · approval …) with templates, enable / disable.'],
+  [/^غير المقروء/, 'يعرض غير المقروء فقط.', 'Unread only.'],
+  /* ---------------- online / achievements / occasions ---------------- */
+  [/^إنشاء فصل$/, 'التاريخ ومن–إلى · النطاق · رابط البث (يوتيوب / فيسبوك / زووم / ميت) · امتحان مربوط · مناسبة · دردشة · قواعد الحضور (نسبة الوقت · فحوص الانتباه · الإجابات · النقاط).', 'Date & from–to · scope · stream link (YouTube / Facebook / Zoom / Meet) · linked exam · event · chat · attendance rules (time % · attention checks · answers · points).'],
+  [/^ابدأ الفصل$|^بدء$/, 'يفتح الغرفة للمخدومين ويبدأ حساب الوقت.', 'Opens the room to children and starts timing.'],
+  [/^إنهاء الفصل$|^إنهاء$/, 'يطبّق قاعدة الحضور (وقت ≥ الحد و الفحوص ≥ الحد) → حاضر / غائب + نقاط.', 'Applies the attendance rule (time ≥ threshold and checks ≥ min) → present / absent + points.'],
+  [/^فحص انتباه$|^إرسال فحص$/, 'نافذة بعدّاد عند كل مخدوم يجب الضغط عليها.', 'A countdown popup every child must tap.'],
+  [/^سؤال مباشر$|^سؤال جديد$/, 'اختيار من متعدد مُصحَّح آلياً بنقاط أو نص حر، والإجابات لحظياً.', 'Auto-graded multiple choice with points or free text; answers shown live.'],
+  [/^المشاركون$/, 'من دخل الآن / المسجَّلون، بحث وفلاتر، ورقة المشارك (الحالة · قائمة التحقق · التذكرة · ملاحظة · حذف)، CSV.', 'Who is in / registered, search & filters, participant sheet (status · checklist · ticket · note · remove), CSV.'],
+  [/^الدردشة$/, 'دردشة الفصل المباشر.', 'Live class chat.'],
+  [/^ادخل الفصل$|^انضم$/, 'يُسجَّل وقت الدخول ونبض كل 30 ث؛ البث والفحوص والأسئلة والدردشة.', 'Join time and a 30 s heartbeat are recorded; stream, checks, questions and chat.'],
+  [/^إنجاز جديد$|^إضافة إنجاز$/, 'الاسم · الوصف · الصورة · النقاط · النطاق · طريقة المنح (مرة / عدة مرات بحد وفاصل) · النوع (عادي يدوي أو حضور آلي N حضور / N متتالٍ).', 'Name · description · picture · points · scope · award mode (once / repeatable) · type (manual or automatic attendance rule N total / N consecutive).'],
+  [/^الحاصلون/, 'من حصلوا على الإنجاز مع إمكانية الإلغاء (يخصم النقاط).', 'Earners, with revoke (deducts the points).'],
+  [/^فعالية جديدة$|^إضافة فعالية$/, 'الصورة · العنوان · النوع · الموعد · المكان · المنظّم · آخر موعد للتسجيل · السعة · تأكيد تلقائي أو مراجعة · نقاط الدخول · قائمة تحقق.', 'Cover · title · kind · date · place · organizer · deadline · capacity · auto-confirm or review · check-in points · checklist.'],
+  [/^تسجيل الدخول للفعالية$|^تسجيل دخول$/, 'مسح QR التذكرة أو كارت المخدوم (أو كود / بحث) → كارت نتيجة أخضر / كهرماني + نقاط الدخول.', 'Scan the ticket QR or the child\'s card (or code / search) → green / amber result card + check-in points.'],
+  [/^قائمة التحقق$/, 'تعريف العناصر (الدفع · إذن ولي الأمر · المواصلات …) وترتيبها ونسبة إنجاز كل عنصر.', 'Define items (payment · consent · transport …), order them, completion % per item.'],
+  [/^أنا مشارك/, 'يسجّل المخدوم نفسه (قيد المراجعة أو مؤكد حسب الإعداد) ثم تظهر تذكرته الإلكترونية.', 'The child registers himself (pending or confirmed per the setting); his e-ticket then appears.'],
+  /* ---------------- results / library ---------------- */
+  [/^المواد$/, 'اسم · كود · الدرجة الكاملة · درجة النجاح · الوزن · الترتيب · مادة إضافية.', 'Name · code · full mark · pass mark · weight · order · extra subject.'],
+  [/^الإدخال الجماعي$|^إدخال جماعي$/, 'جدول مخدومين × مواد بلوحة المفاتيح (Enter/↓، Alt+A غائب، لصق من Excel) مع تحقق فوري وتقدير مباشر ومسودة تلقائية وحفظ الكل.', 'Students × subjects grid with keyboard navigation (Enter/↓, Alt+A absent, paste from Excel), live validation & grade, autosave and save-all.'],
+  [/^استيراد من Excel$|^استيراد Excel$/, 'قالب بأكواد المخدومين → معاينة → مطابقة بالكود ثم الاسم → تصحيح غير المعروف / المكرر / غير الصالح → استيراد.', 'Template with child codes → preview → match by code then name → fix unknown / duplicate / invalid → import.'],
+  [/^قفل النتائج$|^قفل$/, 'يقفل النتائج بعد الاعتماد فلا تُعدَّل.', 'Locks the results after approval.'],
+  [/^أنظمة التقدير$/, 'عامة أو لكل كنيسة بشرائح (اسم · من٪ · إلى٪ · لون · ناجح) مع تحقق من التداخل والفجوات.', 'Global or per church with bands (name · from % · to % · colour · pass) with overlap/gap validation.'],
+  [/^التقارير$/, 'نتائج امتحان · ترتيب · أداء المواد · أداء الفصول · توزيع التقديرات · النجاح والرسوب؛ Excel وطباعة.', 'Exam results · ranking · subject performance · class performance · grade distribution · pass/fail; Excel & print.'],
+  [/^نتائج المخدومين$/, 'بحث عن مخدوم → كل امتحاناته مع تطور النسبة وبطاقة النتيجة.', 'Search a child → all his exams with % trend and the result card.'],
+  [/^موضوع جديد$|^إضافة موضوع$/, 'موضوع مكتبة (اسم · وصف · غلاف · الجمهور: الجميع / الخدام / خدمة / فصل).', 'Library subject (name · description · cover · audience: everyone / servants / service / class).'],
+  [/^الكتب$|^📚/, 'عنوان · مؤلف · وصف · غلاف · رابط PDF (Drive أو مباشر).', 'Title · author · description · cover · PDF link (Drive or direct).'],
+  [/^المحاضرات$|^🎓/, 'عنوان · متحدث · تاريخ · 🎥 فيديو أو 🎙️ صوت تُشغَّل داخل التطبيق.', 'Title · speaker · date · 🎥 video or 🎙️ audio played inside the app.'],
+  [/^المفضلة$|^⭐/, 'ما حفظه هذا المستخدم من كتب ومحاضرات.', 'The books and lectures this user starred.'],
+  /* ---------------- activity / reports / access / family ---------------- */
+  [/^تعم?ّ?ق أكثر$/, 'يجلب العمليات الأقدم (keyset pagination) بلا تكرار.', 'Loads older operations (keyset pagination) without duplicates.'],
+  [/^(10|100|1000)$/, 'عدد العمليات المحمَّلة في كل جلب.', 'Operations loaded per dig.'],
+  [/^بالمستخدم$/, 'كل فاعل بعدد عملياته وآخرها → عملياته.', 'Every actor with count and last operation → his rows.'],
+  [/^بالعملية$/, 'العمليات مجمّعة حسب الوحدة مع العدّادات.', 'Operations grouped by module with counters.'],
+  [/^نظرة عامة$/, 'KPIs · آخر 30 يوماً · ساعات النشاط · الأكثر نشاطاً · (للمالك) الاحتفاظ والتنظيف.', 'KPIs · last 30 days · active hours · most active · (owner) retention & prune.'],
+  [/^الحقول والمعاينة$/, 'الخطوة 2: اختيار الحقول وترتيبها وتسميتها وعرضها ومحاذاتها وفلاتر الصفوف مع معاينة حية.', 'Step 2: pick, reorder, rename, size and align the fields, row filters, live preview.'],
+  [/^التصميم$/, 'الخطوة 3: مصمّم صفحة بالملليمتر (عنوان · نص · شعار · صورة · جدول متدفق · رسوم SVG · رأس وتذييل · أرقام صفحات).', 'Step 3: mm-exact page designer (title · text · logo · image · flowing table · SVG charts · header/footer · page numbers).'],
+  [/^التصدير$/, 'الخطوة 4: PDF · Excel · طباعة · حفظ كقالب.', 'Step 4: PDF · Excel · print · save as template.'],
+  [/^القوالب/, 'قوالب التقارير المحفوظة لإعادة التشغيل بنطاق / فترة أخرى.', 'Saved report templates to re-run with another scope / period.'],
+  [/^البوابة$/, 'اختر البوابة → امسح / اكتب الكود / ابحث → كارت «مسموح / مرفوض» مع بيانات الشخص وكل قاعدة مستوفاة / غير مستوفاة بقيمتها.', 'Pick the gate → scan / type / search → «Allowed / Denied» card with the person\'s data and every rule met / not met with its value.'],
+  [/^الإعداد$/, 'البوابات (إنشاء · تعديل · تشغيل / إيقاف · حذف) · شجرة القواعد (AND / OR ومجموعات) · قائمة المسموح · السجل · الإعداد الكامل.', 'Gates (create · edit · start/stop · delete) · rule tree (AND / OR, groups) · allowed list · log · full configuration.'],
+  [/^بوابة جديدة$|^إضافة بوابة$/, 'بوابة دخول (حفلة · أوتوبيس رحلة · قاعة …) بقواعدها وقائمتها.', 'An access gate (party · trip bus · hall …) with its rules and list.'],
+  [/^قاعدة جديدة$|^إضافة قاعدة$/, 'نقاط · عدد حضور · حضر مناسبات · لم يدخل قبل · الجنس · السن · النطاق · حقل · امتحان · إنجاز · فعالية.', 'Points · attendance count · attended events · not entered before · gender · age · scope · field · exam · achievement · occasion.'],
+  [/^قائمة المسموح$|^المسموح لهم$/, 'أشخاص · فصل · خدمة · كنيسة كاملة؛ من خارجها مرفوض حتى لو استوفى القواعد، إلا إن كانت البوابة «مفتوحة للجميع».', 'Persons · class · service · whole church; anyone outside is denied even if every rule passes, unless the gate is «open to all».'],
+  [/^عائلة جديدة$|^إضافة عائلة$/, 'عائلة بكودها الخاص (كتابة · مسح · توليد) + اسم · هاتف · عنوان · ملاحظات؛ QR قابل للنسخ والمشاركة.', 'A family with its own code (typed · scanned · generated) + name · phone · address · notes; shareable QR.'],
+  [/^إضافة أفراد$|^إضافة فرد$/, 'بصلة مختارة مسبقاً (أب · أم · ابن · ابنة …) بثلاث طرق: مسح كود · بحث · فرد جديد. الشخص في عائلة أخرى يسأل «نقل؟».', 'With a preselected relation (father · mother · son · daughter …) in three ways: scan · search · new person. A person in another family asks «move?».'],
+  [/^مسح كود$/, 'مسح كارت بعد كارت (أو كتابة الكود).', 'Scan card after card (or type the code).'],
+  [/^فرد جديد$/, 'إنشاء الشخص هنا وإضافته للعائلة في معاملة واحدة.', 'Create the person here and add him to the family in one transaction.'],
+  /* ---------------- auth & child portal ---------------- */
+  [/^دخول المخدوم$/, 'ينتقل إلى دخول المخدوم: الكود (مسح / كتابة) + كلمة المرور + تذكرني (0042).', 'Switches to the child login: code (scan / type) + password + remember me (0042).'],
+  [/^دخول الخادم$/, 'ينتقل إلى دخول الخادم بالكود / الرقم القومي وكلمة المرور.', 'Switches to the servant login with code / national id and password.'],
+  [/^تسجيل الدخول$/, 'يتحقق من الكود وكلمة المرور (Supabase Auth) ويفتح الجلسة حسب الدور: خادم → التطبيق، مخدوم → البوابة.', 'Checks code and password (Supabase Auth) and opens the session by role: servant → app, child → portal.'],
+  [/^إنشاء حساب$|^تسجيل جديد$/, 'تسجيل خادم جديد: الاسم · الكود · الهاتف · كلمة المرور · النطاقات؛ ينتظر اعتماد المدير.', 'New servant signup: name · code · phone · password · scopes; waits for approval.'],
+  [/^تذكرني$/, 'يحفظ الجلسة على هذا الجهاز.', 'Keeps the session on this device.'],
+  [/^تحميل QR$|^تنزيل QR$|^حفظ الكود$/, 'يحفظ QR المخدوم كصورة ليُعرض للماسح.', 'Saves the child\'s QR as an image to show to the scanner.'],
+  [/^رفع صورة$|^تغيير الصورة$/, 'صورة جديدة للمخدوم؛ تذهب كطلب إلى المديرين لاعتمادها.', 'New photo; goes to the managers as a request to approve.'],
+  [/^طلب تعديل/, 'طلب تعديل (الاسم · تاريخ الميلاد · الجنس · الهاتف · العنوان) يراجعه المديرون؛ يمكن إلغاؤه قبل المراجعة.', 'Change request (name · birthdate · gender · phone · address) reviewed by managers; cancellable before review.'],
+  [/^تثبيت/, 'إرشاد تثبيت التطبيق (PWA) على الشاشة الرئيسية.', 'Hint to install the PWA on the home screen.'],
+  [/^إستبدال النقاط$|^استبدال النقاط$/, 'فلتر عمليات المتجر في سجل النقاط؛ الضغط على السطر يفتح الفاتورة.', 'Store filter in the points log; tapping a row opens the bill.'],
+);
+
+/* page / module names as they appear in the side menu, the bottom bar, the settings hub and the home widgets */
+G.push(
+  [/^الرئيسية$/, 'الصفحة الرئيسية: شبكة ودجات يحددها المالك (ترحيب · النبض اليومي · العدّادات · إجراءات سريعة · الحدث القادم · اتجاه الحضور · لوحة الشرف · المتابعة · أعياد الميلاد · الفعاليات · الرسائل · الإشعارات · آية اليوم …).', 'Home: a grid of owner-configured widgets (welcome · daily pulse · counters · quick actions · next event · attendance trend · leaderboard · follow-up · birthdays · occasions · messages · notifications · verse of the day …).'],
+  [/^المخدومين$/, 'صفحة المخدومين: القائمة الحية بالنطاق كنيسة → خدمة → فصل → مناسبة، مجمّعة بالفصول، مع المهام (حضور · نقاط · بيانات) والشارات والفلاتر والترتيب والبحث.', 'Children page: the live scoped list (church → service → class → event) grouped by class, with the jobs (attendance · points · data), badges, filters, sort and search.'],
+  [/^الماسح$/, 'الماسح: نفس نظام المخدومين لكن بالكاميرا — المهمة المختارة تُنفَّذ على الشخص لحظة مسح كود QR كارته، مع أرشيف العمليات ومنتقي العائلة.', 'Scanner: the same system as the children page but with the camera — the chosen job runs on the person the moment his card QR is scanned, with an operations archive and the family picker.'],
+  [/^الإحصائيات$/, 'الإحصائيات: مؤشرات بالنطاق، الحضور بالمناسبة والنقاط بالسبب، رسوم زمنية، لوحة شرف، تصدير Excel من 8 أوراق.', 'Statistics: scoped KPIs, attendance by event and points by cause, timelines, leaderboard, 8-sheet Excel export.'],
+  [/^الإعدادات$/, 'مركز الإعدادات: الملف الشخصي · الإدارة (الكنائس · الخدمات · الفصول · المناسبات · الأسباب · نتائج الافتقاد · الخدام · المخدومين · العائلات) · النشاط (طلبات التعديل · النسخ الاحتياطي · سجل النشاط) · الوحدات.', 'Settings hub: profile · administration (churches · services · classes · events · causes · call feedbacks · servants · children · families) · activity (data requests · backup · activity log) · modules.'],
+  [/^وحدة المالك$/, 'وحدة المالك (للمالك فقط): صلاحيات الوحدات · ملفات الصلاحيات · إدارة الأفراد · تخصيص التطبيق.', 'Owner module (owner only): module permissions · permission profiles · persons management · customize the app.'],
+  [/^تصميم الكروت$/, 'وحدة تصميم الكروت: قوالب كروت بمقاس حقيقي، وجه وظهر، متغيرات المخدوم، طلبات الطباعة والطباعة الجماعية.', 'Card Designer module: true-size card templates, front & back, child variables, print requests and bulk print.'],
+  [/^أسر الافتقاد$|^الأشابين$/, 'وحدة الأشابين: كل خادم يختار مجموعته من المخدومين ويتابعها؛ زر «مجموعتي» في صفحة المخدومين.', 'Shepherds module: every servant picks his own group of children to follow up; the «my group» button on the children page.'],
+  [/^كانتين النقاط$|^إستبدال النقاط$|^المتجر$/, 'وحدة إستبدال النقاط: مخزون بملصقات QR · كاشير يخصم من رصيد المخدوم · أرشيف فواتير مع إلغاء واسترداد.', 'Points store module: inventory with QR labels · POS that spends the child\'s points · bill archive with cancel & refund.'],
+  [/^الامتحانات$/, 'وحدة الامتحانات: امتحانات اختيار من متعدد يحلّها المخدوم من بوابته بعدّاد، نتائج ونقاط تلقائية.', 'Exams module: multiple-choice exams solved from the child portal with a timer, automatic results and points.'],
+  [/^أعياد الميلاد$/, 'وحدة أعياد الميلاد: مواليد الشهر يوماً بيوم، تهنئة واتساب/SMS، هدية نقاط، كروت تهنئة، ICS وExcel.', 'Birthdays module: the month\'s birthdays day by day, WhatsApp/SMS greeting, points gift, greeting cards, ICS & Excel.'],
+  [/^الفصول الأونلاين$/, 'وحدة الفصول الأونلاين: بث يوتيوب/زووم/ميت مع فحوص انتباه وأسئلة مباشرة ودردشة وحضور محسوب بقاعدة.', 'Online classes module: YouTube/Zoom/Meet stream with attention checks, live questions, chat and rule-based attendance.'],
+  [/^الإنجازات$/, 'وحدة الإنجازات: شارات بنقاط تُمنح يدوياً أو آلياً بقاعدة حضور.', 'Achievements module: badges with points awarded manually or automatically by an attendance rule.'],
+  [/^الفعاليات$|^المناسبات$/, 'وحدة الفعاليات: رحلات ومؤتمرات واحتفالات بتسجيل وتذاكر QR وقائمة تحقق وتسجيل دخول.', 'Occasions module: trips, conferences and celebrations with registration, QR tickets, checklist and check-in.'],
+  [/^نتائج الامتحانات$/, 'وحدة نتائج الامتحانات: امتحانات مدرسية بمواد ودرجات، إدخال جماعي، استيراد Excel، ترتيب وتقارير.', 'Exam Results module: school-style exams with subjects and marks, bulk entry, Excel import, ranking and reports.'],
+  [/^المكتبة$/, 'وحدة المكتبة: مواضيع بكتب PDF ومحاضرات فيديو/صوت بروابط، مفضلة وبحث.', 'Library module: subjects with PDF books and video/audio lectures by link, favourites and search.'],
+  [/^سجل النشاط$|^النشاط$/, 'وحدة سجل النشاط: كل عملية في التطبيق مسجّلة من قاعدة البيانات — مَن · ماذا · على مَن · أين · الفرق.', 'Activity Log module: every operation recorded by the database — who · what · on whom · where · the diff.'],
+  [/^تقارير وجداول$|^التقارير والجداول$/, 'وحدة التقارير: معالج 4 خطوات (البيانات → الحقول → التصميم → التصدير PDF/Excel/طباعة) وقوالب محفوظة.', 'Reports module: 4-step wizard (data → fields → design → PDF/Excel/print export) and saved templates.'],
+  [/^التحكم في الدخول$|^الدخول$/, 'وحدة التحكم في الدخول: بوابات بقواعد AND/OR وقائمة مسموح، مسح عند الباب → مسموح/مرفوض.', 'Access module: gates with AND/OR rules and an allowed list; scan at the door → allowed/denied.'],
+  [/^العائلات$/, 'وحدة العائلات: عائلة بكودها وأفرادها وصلاتهم؛ منتقي العائلة في الماسح.', 'Family module: a family with its code, members and relations; the family picker in the scanner.'],
+  [/^الوحدات$/, 'قسم «الوحدات»: الوحدات الاختيارية الممنوحة لنطاقك عبر صلاحيات الوحدات.', '«Modules» section: the optional modules granted to your scope through module permissions.'],
+  [/^إدارة المخدومين$/, 'إدارة المخدومين: المخدومين (تعديل · نقل · إيقاف · حذف) · إضافة فردي/جماعي · طلبات الانضمام · دعوة QR.', 'Children management: children (edit · move · stop · delete) · add single/bulk · join requests · invite QR.'],
+  [/^إدارة الخدام$/, 'إدارة الخدام: تعديل · إيقاف · حذف · إضافة فردي/جماعي · الطلبات · دعوة، بشجرة كنيسة → خدمة → فصل.', 'Servants management: edit · stop · delete · add single/bulk · requests · invite, in a church → service → class tree.'],
+  [/^إدارة الكنائس$|^الكنائس$/, 'الكنائس وشعاراتها — المستوى الأول من النطاق.', 'Churches and their logos — first level of the scope.'],
+  [/^إدارة الخدمات$|^الخدمات$/, 'الخدمات داخل كل كنيسة بصورها.', 'Services inside each church with photos.'],
+  [/^إدارة الفصول$|^الفصول$/, 'الفصول داخل كل خدمة بصورها.', 'Classes inside each service with photos.'],
+  [/^إدارة المناسبات$/, 'المناسبات (المستوى الرابع): التكرار ونافذة اليوم/الوقت والنقاط والافتراضي لكل نطاق.', 'Events (4th level): recurrence, day/time window, points and per-scope default.'],
+  [/^أسباب النقاط$/, 'أسباب النقاط بقيمها ونطاقها والافتراضي.', 'Points causes with values, scope and default.'],
+  [/^إدارة نتائج الافتقاد$|^نتائج الافتقاد$/, 'نتائج الافتقاد: الاسم · اللون · الأيقونة · النطاق حتى المناسبة.', 'Call-feedback presets: name · colour · icon · scope down to the event.'],
+  [/^طلبات تعديل البيانات$/, 'مراجعة طلبات المخدومين لتغيير الصورة أو البيانات: اعتماد أو رفض.', 'Review children\'s photo / data change requests: approve or reject.'],
+  [/^النسخ الاحتياطي والاسترجاع$/, 'نسخة JSON من كل الجداول + استرجاع + جدولة.', 'JSON backup of every table + restore + schedule.'],
+  [/^الحضور$/, 'بوابة المخدوم → الحضور: كل حضور باليوم والمناسبة والوقت والنقاط.', 'Child portal → Attendance: every attendance by day, event, time and points.'],
+  [/^النقاط$/, 'بوابة المخدوم → النقاط: الرصيد وكل إضافة/خصم بالسبب أو الحضور أو الإستبدال.', 'Child portal → Points: balance and every addition/deduction by cause, attendance or store.'],
+  [/^الخيارات$/, 'بوابة المخدوم → الخيارات: الملف · تحديث · تثبيت · تسجيل الخروج.', 'Child portal → Options: profile · refresh · install · logout.'],
+);
+// the two child-portal rules above only make sense on /child pages; the servant-side
+// «الحضور / النقاط» job rules earlier in the list win first because order matters.
+
+// generic fallbacks by kind when no label matched
+const BY_KIND = {
+  tab: ['تبويب داخل الصفحة يغيّر المحتوى المعروض دون الانتقال لصفحة أخرى.', 'In-page tab that switches the content without leaving the page.'],
+  link: ['رابط ينتقل إلى صفحة أخرى في التطبيق.', 'Link that navigates to another page of the app.'],
+  select: ['قائمة اختيار تصفّي أو تحدد قيمة.', 'Dropdown that filters or picks a value.'],
+  checkbox: ['خانة تفعيل / إيقاف.', 'On/off checkbox.'],
+  field: ['حقل إدخال.', 'Input field.'],
+  button: ['زر يُنفّذ إجراءً في هذه الصفحة.', 'Button that performs an action on this page.'],
+};
+
+export function explain(label) {
+  const l = (label || '').replace(/\s+/g, ' ').trim();
+  if (!l || l === '(icon)') return null;
+  const core = l.replace(/[\d٠-٩]+/g, '').replace(/\s+/g, ' ').trim(); // "ابتدائي 9" → "ابتدائي"
+  for (const [re, ar, en] of G) if (re.test(l) || re.test(core)) return { ar, en };
+  return null;
+}
+export function fallback(kind) { const f = BY_KIND[kind] || BY_KIND.button; return { ar: f[0], en: f[1] }; }
+
+/* what a *state* (menu / modal / sheet …) is, by its kind and trigger */
+export function stateExplain(stateKind, triggerLabel, title) {
+  const e = explain(triggerLabel);
+  const kindAr = { sidemenu: 'القائمة الجانبية', modal: 'نافذة', sheet: 'ورقة سفلية', tab: 'تبويب', expand: 'لوحة موسّعة', navigate: 'صفحة' }[stateKind] || 'حالة';
+  const kindEn = { sidemenu: 'Side menu', modal: 'Dialog', sheet: 'Bottom sheet', tab: 'Tab', expand: 'Expanded panel', navigate: 'Page' }[stateKind] || 'State';
+  return {
+    ar: `${kindAr}${title ? ` «${title}»` : ''} تُفتح بالضغط على «${triggerLabel}». ${e ? e.ar : ''}`.trim(),
+    en: `${kindEn}${title ? ` «${title}»` : ''} opened by tapping «${triggerLabel}». ${e ? e.en : ''}`.trim(),
+  };
+}
