@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>عرض تفاعلي لصفحات التطبيق — إدارة الإيبارشية</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0a1020; --panel:#0f172a; --card:#111a2e; --line:#1f2b47; --line2:#2c3d6b; --text:#e6ecff; --muted:#9fb0d8; --navy:#1e3a8a; --gold:#c9a227; --accent:#f59e0b; --accent2:#22d3ee;
+          --pw: 430px; --ph: auto; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; font-family: Cairo, system-ui, "Segoe UI", Tahoma, sans-serif; background: radial-gradient(1200px 600px at 80% -10%, #16224a 0%, var(--bg) 60%); color:var(--text); display:grid; grid-template-columns: 290px 1fr 380px; grid-template-rows: 100vh; overflow:hidden; }
+  button { font:inherit; }
+  .ar, .en { }
+  body.lang-ar .en, body.lang-en .ar { display:none !important; }
+  body.lang-both .dual .en { display:none; }
+
+  /* ---------- icon buttons ---------- */
+  .ib { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:34px; min-width:34px; padding:0 9px; border-radius:9px; border:1px solid var(--line2); background:linear-gradient(180deg,#1a2544,#131c33); color:#e6ecff; cursor:pointer; transition:background .12s, border-color .12s, transform .05s; }
+  .ib:hover { background:linear-gradient(180deg,#22305a,#182548); border-color:#3a4f8a; }
+  .ib:active { transform:translateY(1px); }
+  .ib:disabled { opacity:.35; cursor:default; transform:none; }
+  .ib.on { background:linear-gradient(180deg,#f7b53a,#e39a12); border-color:#f7b53a; color:#111; }
+  .ib svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .ib .lbl { font-size:12.5px; font-weight:700; }
+  .seg { display:inline-flex; align-items:center; background:#0b1220; border:1px solid var(--line); border-radius:11px; padding:3px; gap:2px; }
+  .seg .ib { border-color:transparent; background:transparent; height:30px; border-radius:8px; }
+  .seg .ib:hover { background:#1a2544; }
+  .seg .cap { font-size:11px; color:var(--muted); padding:0 8px 0 4px; font-weight:700; }
+  .seg .val { font-size:12.5px; color:#fff; min-width:54px; text-align:center; font-variant-numeric: tabular-nums; }
+  .tip { position:relative; }
+  .tip:hover::after { content:attr(data-tip); position:absolute; top:calc(100% + 8px); inset-inline-start:50%; transform:translateX(50%); background:#000; color:#fff; font-size:11px; font-weight:600; padding:4px 8px; border-radius:6px; white-space:nowrap; z-index:60; pointer-events:none; }
+  body[dir=ltr] .tip:hover::after { transform:translateX(-50%); }
+
+  /* ---------- sidebar ---------- */
+  aside { background:var(--panel); border-inline-start:1px solid var(--line); padding:14px; overflow:auto; }
+  aside h1 { font-size:17px; margin:0 0 2px; color:#fff; }
+  aside .sub { color:var(--muted); font-size:11.5px; margin-bottom:10px; line-height:1.6; }
+  aside h2 { font-size:12px; color:var(--gold); margin:14px 0 4px; display:flex; justify-content:space-between; align-items:center; }
+  aside h2 .c { color:var(--muted); font-weight:400; }
+  aside a { display:flex; gap:6px; align-items:flex-start; color:var(--text); text-decoration:none; font-size:12.5px; padding:6px 8px; border-radius:8px; line-height:1.45; }
+  aside a:hover { background:#182548; }
+  aside a.active { background:var(--navy); color:#fff; }
+  aside a .n { color:var(--muted); font-size:10.5px; min-width:18px; text-align:center; background:#0b1220; border-radius:6px; padding:1px 3px; }
+  aside a.active .n { background:rgba(255,255,255,.15); color:#fff; }
+  aside a.st { padding:3px 8px 3px 8px; margin-inline-start:22px; font-size:11.5px; color:var(--muted); border-inline-start:2px solid var(--line); border-radius:0 8px 8px 0; }
+  aside a.st .k { font-size:9.5px; background:#0b1220; color:var(--gold); border-radius:5px; padding:1px 5px; white-space:nowrap; }
+  aside a.st.active { background:#10283a; color:#fff; border-inline-start-color:var(--accent2); }
+  aside .stwrap { display:none; } aside .stwrap.open { display:block; }
+  aside a .tg { margin-inline-start:auto; color:var(--muted); font-size:10px; padding:0 4px; border-radius:4px; } aside a .tg:hover { background:#0b1220; color:#fff; }
+  .tools { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px; }
+  .tools .ib { width:100%; height:36px; }
+
+  /* ---------- stage ---------- */
+  main { position:relative; display:flex; flex-direction:column; padding:12px 20px 0; overflow:hidden; min-width:0; }
+  .top { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+  .top h2 { margin:0; font-size:19px; line-height:1.3; }
+  .top .meta { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .states { display:flex; flex-wrap:wrap; gap:5px; margin:2px 0 6px; max-height:64px; overflow:auto; }
+  .states .stb { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:3px 10px; font-size:11.5px; cursor:pointer; display:inline-flex; gap:6px; align-items:center; font-family:inherit; }
+  .states .stb:hover { border-color:var(--line2); background:#15203a; } .states .stb.on { border-color:var(--accent2); background:#10283a; color:#fff; }
+  .states .stb .k { font-size:9.5px; color:var(--gold); }
+  .states .stb.base { border-color:var(--gold); }
+  .badge.kind { background:#2a1f4d; color:#e9d8ff; }
+  .trig { position:absolute; border:2px dashed var(--gold); border-radius:8px; pointer-events:none; box-shadow:0 0 0 3px rgba(255,205,86,.18); z-index:6; }
+  .trig::after { content:attr(data-l); position:absolute; top:-18px; inset-inline-start:0; background:var(--gold); color:#111; font-size:10px; font-weight:800; padding:1px 6px; border-radius:6px; white-space:nowrap; }
+  .layer { position:absolute; inset:0; pointer-events:none; z-index:5; box-shadow: inset 0 0 0 9999px rgba(0,0,0,0); }
+  .iphone.state-shot .scroller { overflow:hidden; }
+  .path { font-family: ui-monospace, Menlo, monospace; color:var(--gold); font-size:12px; direction:ltr; background:#0b1220; padding:2px 8px; border-radius:6px; }
+  .badge { background:#182548; color:var(--muted); border-radius:999px; padding:2px 10px; font-size:11.5px; }
+  .toolbar { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; padding:6px 0 10px; }
+  .stage { position:relative; flex:1; min-height:0; overflow:auto; display:flex; justify-content:center; align-items:flex-start; padding:6px 0 40px; scrollbar-width:thin; }
+  .hint { color:var(--muted); font-size:11.5px; text-align:center; padding:6px 0 8px; }
+
+  /* ---------- iPhone (fixed 430:932 ratio unless unlocked) ---------- */
+  .iphone { position:relative; flex:none; width:var(--pw); height:var(--ph); aspect-ratio: 430 / 932; --bez: calc(var(--pw) * 0.030); --rad: calc(var(--pw) * 0.135); }
+  .iphone.free { aspect-ratio:auto; }
+  .iphone .body { position:absolute; inset:0; border-radius:var(--rad); background:linear-gradient(160deg,#3a3a3f,#0d0d10 60%,#2a2a2f); box-shadow: 0 40px 90px rgba(0,0,0,.65), inset 0 0 0 2px #5b5b62, inset 0 0 0 5px #17171a; }
+  .iphone .btn { position:absolute; width:3px; background:#3f3f46; border-radius:2px; }
+  .iphone .btn.l1 { inset-inline-start:-3px; top:13%; height:3.6%; } .iphone .btn.l2 { inset-inline-start:-3px; top:19%; height:6.8%; } .iphone .btn.l3 { inset-inline-start:-3px; top:27%; height:6.8%; }
+  .iphone .btn.r { inset-inline-end:-3px; top:21.5%; height:10.7%; }
+  .iphone .screen { position:absolute; inset:var(--bez); border-radius:calc(var(--rad) - var(--bez)); background:#fff; overflow:hidden; }
+  .iphone .scroller { position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; scroll-behavior:smooth; scrollbar-width:none; }
+  .iphone .scroller::-webkit-scrollbar { display:none; }
+  .iphone .canvas { position:relative; width:100%; }
+  .iphone .canvas img { display:block; width:100%; height:auto; user-select:none; -webkit-user-drag:none; }
+  .iphone .canvas .mask { position:absolute; left:0; right:0; background:#f5f6fa; display:none; z-index:1; }
+  .iphone .canvas .hs { z-index:2; }
+  .iphone .canvas .mask.on { display:block; }
+  .iphone .pin { position:absolute; left:0; right:0; overflow:hidden; z-index:3; display:none; pointer-events:none; }
+  .iphone .pin.top { top:0; box-shadow:0 2px 10px rgba(0,0,0,.18); } .iphone .pin.bottom { bottom:0; box-shadow:0 -2px 10px rgba(0,0,0,.12); }
+  .iphone .pin img { display:block; width:100%; position:absolute; left:0; top:0; }
+  .iphone .pin.on { display:block; }
+  .iphone .home { position:absolute; bottom:1%; left:50%; transform:translateX(-50%); width:32%; height:5px; border-radius:3px; background:rgba(0,0,0,.55); z-index:4; pointer-events:none; mix-blend-mode:multiply; }
+
+  /* hotspots */
+  .hs { position:absolute; border:2px solid var(--accent); border-radius:10px; background:rgba(245,158,11,.10); cursor:pointer; transition: border-color .15s, background .15s, opacity .15s; }
+  .hs .num { position:absolute; top:50%; transform:translateY(-50%); width:22px; height:22px; border-radius:50%; background:var(--accent); color:#111; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,.4); }
+  .hs.side-left .num { left:-12px; } .hs.side-right .num { right:-12px; }
+  .hs.hot { border-color:var(--accent2); background:rgba(34,211,238,.16); box-shadow:0 0 0 4px rgba(34,211,238,.25); }
+  .hs.hot .num { background:var(--accent2); }
+  .hs.dim { opacity:.3; }
+  .hs.fixed { z-index:6; }
+  body.no-callouts .hs, body.no-callouts svg.lines { display:none; }
+
+  /* leader lines: full-window overlay so they can never be clipped */
+  svg.lines { position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:30; }
+  svg.lines path { stroke:var(--accent); stroke-width:1.5; fill:none; opacity:.5; }
+  svg.lines circle { fill:var(--accent); opacity:.75; }
+  svg.lines .hot path { opacity:1; stroke-width:2.4; stroke:var(--accent2); }
+  svg.lines .hot circle { fill:var(--accent2); opacity:1; }
+  svg.lines .dim path, svg.lines .dim circle { opacity:.1; }
+
+  /* ---------- explain panel ---------- */
+  .explain { background:var(--panel); border-inline-end:1px solid var(--line); padding:16px; overflow:auto; display:flex; flex-direction:column; gap:12px; }
+  .explain h3 { margin:0; font-size:15px; color:#fff; display:flex; justify-content:space-between; align-items:center; }
+  .etabs { display:flex; gap:4px; background:#0b1220; border-radius:10px; padding:3px; }
+  .etabs button { flex:1; border:0; background:transparent; color:var(--muted); font-family:inherit; font-size:12px; padding:6px 4px; border-radius:8px; cursor:pointer; display:flex; gap:5px; justify-content:center; align-items:center; }
+  .etabs button .c { font-size:10px; background:#182548; border-radius:999px; padding:0 6px; }
+  .etabs button.on { background:var(--navy); color:#fff; }
+  .epane { display:none; flex-direction:column; gap:10px; } .epane.on { display:flex; }
+  .ctl { display:flex; flex-direction:column; gap:6px; }
+  .ctl .c { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px 10px; display:flex; gap:9px; align-items:flex-start; }
+  .ctl .c .ic { flex:none; width:26px; height:26px; border-radius:8px; background:#182548; display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--gold); }
+  .ctl .c .lb { font-weight:800; font-size:12.5px; color:#fff; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .ctl .c .lb .k { font-size:9.5px; color:var(--muted); font-weight:400; background:#0b1220; border-radius:5px; padding:1px 5px; }
+  .ctl .c .tx { font-size:12px; line-height:1.65; color:#dbe4ff; margin-top:2px; } .ctl .c .tx .en { display:block; color:var(--muted); font-size:11.5px; direction:ltr; text-align:left; margin-top:3px; }
+  .ctl .c .jump { margin-top:5px; display:flex; gap:5px; flex-wrap:wrap; }
+  .ctl .c .jump button { border:1px solid var(--line2); background:#10283a; color:#bfefff; font-family:inherit; font-size:11px; border-radius:999px; padding:2px 9px; cursor:pointer; } .ctl .c .jump button:hover { background:#153a52; }
+  .ctl .c.open { border-color:var(--accent2); }
+  .docs { display:flex; flex-direction:column; gap:10px; }
+  .docs .entry { background:#1c2a1a; border:1px solid #2f4a2b; border-radius:12px; padding:10px 12px; font-size:12.5px; line-height:1.7; color:#dff7d8; direction:ltr; text-align:left; }
+  .docs details { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .docs summary { cursor:pointer; padding:9px 12px; font-size:12.5px; font-weight:800; color:#fff; list-style:none; display:flex; justify-content:space-between; gap:8px; }
+  .docs summary::-webkit-details-marker { display:none; } .docs summary .ln { color:var(--muted); font-weight:400; font-size:10.5px; white-space:nowrap; }
+  .docs .md { padding:0 12px 12px; font-size:12px; line-height:1.7; color:#dbe4ff; direction:ltr; text-align:left; unicode-bidi:plaintext; overflow-wrap:anywhere; word-break:break-word; min-width:0; }
+  .docs .feat.md { padding:8px 12px; } .docs .md code { overflow-wrap:anywhere; }
+  .docs .md p, .docs .md ul, .docs .md ol { margin:6px 0; } .docs .md li { margin:3px 0 3px 16px; unicode-bidi:plaintext; }
+  .docs .md code { background:#0b1220; border-radius:4px; padding:0 4px; font-size:11px; color:#ffd166; direction:ltr; }
+  .docs .md pre { background:#0b1220; border-radius:8px; padding:8px; overflow:auto; font-size:11px; }
+  .docs .md table { border-collapse:collapse; width:100%; font-size:11px; } .docs .md td, .docs .md th { border:1px solid var(--line); padding:3px 5px; vertical-align:top; }
+  .docs .md h3, .docs .md h4, .docs .md h5 { margin:8px 0 4px; color:#fff; font-size:12.5px; }
+  .docs .md strong { color:#fff; } .docs .md a { color:var(--accent2); }
+  .docs .feat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px 12px; }
+  .stdesc { background:#2a1f4d33; border:1px solid #4a3a80; border-radius:12px; padding:10px 12px; font-size:12.5px; line-height:1.75; color:#e9d8ff; }
+  .stdesc .en { color:var(--muted); font-size:12px; direction:ltr; text-align:left; margin-top:6px; border-top:1px dashed var(--line); padding-top:6px; }
+  .stdesc .back { margin-top:6px; } .stdesc .back button { border:1px solid var(--line2); background:#10283a; color:#bfefff; font-family:inherit; font-size:11px; border-radius:999px; padding:2px 9px; cursor:pointer; }
+  .explain .desc { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 14px; font-size:13.5px; line-height:1.8; color:#dbe4ff; }
+  .explain .desc .en { color:var(--muted); font-size:12.5px; direction:ltr; text-align:left; margin-top:8px; border-top:1px dashed var(--line); padding-top:8px; line-height:1.6; }
+  .explain #parts { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .explain #parts li { display:flex; gap:10px; align-items:flex-start; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:9px 10px; cursor:pointer; transition:all .15s; }
+  .explain #parts li:hover { border-color:var(--line2); background:#15203a; }
+  .explain #parts li.hot { border-color:var(--accent2); background:#10283a; box-shadow:0 0 0 2px rgba(34,211,238,.25); }
+  .explain #parts li.off { opacity:.6; }
+  .explain #parts li .num { flex:none; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#111; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+  .explain #parts li.hot .num { background:var(--accent2); }
+  .explain #parts li .tx { font-size:12.5px; line-height:1.65; flex:1; }
+  .explain #parts li .tx .en { display:block; color:var(--muted); font-size:11.5px; direction:ltr; text-align:left; margin-top:3px; }
+  .explain .empty { color:var(--muted); font-size:12.5px; }
+
+  /* ---------- settings ---------- */
+  .settings { display:none; position:absolute; top:112px; inset-inline-start:20px; width:350px; max-height:calc(100vh - 130px); overflow:auto; background:var(--panel); border:1px solid var(--line2); border-radius:16px; padding:14px 16px; z-index:40; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  .settings.open { display:block; }
+  .settings h4 { margin:0 0 6px; font-size:15px; display:flex; justify-content:space-between; align-items:center; }
+  .settings section { border-top:1px solid var(--line); padding:10px 0; }
+  .settings h5 { margin:0 0 8px; font-size:12.5px; color:var(--gold); }
+  .settings h5 small { color:var(--muted); font-weight:400; margin-inline-start:6px; }
+  .settings label { display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12.5px; margin:6px 0; }
+  .settings label.row { justify-content:flex-start; }
+  .settings input[type=number] { width:78px; background:#0b1220; color:#fff; border:1px solid var(--line2); border-radius:8px; padding:5px 8px; font:inherit; font-size:12.5px; }
+  .settings input[type=range] { width:160px; accent-color:var(--accent); }
+  .settings .keys { display:grid; grid-template-columns:1fr auto; gap:6px 10px; align-items:center; font-size:12.5px; }
+  .settings .kbd { background:#0b1220; color:#fff; border:1px solid var(--line2); border-radius:8px; padding:5px 10px; min-width:72px; text-align:center; font-family:ui-monospace, Menlo, monospace; font-size:12.5px; font-weight:700; cursor:pointer; }
+  .settings .kbd:hover { border-color:var(--accent); }
+  .settings .kbd.listen { border-color:var(--accent2); color:var(--accent2); }
+  .settings .presets { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .settings .presets .ib { height:28px; font-size:11.5px; }
+
+  /* ---------- grid ---------- */
+  .grid { display:none; position:absolute; inset:0; overflow:auto; padding:16px 24px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); grid-auto-rows:max-content; gap:14px; background:var(--bg); z-index:20; align-content:start; }
+  .grid figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; cursor:pointer; transition:transform .12s; display:block; }
+  .grid figure:hover { transform:translateY(-2px); border-color:var(--line2); }
+  .grid figure img { width:100%; height:240px; object-fit:cover; object-position:top; display:block; background:#fff; }
+  .grid figcaption { padding:7px 9px; font-size:11.5px; line-height:1.45; }
+  .grid figcaption .p { color:var(--gold); font-family:ui-monospace, monospace; direction:ltr; display:block; font-size:10.5px; }
+  .grid h4 { grid-column:1/-1; margin:8px 0 0; color:var(--gold); font-size:13px; }
+  body.grid-mode .grid { display:grid; }
+  body.grid-mode svg.lines { display:none; }
+  .progress { position:absolute; bottom:0; left:0; height:3px; background:var(--accent); width:0; transition:width .3s linear; }
+  @media (max-width: 1200px) { body { grid-template-columns: 240px 1fr 320px; } }
+</style>
+</head>
+<body class="lang-both">
+
+<svg class="lines" id="lines"></svg>
+
+<aside>
+  <h1>إدارة الإيبارشية — عرض تفاعلي</h1>
+  <div class="sub dual"><span class="ar">__COUNT__ صفحة + __NSTATES__ قائمة / نافذة / تبويب · بيانات تجريبية · مرّر داخل الهاتف · مرّر الفأرة على الأرقام</span><span class="en">__COUNT__ pages + __NSTATES__ menus / dialogs / tabs · demo data · scroll inside the phone · hover the numbers</span></div>
+  <div class="tools dual">
+    <button class="ib" id="toggleGrid"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="lbl"><span class="ar">كل الصفحات</span><span class="en">All pages</span></span></button>
+    <button class="ib on" id="toggleCallouts"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg><span class="lbl"><span class="ar">الشروحات</span><span class="en">Callouts</span></span></button>
+    <button class="ib" id="play"><svg viewBox="0 0 24 24" id="playIcon"><path d="M7 5v14l11-7z" fill="currentColor" stroke="none"/></svg><span class="lbl"><span class="ar">عرض تلقائي</span><span class="en">Auto tour</span></span></button>
+    <button class="ib" id="lang"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><span class="lbl">AR / EN</span></button>
+  </div>
+  <nav id="nav"></nav>
+</aside>
+
+<main>
+  <div class="top">
+    <h2 id="title"></h2>
+    <div class="meta"><span class="path" id="path"></span><span class="badge" id="persona"></span><span class="badge" id="secbadge"></span><span class="badge kind" id="kindbadge" style="display:none"></span></div>
+    <div class="states" id="statesBar"></div>
+  </div>
+
+  <div class="toolbar dual">
+    <span class="seg">
+      <span class="cap"><span class="ar">الصفحة</span><span class="en">Page</span></span>
+      <button class="ib tip" id="next" data-tip="التالية"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <span class="val" id="counter"></span>
+      <button class="ib tip" id="prev" data-tip="السابقة"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+    </span>
+    <span class="seg">
+      <span class="cap"><span class="ar">الجزء</span><span class="en">Part</span></span>
+      <button class="ib tip" id="cnext" data-tip="الجزء التالي"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <span class="val" id="ccounter">—</span>
+      <button class="ib tip" id="cprev" data-tip="الجزء السابق"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+    </span>
+    <span class="seg">
+      <span class="cap"><span class="ar">القوائم</span><span class="en">Menus</span></span>
+      <button class="ib tip" id="snext" data-tip="القائمة / النافذة التالية"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+      <span class="val" id="scounter">—</span>
+      <button class="ib tip" id="sprev" data-tip="السابقة"><svg viewBox="0 0 24 24"><path d="M20 6H4M20 12H4M20 18h-10"/></svg></button>
+    </span>
+    <span class="seg">
+      <span class="cap"><span class="ar">حجم الهاتف</span><span class="en">Phone size</span></span>
+      <button class="ib tip" id="sizeDown" data-tip="أصغر"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+      <span class="val" id="sizeLbl"></span>
+      <button class="ib tip" id="sizeUp" data-tip="أكبر"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="ib tip" id="sizeFit" data-tip="ملاءمة الشاشة"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    </span>
+    <button class="ib tip" id="fullscreen" data-tip="ملء الشاشة"><svg viewBox="0 0 24 24" id="fsIcon"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>
+    <button class="ib tip" id="settingsBtn" data-tip="الإعدادات"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
+
+  <div class="settings dual" id="settings">
+    <h4><span><span class="ar">الإعدادات</span><span class="en">Settings</span></span><button class="ib" id="settingsClose" style="height:28px;min-width:28px;padding:0"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></h4>
+    <section>
+      <h5><span class="ar">حجم الهاتف</span><span class="en">Phone size</span></h5>
+      <label><span><span class="ar">العرض (px)</span><span class="en">Width (px)</span></span><input type="number" id="setW" min="200" max="1200" step="10"></label>
+      <label><span><span class="ar">الارتفاع (px)</span><span class="en">Height (px)</span></span><input type="number" id="setH" min="300" max="2600" step="10"></label>
+      <label class="row"><input type="checkbox" id="setLock" checked><span><span class="ar">قفل نسبة iPhone (430 × 932)</span><span class="en">Lock iPhone ratio (430 × 932)</span></span></label>
+      <div class="presets">
+        <button class="ib" data-w="320"><span class="lbl">S</span></button>
+        <button class="ib" data-w="390"><span class="lbl">M</span></button>
+        <button class="ib" data-w="430"><span class="lbl">L · 1:1</span></button>
+        <button class="ib" data-w="520"><span class="lbl">XL</span></button>
+        <button class="ib" id="sizeFit2"><span class="lbl"><span class="ar">ملاءمة الشاشة</span><span class="en">Fit screen</span></span></button>
+      </div>
+    </section>
+    <section>
+      <h5><span class="ar">العرض التلقائي</span><span class="en">Auto tour</span></h5>
+      <label><span><span class="ar">مدة كل جزء (ثانية)</span><span class="en">Seconds per callout</span></span><input type="number" id="setCallout" min="0.5" max="60" step="0.5"></label>
+      <label><span><span class="ar">الانتظار قبل الصفحة التالية (ثانية)</span><span class="en">Pause before next page (s)</span></span><input type="number" id="setPage" min="0" max="60" step="0.5"></label>
+      <label><span><span class="ar">صفحة بلا أجزاء: مدة العرض (ثانية)</span><span class="en">Page without callouts: dwell (s)</span></span><input type="number" id="setDwell" min="0.5" max="60" step="0.5"></label>
+      <label class="row"><input type="checkbox" id="setLoop"><span><span class="ar">إعادة من البداية عند النهاية</span><span class="en">Loop at the end</span></span></label>
+      <label class="row"><input type="checkbox" id="setAutoScroll" checked><span><span class="ar">تمرير الهاتف إلى الجزء عند اختياره</span><span class="en">Scroll the phone to the selected part</span></span></label>
+      <label class="row"><input type="checkbox" id="setTourStates" checked><span><span class="ar">العرض التلقائي يفتح القوائم والنوافذ أيضاً</span><span class="en">Auto tour also opens the menus & dialogs</span></span></label>
+    </section>
+    <section>
+      <h5><span class="ar">اختصارات لوحة المفاتيح</span><span class="en">Keyboard shortcuts</span> <small><span class="ar">اضغط الحقل ثم اضغط المفتاح</span><span class="en">click a field, then press a key</span></small></h5>
+      <div class="keys" id="keys"></div>
+      <div class="presets"><button class="ib" id="keysReset"><span class="lbl"><span class="ar">استعادة الافتراضي</span><span class="en">Reset defaults</span></span></button></div>
+    </section>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="iphone" id="iphone">
+      <div class="body"></div>
+      <div class="btn l1"></div><div class="btn l2"></div><div class="btn l3"></div><div class="btn r"></div>
+      <div class="screen" id="screen">
+        <div class="scroller" id="scroller"><div class="canvas" id="canvas"><img id="shot" alt=""><div class="mask" id="maskTop"></div><div class="mask" id="maskBottom"></div></div></div>
+        <div class="trig" id="trig" style="display:none"></div>
+        <div class="pin top" id="pinTop"><img id="pinTopImg" alt=""></div>
+        <div class="pin bottom" id="pinBottom"><img id="pinBottomImg" alt=""></div>
+        <div class="home"></div>
+      </div>
+    </div>
+  </div>
+  <div class="hint dual"><span class="ar">اضغط على رقم في الهاتف أو في القائمة لتمييز الجزء؛ الهاتف يتمرّر إليه. الخطوط تظهر للأجزاء الظاهرة على الشاشة فقط.</span><span class="en">Click a number on the phone or in the list to highlight that part; the phone scrolls to it. Lines are drawn only for parts currently visible on the screen.</span></div>
+  <div class="grid" id="grid"></div>
+  <div class="progress" id="progress"></div>
+</main>
+
+<section class="explain">
+  <h3 class="dual"><span><span class="ar">ما في هذه الصفحة</span><span class="en">What is on this page</span></span><span class="badge" id="cnum"></span></h3>
+  <div class="desc" id="desc"></div>
+  <div class="stdesc" id="stdesc" style="display:none"></div>
+  <div class="etabs dual" id="etabs">
+    <button class="on" data-pane="parts"><span class="ar">الأجزاء</span><span class="en">Parts</span><span class="c" id="nParts">0</span></button>
+    <button data-pane="controls"><span class="ar">الأزرار والقوائم</span><span class="en">Buttons &amp; menus</span><span class="c" id="nCtl">0</span></button>
+    <button data-pane="docs"><span class="ar">من الدليل</span><span class="en">From README</span><span class="c" id="nDocs">0</span></button>
+  </div>
+  <div class="epane on" id="pane-parts"><ol id="parts"></ol></div>
+  <div class="epane" id="pane-controls"><div class="ctl" id="controls"></div></div>
+  <div class="epane" id="pane-docs"><div class="docs" id="docs"></div></div>
+</section>
+
+<script>
+const S = __DATA__;
+const SECTIONS = __SECTIONS__;
+const README = __README__;
+const SHOT_W = 430, RATIO = 932 / 430;
+const $ = (id) => document.getElementById(id);
+let i = 0, si = -1, hot = -1, playing = null, lang = localStorage.getItem('tour-lang') || 'both';
+let pane = localStorage.getItem('tour-pane') || 'parts';
+// the view currently shown in the phone: the page itself (si < 0) or one of its explored states
+const cur = () => (si >= 0 && S[i].states[si]) ? S[i].states[si] : S[i];
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- settings ----------
+const DEFAULTS = {
+  phoneW: 430, phoneH: 932, lock: true,
+  calloutMs: 2600, pageMs: 1600, dwellMs: 3000, loop: false, autoScroll: true,
+  keys: { nextPage: 'ArrowLeft', prevPage: 'ArrowRight', nextCallout: 'ArrowDown', prevCallout: 'ArrowUp', nextState: 'PageDown', prevState: 'PageUp', backToPage: 'Backspace', play: ' ', fullscreen: 'f', sizeUp: '+', sizeDown: '-', sizeFit: '0', grid: 'g', settings: 's', paneParts: 'q', paneControls: 'w', paneDocs: 'e' },
+  tourStates: true,
+};
+const KEY_LABELS = { nextPage: ['الصفحة التالية', 'Next page'], prevPage: ['الصفحة السابقة', 'Previous page'], nextCallout: ['الجزء التالي', 'Next callout'], prevCallout: ['الجزء السابق', 'Previous callout'], nextState: ['القائمة / النافذة التالية', 'Next menu / dialog'], prevState: ['القائمة / النافذة السابقة', 'Previous menu / dialog'], backToPage: ['رجوع إلى الصفحة', 'Back to the page'], paneParts: ['لوحة الأجزاء', 'Parts pane'], paneControls: ['لوحة الأزرار والقوائم', 'Buttons & menus pane'], paneDocs: ['لوحة الدليل', 'README pane'], play: ['تشغيل / إيقاف العرض', 'Play / pause tour'], fullscreen: ['ملء الشاشة', 'Fullscreen'], sizeUp: ['هاتف أكبر', 'Bigger phone'], sizeDown: ['هاتف أصغر', 'Smaller phone'], sizeFit: ['ملاءمة الشاشة', 'Fit screen'], grid: ['كل الصفحات', 'All pages grid'], settings: ['الإعدادات', 'Settings'] };
+let cfg = { ...DEFAULTS, keys: { ...DEFAULTS.keys } };
+try { const saved = JSON.parse(localStorage.getItem('tour-cfg2') || '{}'); cfg = { ...cfg, ...saved, keys: { ...cfg.keys, ...(saved.keys || {}) } }; } catch { /* ignore */ }
+const saveCfg = () => localStorage.setItem('tour-cfg2', JSON.stringify(cfg));
+const keyName = (k) => ({ ' ': 'Space', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'Esc' }[k] || (k.length === 1 ? k.toUpperCase() : k));
+
+function applyLang() { document.body.classList.remove('lang-ar', 'lang-en', 'lang-both'); document.body.classList.add('lang-' + lang); localStorage.setItem('tour-lang', lang); }
+$('lang').onclick = () => { lang = lang === 'both' ? 'ar' : lang === 'ar' ? 'en' : 'both'; applyLang(); go(i, si); };
+applyLang();
+
+// ---------- phone size ----------
+const stage = $('stage'), iphone = $('iphone'), screen = $('screen'), scroller = $('scroller'), canvas = $('canvas'), shot = $('shot'), lines = $('lines');
+function applySize() {
+  const w = Math.max(200, Math.min(1200, Math.round(cfg.phoneW)));
+  cfg.phoneW = w;
+  if (cfg.lock) cfg.phoneH = Math.round(w * RATIO);
+  iphone.classList.toggle('free', !cfg.lock);
+  iphone.style.setProperty('--pw', w + 'px');
+  iphone.style.setProperty('--ph', cfg.lock ? 'auto' : cfg.phoneH + 'px');
+  $('sizeLbl').textContent = w + '×' + cfg.phoneH;
+  $('setW').value = w; $('setH').value = cfg.phoneH; $('setLock').checked = cfg.lock;
+  saveCfg();
+  requestAnimationFrame(() => { renderHotspots(cur()); drawLines(); });
+}
+function fitSize() {
+  const st = stage.getBoundingClientRect();
+  const h = st.height - 56, w = st.width - 40;
+  cfg.lock = true; cfg.phoneW = Math.floor(Math.min(w, h / RATIO)); applySize();
+}
+$('sizeUp').onclick = () => { cfg.phoneW = cfg.phoneW * 1.1; if (!cfg.lock) cfg.phoneH = Math.round(cfg.phoneH * 1.1); applySize(); };
+$('sizeDown').onclick = () => { cfg.phoneW = cfg.phoneW / 1.1; if (!cfg.lock) cfg.phoneH = Math.round(cfg.phoneH / 1.1); applySize(); };
+$('sizeFit').onclick = fitSize; $('sizeFit2').onclick = fitSize;
+$('setW').onchange = (e) => { cfg.phoneW = +e.target.value; applySize(); };
+$('setH').onchange = (e) => { cfg.phoneH = Math.max(300, +e.target.value); cfg.lock = false; applySize(); };
+$('setLock').onchange = (e) => { cfg.lock = e.target.checked; applySize(); };
+document.querySelectorAll('.presets [data-w]').forEach((b) => { b.onclick = () => { cfg.lock = true; cfg.phoneW = +b.dataset.w; applySize(); }; });
+
+// ---------- settings panel ----------
+function renderSettings() {
+  $('setCallout').value = cfg.calloutMs / 1000; $('setPage').value = cfg.pageMs / 1000; $('setDwell').value = cfg.dwellMs / 1000;
+  $('setLoop').checked = cfg.loop; $('setAutoScroll').checked = cfg.autoScroll; $('setTourStates').checked = cfg.tourStates !== false;
+  $('setW').value = cfg.phoneW; $('setH').value = cfg.phoneH; $('setLock').checked = cfg.lock;
+  const keys = $('keys'); keys.innerHTML = '';
+  for (const [action, [ar, en]] of Object.entries(KEY_LABELS)) {
+    const lbl = document.createElement('span'); lbl.innerHTML = '<span class="ar">' + ar + '</span><span class="en">' + en + '</span>';
+    const kbd = document.createElement('button'); kbd.className = 'kbd'; kbd.dataset.action = action; kbd.textContent = keyName(cfg.keys[action]);
+    kbd.onclick = () => {
+      document.querySelectorAll('.kbd.listen').forEach((b) => { b.classList.remove('listen'); b.textContent = keyName(cfg.keys[b.dataset.action]); });
+      kbd.classList.add('listen'); kbd.textContent = '…';
+      const h = (e) => { e.preventDefault(); e.stopPropagation(); if (e.key !== 'Escape') { cfg.keys[action] = e.key; saveCfg(); } kbd.classList.remove('listen'); kbd.textContent = keyName(cfg.keys[action]); window.removeEventListener('keydown', h, true); };
+      window.addEventListener('keydown', h, true);
+    };
+    keys.append(lbl, kbd);
+  }
+}
+$('setCallout').onchange = (e) => { cfg.calloutMs = Math.max(500, +e.target.value * 1000); saveCfg(); };
+$('setPage').onchange = (e) => { cfg.pageMs = Math.max(0, +e.target.value * 1000); saveCfg(); };
+$('setDwell').onchange = (e) => { cfg.dwellMs = Math.max(500, +e.target.value * 1000); saveCfg(); };
+$('setLoop').onchange = (e) => { cfg.loop = e.target.checked; saveCfg(); };
+$('setAutoScroll').onchange = (e) => { cfg.autoScroll = e.target.checked; saveCfg(); };
+$('setTourStates').onchange = (e) => { cfg.tourStates = e.target.checked; saveCfg(); };
+$('keysReset').onclick = () => { cfg.keys = { ...DEFAULTS.keys }; saveCfg(); renderSettings(); };
+const toggleSettings = (open) => { const o = open ?? !$('settings').classList.contains('open'); $('settings').classList.toggle('open', o); $('settingsBtn').classList.toggle('on', o); if (o) renderSettings(); };
+$('settingsBtn').onclick = () => toggleSettings();
+$('settingsClose').onclick = () => toggleSettings(false);
+document.addEventListener('click', (e) => { if ($('settings').classList.contains('open') && !e.target.closest('#settings, #settingsBtn')) toggleSettings(false); });
+
+// ---------- sidebar + grid ----------
+const nav = $('nav');
+for (const sec of SECTIONS) {
+  const items = S.map((s, k) => [s, k]).filter(([s]) => s.section === sec);
+  const h = document.createElement('h2'); h.innerHTML = sec + '<span class="c">' + items.length + '</span>'; nav.appendChild(h);
+  for (const [s, k] of items) {
+    const a = document.createElement('a'); a.href = '#' + k; a.dataset.k = k;
+    a.innerHTML = '<span class="n">' + (k + 1) + '</span><span>' + esc(s.title) + '</span>' + (s.states.length ? '<span class="tg" title="menus / dialogs">▾ ' + s.states.length + '</span>' : '');
+    nav.appendChild(a);
+    if (s.states.length) {
+      const w = document.createElement('div'); w.className = 'stwrap'; w.dataset.k = k;
+      s.states.forEach((st, n) => { const b = document.createElement('a'); b.href = '#' + k + '.' + n; b.className = 'st'; b.dataset.k = k; b.dataset.s = n; b.innerHTML = '<span class="k">' + esc(st.kindLabel[lang === 'en' ? 1 : 0]) + '</span><span>' + esc(st.title) + '</span>'; w.appendChild(b); });
+      nav.appendChild(w);
+      a.querySelector('.tg').onclick = (e) => { e.preventDefault(); e.stopPropagation(); w.classList.toggle('open'); };
+    }
+  }
+}
+const grid = $('grid');
+for (const sec of SECTIONS) {
+  const h = document.createElement('h4'); h.textContent = sec; grid.appendChild(h);
+  S.forEach((s, k) => { if (s.section !== sec) return; const f = document.createElement('figure');
+    f.innerHTML = '<img loading="lazy" src="' + s.src + '"><figcaption>' + (k + 1) + '. ' + s.title + '<span class="p">' + s.path + '</span></figcaption>';
+    f.onclick = () => { document.body.classList.remove('grid-mode'); $('toggleGrid').classList.remove('on'); go(k); }; grid.appendChild(f); });
+}
+$('toggleGrid').onclick = () => { document.body.classList.toggle('grid-mode'); $('toggleGrid').classList.toggle('on'); };
+$('toggleCallouts').onclick = () => { document.body.classList.toggle('no-callouts'); $('toggleCallouts').classList.toggle('on'); };
+
+// ---------- geometry ----------
+function scale() { return shot.getBoundingClientRect().width / SHOT_W; }
+// which side of the phone faces the explanation panel
+function panelSide() { const e = document.querySelector('.explain').getBoundingClientRect(), p = iphone.getBoundingClientRect(); return e.left < p.left ? 'left' : 'right'; }
+const isPinnedTop = (c) => c.kind === 'header' && $('pinTop').classList.contains('on');
+const isPinnedBottom = (c) => c.kind === 'nav' && $('pinBottom').classList.contains('on');
+
+function pinChrome(s) {
+  const k = scale();
+  if (s.viewportOnly) { $('pinTop').classList.remove('on'); $('pinBottom').classList.remove('on'); $('maskTop').classList.remove('on'); $('maskBottom').classList.remove('on'); return; }
+  const hdr = s.callouts.find((c) => c.kind === 'header');
+  const nv = s.callouts.find((c) => c.kind === 'nav');
+  const pt = $('pinTop'), pb = $('pinBottom');
+  const mt = $('maskTop'), mb = $('maskBottom');
+  if (hdr && hdr.y < 5) { pt.classList.add('on'); pt.style.height = (hdr.h * k) + 'px'; $('pinTopImg').src = s.src; mt.classList.remove('on'); }
+  else { pt.classList.remove('on'); mt.classList.remove('on'); }
+  // the bottom bar was fixed on the device, but the full-page capture rendered
+  // it once at the bottom of the first viewport (y ≈ 863). Show it pinned at
+  // the screen bottom and hide the mid-page copy with a mask in the page colour.
+  const imgH = shot.naturalHeight || s.pageH;
+  if (nv && imgH > 940 && nv.y < 940) {
+    const pinH = nv.h * k;
+    pb.classList.add('on'); pb.style.height = pinH + 'px';
+    $('pinBottomImg').src = s.src; $('pinBottomImg').style.top = -(nv.y * k) + 'px';
+    mb.classList.add('on'); mb.style.top = (nv.y * k - 1) + 'px'; mb.style.height = (pinH + 2) + 'px';
+    try { const cv = document.createElement('canvas'); cv.width = cv.height = 1; const cx = cv.getContext('2d'); const sx = shot.naturalWidth / SHOT_W; cx.drawImage(shot, Math.round(6 * sx), Math.round((nv.y + nv.h + 4) * sx), 1, 1, 0, 0, 1, 1); const d = cx.getImageData(0, 0, 1, 1).data; mb.style.background = 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')'; } catch { /* default colour */ }
+  } else { pb.classList.remove('on'); mb.classList.remove('on'); }
+}
+function renderTrigger(s) {
+  const t = $('trig'), k = scale();
+  if (!s.trigger) { t.style.display = 'none'; return; }
+  const tr = s.trigger;
+  t.style.display = ''; t.dataset.l = tr.label;
+  t.style.left = (tr.x * k) + 'px'; t.style.top = (tr.y * k) + 'px'; t.style.width = (tr.w * k) + 'px'; t.style.height = (tr.h * k) + 'px';
+  if (s.viewportOnly && tr.y > 932) t.style.display = 'none';
+}
+function renderHotspots(s) {
+  pinChrome(s);
+  iphone.classList.toggle('state-shot', !!s.viewportOnly);
+  document.querySelectorAll('.iphone .hs').forEach((e) => e.remove());
+  renderTrigger(s);
+  const k = scale(), side = panelSide();
+  s.callouts.forEach((c, n) => {
+    const d = document.createElement('div'); d.className = 'hs side-' + side; d.dataset.n = n;
+    d.style.left = (c.x * k) + 'px'; d.style.top = (c.y * k) + 'px'; d.style.width = (c.w * k) + 'px'; d.style.height = (c.h * k) + 'px';
+    d.innerHTML = '<span class="num">' + (n + 1) + '</span>';
+    d.onmouseenter = () => setHot(n, false); d.onmouseleave = () => setHot(-1, false); d.onclick = (e) => { e.stopPropagation(); setHot(n, cfg.autoScroll); };
+    if (isPinnedTop(c) || isPinnedBottom(c)) { d.classList.add('fixed'); if (c.kind === 'nav') { d.style.top = 'auto'; d.style.bottom = '0px'; } screen.appendChild(d); }
+    else canvas.appendChild(d);
+  });
+}
+/** the badge of callout n in viewport coordinates, or null when it is scrolled out of the screen */
+function badgePoint(n) {
+  const d = document.querySelector('.iphone .hs[data-n="' + n + '"] .num'); if (!d) return null;
+  const r = d.getBoundingClientRect(), sc = screen.getBoundingClientRect();
+  const cy = r.top + r.height / 2, cx = r.left + r.width / 2;
+  if (cy < sc.top + 4 || cy > sc.bottom - 4) return null;
+  return { x: cx, y: cy };
+}
+function drawLines() {
+  const s = cur(); lines.innerHTML = '';
+  if (document.body.classList.contains('grid-mode') || pane !== 'parts') return;
+  const items = [...$('parts').children], side = panelSide(), pr = iphone.getBoundingClientRect();
+  s.callouts.forEach((c, n) => {
+    const li = items[n]; if (!li) return;
+    const b = badgePoint(n);
+    li.classList.toggle('off', !b);
+    if (!b) return;
+    const lr = li.getBoundingClientRect();
+    const tx = side === 'left' ? lr.right : lr.left, ty = lr.top + Math.min(lr.height / 2, 22);
+    const ex = side === 'left' ? pr.left - 14 : pr.right + 14; // exit point just outside the phone
+    const mx = (ex + tx) / 2;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.classList.toggle('hot', n === hot); g.classList.toggle('dim', hot >= 0 && n !== hot);
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', 'M ' + b.x + ' ' + b.y + ' L ' + ex + ' ' + b.y + ' C ' + mx + ' ' + b.y + ' ' + mx + ' ' + ty + ' ' + tx + ' ' + ty);
+    const c2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c2.setAttribute('cx', tx); c2.setAttribute('cy', ty); c2.setAttribute('r', 3.5);
+    g.append(p, c2); lines.appendChild(g);
+  });
+}
+function setHot(n, scroll) {
+  hot = n; updateCalloutCounter();
+  document.querySelectorAll('.iphone .hs').forEach((e) => { e.classList.toggle('hot', +e.dataset.n === n); e.classList.toggle('dim', n >= 0 && +e.dataset.n !== n); });
+  [...$('parts').children].forEach((li, k) => li.classList.toggle('hot', k === n));
+  if (scroll && n >= 0) {
+    const c = cur().callouts[n]; const k = scale(); const sc = screen.getBoundingClientRect();
+    if (c.kind === 'header') scroller.scrollTo({ top: 0, behavior: 'smooth' });
+    else if (c.kind !== 'nav') scroller.scrollTo({ top: Math.max(0, c.y * k - sc.height / 2 + (c.h * k) / 2), behavior: 'smooth' });
+    $('parts').children[n]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // the smooth scroll takes a moment — keep the lines in sync while it runs
+    let t = 0; const tick = () => { drawLines(); if ((t += 50) < 600) setTimeout(tick, 50); }; tick();
+  }
+  drawLines();
+}
+function updateCalloutCounter() { const n = cur().callouts.length; $('ccounter').textContent = n ? ((hot < 0 ? '–' : hot + 1) + ' / ' + n) : '—'; const ns = S[i].states.length; $('scounter').textContent = ns ? ((si < 0 ? '–' : si + 1) + ' / ' + ns) : '—'; }
+function stepCallout(d) { const n = cur().callouts.length; if (!n) return; setHot(hot < 0 ? (d > 0 ? 0 : n - 1) : (hot + d + n) % n, cfg.autoScroll); }
+function stepState(d) { const n = S[i].states.length; if (!n) return; const nx = si < 0 ? (d > 0 ? 0 : n - 1) : si + d; if (nx >= n || nx < -1) { showState(-1); return; } showState(nx); }
+
+// ---------- explanation panes ----------
+function setPane(p) { pane = p; localStorage.setItem('tour-pane', p); document.querySelectorAll('#etabs button').forEach((b) => b.classList.toggle('on', b.dataset.pane === p)); document.querySelectorAll('.epane').forEach((e) => e.classList.toggle('on', e.id === 'pane-' + p)); drawLines(); }
+document.querySelectorAll('#etabs button').forEach((b) => { b.onclick = () => setPane(b.dataset.pane); });
+const KIND_ICON = { button: '▣', link: '↗', tab: '⇄', expander: '▾', select: '☰', checkbox: '☑', field: '✎', sidemenu: '☰', modal: '▢', sheet: '⬒', expand: '▾', navigate: '↗' };
+function renderControls(s) {
+  const box = $('controls'); box.innerHTML = '';
+  const page = S[i];
+  // on a state view, list the buttons INSIDE the menu / dialog; on the page view, every control of the page
+  const list = s === page ? page.controls : s.buttons;
+  $('nCtl').textContent = list.length;
+  if (!list.length) { box.innerHTML = '<div class="empty">—</div>'; return; }
+  for (const c of list) {
+    const d = document.createElement('div'); d.className = 'c' + (c.state === si && si >= 0 ? ' open' : '');
+    let jump = '';
+    if (c.state != null) jump += '<button data-st="' + c.state + '"><span class="ar">افتح ' + esc(page.states[c.state].kindLabel[0]) + ' ↗</span><span class="en">open ' + esc(page.states[c.state].kindLabel[1]) + ' ↗</span></button>';
+    if (c.nav != null) jump += '<button data-nav="' + c.nav + '"><span class="ar">اذهب إلى «' + esc(S[c.nav].title) + '» ↗</span><span class="en">go to «' + esc(S[c.nav].title) + '» ↗</span></button>';
+    d.innerHTML = '<span class="ic">' + (KIND_ICON[c.kind] || '▣') + '</span><div style="flex:1;min-width:0"><div class="lb">' + esc(c.label) + '<span class="k">' + esc(c.kind) + '</span></div><div class="tx"><span class="ar">' + esc(c.ar) + '</span><span class="en">' + esc(c.en) + '</span></div>' + (jump ? '<div class="jump dual">' + jump + '</div>' : '') + '</div>';
+    d.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => showState(+b.dataset.st); });
+    d.querySelectorAll('[data-nav]').forEach((b) => { b.onclick = () => go(+b.dataset.nav); });
+    if (c.x != null && s === page) { d.onmouseenter = () => flashTrigger(c); d.onmouseleave = () => renderTrigger(cur()); }
+    box.appendChild(d);
+  }
+}
+function flashTrigger(c) { const t = $('trig'), k = scale(); t.style.display = ''; t.dataset.l = c.label; t.style.left = (c.x * k) + 'px'; t.style.top = (c.y * k) + 'px'; t.style.width = (c.w * k) + 'px'; t.style.height = (c.h * k) + 'px'; if (cfg.autoScroll) { const sc = screen.getBoundingClientRect(); scroller.scrollTo({ top: Math.max(0, c.y * k - sc.height / 2), behavior: 'smooth' }); } }
+function renderDocs(s) {
+  const box = $('docs'); box.innerHTML = '';
+  const r = s.readme || {}; let n = 0;
+  if (r.entry) { const d = document.createElement('div'); d.className = 'entry'; d.innerHTML = '<b style="color:#9be48a">README › Functional Entry Points</b><br>' + r.entry; box.appendChild(d); n++; }
+  for (const f of r.feats || []) { const d = document.createElement('div'); d.className = 'feat md'; d.innerHTML = '<b style="color:var(--gold);font-size:11px">README › Currently Completed Features</b>' + README.features[f]; box.appendChild(d); n++; }
+  (r.secs || []).forEach((k, idx) => { const sec = README.sections[k]; const d = document.createElement('details'); if (idx === 0) d.open = true; d.innerHTML = '<summary><span>' + esc(sec.title) + '</span><span class="ln">README.md : ' + sec.line + '</span></summary><div class="md">' + sec.html + '</div>'; box.appendChild(d); n++; });
+  $('nDocs').textContent = n;
+  if (!n) box.innerHTML = '<div class="empty">—</div>';
+}
+function renderStatesBar(page) {
+  const bar = $('statesBar'); bar.innerHTML = '';
+  if (!page.states.length) return;
+  const base = document.createElement('button'); base.className = 'stb base' + (si < 0 ? ' on' : ''); base.innerHTML = '<span class="ar">الصفحة</span><span class="en">Page</span>'; base.onclick = () => showState(-1); bar.appendChild(base);
+  page.states.forEach((st, n) => { const b = document.createElement('button'); b.className = 'stb' + (n === si ? ' on' : ''); b.innerHTML = '<span class="k">' + esc(st.kindLabel[lang === 'en' ? 1 : 0]) + '</span>' + esc(st.title); b.title = st.trigger.label; b.onclick = () => showState(n); bar.appendChild(b); });
+}
+/** show the page (n = -1) or one of its explored states inside the phone */
+function showState(n) {
+  const page = S[i]; si = (n >= 0 && page.states[n]) ? n : -1; hot = -1;
+  const s = cur();
+  document.querySelectorAll('#statesBar .stb').forEach((b, k) => b.classList.toggle('on', k === si + 1));
+  const kb = $('kindbadge');
+  if (si >= 0) { kb.style.display = ''; kb.innerHTML = '<span class="ar">' + esc(s.kindLabel[0]) + ' — تُفتح بـ «' + esc(s.trigger.label) + '»</span><span class="en">' + esc(s.kindLabel[1]) + ' — opened by «' + esc(s.trigger.label) + '»</span>'; }
+  else kb.style.display = 'none';
+  const sd = $('stdesc');
+  if (si >= 0) { sd.style.display = ''; sd.innerHTML = '<div class="ar">' + esc(s.ar) + '</div><div class="en">' + esc(s.en) + '</div><div class="back dual"><button id="backBtn"><span class="ar">← رجوع إلى الصفحة</span><span class="en">← back to the page</span></button>' + (s.nav != null ? ' <button id="navBtn"><span class="ar">افتح صفحة «' + esc(S[s.nav].title) + '» في العرض ↗</span><span class="en">open page «' + esc(S[s.nav].title) + '» in the tour ↗</span></button>' : '') + '</div>'; $('backBtn').onclick = () => showState(-1); if (s.nav != null) $('navBtn').onclick = () => go(s.nav); }
+  else sd.style.display = 'none';
+  $('cnum').textContent = s.callouts.length + (lang === 'en' ? ' parts' : ' جزء'); $('nParts').textContent = s.callouts.length;
+  const ol = $('parts'); ol.innerHTML = '';
+  if (!s.callouts.length) ol.innerHTML = '<li class="empty">—</li>';
+  s.callouts.forEach((c, n2) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="num">' + (n2 + 1) + '</span><span class="tx"><span class="ar">' + esc(c.ar) + '</span><span class="en">' + esc(c.en) + '</span></span>';
+    li.onmouseenter = () => setHot(n2, false); li.onmouseleave = () => setHot(-1, false); li.onclick = () => setHot(n2, cfg.autoScroll);
+    ol.appendChild(li);
+  });
+  renderControls(s); renderDocs(page);
+  document.querySelectorAll('#nav a.st').forEach((a) => a.classList.toggle('active', +a.dataset.k === i && +a.dataset.s === si));
+  history.replaceState(null, '', '#' + i + (si >= 0 ? '.' + si : ''));
+  scroller.scrollTop = 0; updateCalloutCounter();
+  shot.onload = () => { renderHotspots(s); drawLines(); };
+  shot.src = s.src; if (shot.complete) { renderHotspots(s); drawLines(); }
+}
+$('snext').onclick = () => stepState(1); $('sprev').onclick = () => stepState(-1);
+
+// ---------- slide ----------
+function go(k, stateIdx = -1) {
+  i = Math.max(0, Math.min(S.length - 1, k)); const s = S[i]; hot = -1; si = -1;
+  $('title').textContent = s.title;
+  $('path').textContent = s.path + (s.finalUrl && s.finalUrl !== s.path ? '  →  ' + s.finalUrl : '');
+  $('persona').innerHTML = '<span class="ar">' + s.persona[0] + '</span><span class="en">' + s.persona[1] + '</span>';
+  $('secbadge').textContent = s.section;
+  $('counter').textContent = (i + 1) + ' / ' + S.length;
+  $('prev').disabled = i === 0; $('next').disabled = i === S.length - 1;
+  $('desc').innerHTML = '<div class="ar">' + (s.ar || '—') + '</div><div class="en">' + (s.en || '') + '</div>';
+  document.querySelectorAll('#nav a:not(.st)').forEach((a) => a.classList.toggle('active', +a.dataset.k === i));
+  document.querySelectorAll('#nav .stwrap').forEach((w) => w.classList.toggle('open', +w.dataset.k === i));
+  document.querySelector('#nav a.active')?.scrollIntoView({ block: 'nearest' });
+  renderStatesBar(s);
+  showState(stateIdx);
+}
+const parseHash = () => { const m = /^#(\d+)(?:\.(\d+))?/.exec(location.hash); return m ? [+m[1], m[2] != null ? +m[2] : -1] : [0, -1]; };
+$('prev').onclick = () => go(i - 1); $('next').onclick = () => go(i + 1);
+$('cnext').onclick = () => stepCallout(1); $('cprev').onclick = () => stepCallout(-1);
+window.addEventListener('hashchange', () => { const [k, st] = parseHash(); if (k !== i) go(k, st); else if (st !== si) showState(st); });
+// any scroll anywhere (phone, stage, explain panel) → redraw
+document.addEventListener('scroll', () => drawLines(), { capture: true, passive: true });
+window.addEventListener('resize', () => { renderHotspots(cur()); drawLines(); });
+canvas.addEventListener('click', () => setHot(-1, false));
+
+// ---------- fullscreen ----------
+$('fullscreen').onclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); };
+document.addEventListener('fullscreenchange', () => {
+  $('fsIcon').innerHTML = document.fullscreenElement ? '<path d="M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5"/>'.replace('M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5', 'M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5') : '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>';
+  setTimeout(() => { renderHotspots(cur()); drawLines(); }, 150);
+});
+
+// ---------- keys ----------
+document.addEventListener('keydown', (e) => {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const K = cfg.keys, k = e.key;
+  const is = (a) => k === K[a] || (K[a].length === 1 && k.toLowerCase() === K[a].toLowerCase());
+  if (is('nextPage')) { e.preventDefault(); go(i + 1); }
+  else if (is('prevPage')) { e.preventDefault(); go(i - 1); }
+  else if (is('nextCallout')) { e.preventDefault(); stepCallout(1); }
+  else if (is('prevCallout')) { e.preventDefault(); stepCallout(-1); }
+  else if (is('nextState')) { e.preventDefault(); stepState(1); }
+  else if (is('prevState')) { e.preventDefault(); stepState(-1); }
+  else if (is('backToPage')) { e.preventDefault(); showState(-1); }
+  else if (is('paneParts')) { e.preventDefault(); setPane('parts'); }
+  else if (is('paneControls')) { e.preventDefault(); setPane('controls'); }
+  else if (is('paneDocs')) { e.preventDefault(); setPane('docs'); }
+  else if (is('play')) { e.preventDefault(); $('play').click(); }
+  else if (is('fullscreen')) { e.preventDefault(); $('fullscreen').click(); }
+  else if (is('sizeUp') || k === '=') { e.preventDefault(); $('sizeUp').click(); }
+  else if (is('sizeDown') || k === '_') { e.preventDefault(); $('sizeDown').click(); }
+  else if (is('sizeFit')) { e.preventDefault(); fitSize(); }
+  else if (is('grid')) { e.preventDefault(); $('toggleGrid').click(); }
+  else if (is('settings')) { e.preventDefault(); toggleSettings(); }
+  else if (k === 'Escape') { if ($('settings').classList.contains('open')) toggleSettings(false); else if (si >= 0) showState(-1); else { setHot(-1, false); document.body.classList.remove('grid-mode'); $('toggleGrid').classList.remove('on'); } }
+  else if (/^[1-9]$/.test(k)) { const n = +k - 1; if (cur().callouts[n]) setHot(n, cfg.autoScroll); }
+});
+
+// ---------- auto tour ----------
+$('play').onclick = () => {
+  if (playing) { clearTimeout(playing); playing = null; $('play').classList.remove('on'); $('playIcon').innerHTML = '<path d="M7 5v14l11-7z" fill="currentColor" stroke="none"/>'; $('progress').style.width = 0; return; }
+  $('play').classList.add('on'); $('playIcon').innerHTML = '<rect x="6" y="5" width="4" height="14" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" fill="currentColor" stroke="none"/>';
+  let n = -1;
+  const step = () => {
+    const s = cur(); n++;
+    if (n < s.callouts.length) { setHot(n, cfg.autoScroll); $('progress').style.width = ((n + 1) / s.callouts.length * 100) + '%'; playing = setTimeout(step, cfg.calloutMs); }
+    else if (n === 0 && !s.callouts.length) { $('progress').style.width = '100%'; playing = setTimeout(step, cfg.dwellMs); }
+    else if (cfg.tourStates !== false && si + 1 < S[i].states.length) { showState(si + 1); n = -1; $('progress').style.width = 0; playing = setTimeout(step, cfg.pageMs); }
+    else if (i < S.length - 1 || cfg.loop) { go(i < S.length - 1 ? i + 1 : 0); n = -1; $('progress').style.width = 0; playing = setTimeout(step, cfg.pageMs); }
+    else { $('play').click(); }
+  };
+  setHot(-1, false); playing = setTimeout(step, 400);
+};
+
+{ const [k, st] = parseHash(); go(Math.max(0, Math.min(S.length - 1, k)), st); setPane(pane); }
+if (localStorage.getItem('tour-cfg2')) applySize(); else fitSize();
+</script>
+</body>
+</html>
