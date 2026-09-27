@@ -1,11 +1,12 @@
 'use client';
 
-// ---------- Unified login (دخول الخادم / دخول المخدوم) ----------
-// One page, two entries. Both use the CODE (national id / QR) as the login
+// ---------- Unified login (دخول الخادم / دخول المخدوم / دخول الكاهن) ----------
+// One page, three entries. Both use the CODE (national id / QR) as the login
 // name — scanned with the camera / picked from the gallery or typed — plus a
 // password, a «تذكرني» switch and a signup link.
 //   * servant → Supabase Auth (email = code@diocese.app)
 //   * child   → child_login RPC (migration 0042) → session token
+//   * priest  → priest_login RPC (migration 20260927120000) → session token
 
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
@@ -13,16 +14,17 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import {
-  LogIn, Loader2, User, Lock, QrCode, Keyboard, Eye, EyeOff, UserPlus, Users, GraduationCap,
+  LogIn, Loader2, User, Lock, QrCode, Keyboard, Eye, EyeOff, UserPlus, Users, GraduationCap, Cross,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { userIdToEmail, codeToUserId } from '@/lib/types';
 import { childLogin, fetchChildProfile, setChildToken, childErrorMessage, getChildToken } from '@/lib/child-portal';
+import { priestLogin, fetchPriestProfile, setPriestToken, priestErrorMessage, getPriestToken } from '@/lib/priest-portal';
 import QrScanner from '@/components/store/QrScanner';
 import { SERVANT_NO_REMEMBER_KEY, SERVANT_TAB_ALIVE_KEY } from '@/lib/session';
 import { logActivity } from '@/lib/activity';
 
-type LoginKind = 'servant' | 'child';
+type LoginKind = 'servant' | 'child' | 'priest';
 
 export default function LoginPage() {
   return (
@@ -37,7 +39,7 @@ function LoginInner() {
   const params = useSearchParams();
   const supabase = createClient();
 
-  const [kind, setKind] = useState<LoginKind>(params.get('as') === 'child' ? 'child' : 'servant');
+  const [kind, setKind] = useState<LoginKind>(params.get('as') === 'child' ? 'child' : params.get('as') === 'priest' ? 'priest' : 'servant');
   const [code, setCode] = useState(params.get('code') ?? '');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -46,9 +48,10 @@ function LoginInner() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // a child that is already signed in goes straight to the portal
+  // a child / priest that is already signed in goes straight to the portal
   useEffect(() => {
     if (kind === 'child' && getChildToken()) router.replace('/child');
+    if (kind === 'priest' && getPriestToken()) router.replace('/priest');
   }, [kind, router]);
 
   const switchKind = (k: LoginKind) => {
@@ -56,8 +59,8 @@ function LoginInner() {
     setError('');
     setScan(false);
     const url = new URL(window.location.href);
-    if (k === 'child') url.searchParams.set('as', 'child');
-    else url.searchParams.delete('as');
+    if (k === 'servant') url.searchParams.delete('as');
+    else url.searchParams.set('as', k);
     window.history.replaceState(null, '', url.toString());
   };
 
@@ -104,6 +107,19 @@ function LoginInner() {
       return;
     }
 
+    if (kind === 'priest') {
+      try {
+        const r = await priestLogin(supabase, clean, password, remember);
+        await fetchPriestProfile(supabase, r.token);
+        setPriestToken(r.token, remember);
+        router.replace('/priest');
+      } catch (err) {
+        setError(priestErrorMessage(err, 'تعذّر تسجيل الدخول، حاول مجدداً'));
+        setLoading(false);
+      }
+      return;
+    }
+
     // child
     try {
       const r = await childLogin(supabase, clean, password, remember);
@@ -117,6 +133,7 @@ function LoginInner() {
   };
 
   const isChild = kind === 'child';
+  const isPriest = kind === 'priest';
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-6 py-8">
@@ -137,18 +154,18 @@ function LoginInner() {
         </div>
 
         {/* servant / child switch */}
-        <div id="login-kind-switch" role="tablist" className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+        <div id="login-kind-switch" role="tablist" className="mb-4 grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 p-1">
           <button
             id="login-as-servant"
             type="button"
             role="tab"
-            aria-selected={!isChild}
+            aria-selected={kind === 'servant'}
             onClick={() => switchKind('servant')}
-            className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-extrabold transition ${
-              !isChild ? 'bg-white text-primary-700 shadow' : 'text-slate-500'
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-extrabold transition sm:text-sm ${
+              kind === 'servant' ? 'bg-white text-primary-700 shadow' : 'text-slate-500'
             }`}
           >
-            <Users className="h-4 w-4" /> دخول الخادم
+            <Users className="h-4 w-4" /> الخادم
           </button>
           <button
             id="login-as-child"
@@ -156,11 +173,23 @@ function LoginInner() {
             role="tab"
             aria-selected={isChild}
             onClick={() => switchKind('child')}
-            className={`flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-extrabold transition ${
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-extrabold transition sm:text-sm ${
               isChild ? 'bg-white text-gold-700 shadow' : 'text-slate-500'
             }`}
           >
-            <GraduationCap className="h-4 w-4" /> دخول المخدوم
+            <GraduationCap className="h-4 w-4" /> المخدوم
+          </button>
+          <button
+            id="login-as-priest"
+            type="button"
+            role="tab"
+            aria-selected={isPriest}
+            onClick={() => switchKind('priest')}
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-extrabold transition sm:text-sm ${
+              isPriest ? 'bg-white text-violet-700 shadow' : 'text-slate-500'
+            }`}
+          >
+            <Cross className="h-4 w-4" /> الكاهن
           </button>
         </div>
 
@@ -168,7 +197,7 @@ function LoginInner() {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label htmlFor="login-user-id" className="block text-sm font-bold">
-                الكود {isChild ? '(كود الكارت)' : '(اسم الدخول)'}
+                الكود {isChild ? '(كود الكارت)' : isPriest ? '(كود الكاهن)' : '(اسم الدخول)'}
               </label>
               <button
                 id="login-toggle-scan"
@@ -254,7 +283,7 @@ function LoginInner() {
             id="login-submit"
             type="submit"
             disabled={loading}
-            className={`w-full flex items-center justify-center gap-2 ${isChild ? 'btn-primary !bg-gradient-to-br !from-gold-500 !to-gold-700' : 'btn-primary'}`}
+            className={`w-full flex items-center justify-center gap-2 ${isChild ? 'btn-primary !bg-gradient-to-br !from-gold-500 !to-gold-700' : isPriest ? 'btn-primary !bg-gradient-to-br !from-violet-600 !to-violet-800' : 'btn-primary'}`}
           >
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogIn className="h-5 w-5" />}
             تسجيل الدخول
@@ -262,18 +291,20 @@ function LoginInner() {
 
           <Link
             id="login-signup-link"
-            href={isChild ? '/child/signup' : '/signup'}
+            href={isChild ? '/child/signup' : isPriest ? '/priest/signup' : '/signup'}
             className="btn-secondary w-full flex items-center justify-center gap-2"
           >
             <UserPlus className="h-5 w-5" />
-            {isChild ? 'إنشاء حساب مخدوم' : 'إنشاء حساب خادم'}
+            {isChild ? 'إنشاء حساب مخدوم' : isPriest ? 'إنشاء حساب كاهن' : 'إنشاء حساب خادم'}
           </Link>
         </form>
 
         <p className="mt-5 text-center text-xs text-slate-400">
           {isChild
             ? 'المخدوم يدخل بكود الكارت وكلمة المرور التي ضبطها الخادم أو اختارها عند التسجيل.'
-            : 'الخادم يدخل بكوده وكلمة المرور؛ الحساب الجديد يحتاج موافقة المسؤول.'}
+            : isPriest
+              ? 'الكاهن يدخل بكوده وكلمة المرور؛ الحساب الجديد يحتاج موافقة مالك التطبيق.'
+              : 'الخادم يدخل بكوده وكلمة المرور؛ الحساب الجديد يحتاج موافقة المسؤول.'}
         </p>
       </section>
     </main>

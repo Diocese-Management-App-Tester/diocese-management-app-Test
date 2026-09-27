@@ -1,9 +1,10 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-// /child/* is the child portal — no Supabase auth account, the scanned QR
-// (national id) is the token, checked client-side + inside the RPCs.
-const PUBLIC_PATHS = ['/login', '/signup', '/pending', '/child'];
+// /child/* is the child portal and /priest/* the priest portal — no Supabase
+// auth account, a session token (code + password) is checked client-side +
+// inside the RPCs.
+const PUBLIC_PATHS = ['/login', '/signup', '/pending', '/child', '/priest'];
 
 /**
  * Route gate.

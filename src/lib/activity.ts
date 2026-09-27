@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 // ---------- row ----------
-export type ActorKind = 'servant' | 'child' | 'system';
+export type ActorKind = 'servant' | 'child' | 'priest' | 'system';
 export type ActivityOp = 'INSERT' | 'UPDATE' | 'DELETE' | 'EVENT';
 
 export interface ActivityRow {
@@ -294,7 +294,7 @@ export const ROLE_LABELS: Record<string, string> = {
   child: 'مخدوم', system: 'النظام', service_role: 'النظام (خادم الويب)', unknown: 'حساب غير معروف',
 };
 
-export const ACTOR_KIND_LABELS: Record<ActorKind, string> = { servant: 'خادم', child: 'مخدوم', system: 'النظام' };
+export const ACTOR_KIND_LABELS: Record<ActorKind, string> = { servant: 'خادم', child: 'مخدوم', priest: 'كاهن', system: 'النظام' };
 
 export const OP_LABELS: Record<ActivityOp, string> = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف', EVENT: 'حدث' };
 
@@ -320,7 +320,7 @@ export function describe(row: ActivityRow): Described {
   const verb = verbOf(row.action);
   const base = row.action.split('.')[0];
   const noun = NOUNS[base] ?? group.label;
-  const actor = row.actor_name ?? (row.actor_kind === 'system' ? 'النظام' : row.actor_kind === 'child' ? 'مخدوم' : 'خادم');
+  const actor = row.actor_name ?? (row.actor_kind === 'system' ? 'النظام' : row.actor_kind === 'child' ? 'مخدوم' : row.actor_kind === 'priest' ? 'كاهن' : 'خادم');
   const target = row.target_name ?? null;
 
   const details: string[] = [];

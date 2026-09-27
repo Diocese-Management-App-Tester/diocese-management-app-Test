@@ -1,0 +1,376 @@
+'use client';
+
+// ---------- PRIEST SIGNUP (إنشاء حساب كاهن) — migration 20260927120000 ----------
+//   Step 1  الكنيسة       the church the priest serves in (REQUIRED)
+//   Step 2  الكود         typed / scanned QR / generated — priest_signup_lookup_code
+//   Step 3  البيانات      title · name · gender · phone · birthdate · address · photo
+//   Step 4  كلمة المرور   password + confirmation
+// Submit → RPC priest_signup → a PENDING request that ONLY THE OWNER reviews
+// (وحدة المالك → الكهنة). The page polls priest_signup_status afterwards.
+
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
+import { BRANDING, dioceseLogo } from '@/lib/branding';
+import Link from 'next/link';
+import Image from 'next/image';
+import {
+  UserPlus, Loader2, ChevronRight, ChevronLeft, Church, IdCard, User, KeyRound,
+  ScanLine, Wand2, Camera, Trash2, UserCheck, Check, AlertTriangle, Clock, CheckCircle2, XCircle, LogIn, Cross,
+} from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import QrScanner from '@/components/store/QrScanner';
+import PhotoCropModal from '@/components/PhotoCropModal';
+import { generateCode as renderCode, normalizeCodes, type CodesConfig } from '@/lib/code-templates';
+import { uploadPhoto } from '@/lib/upload';
+import { PHONE_PREFIX, PHONE_LOCAL_LENGTH, type Gender, type Church as ChurchRow } from '@/lib/types';
+import {
+  priestSignup, priestSignupLookupCode, priestSignupStatus, priestErrorMessage,
+  getPriestSignupRequest, setPriestSignupRequest, type PriestSignupLookup,
+} from '@/lib/priest-portal';
+
+const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+const TITLES = ['القس', 'القمص', 'الأب', 'الراهب القس', 'نيافة الأنبا'];
+
+const composeBirthdate = (d: string, m: string, y: string): string | null =>
+  d && m && y ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null;
+
+type Step = 1 | 2 | 3 | 4;
+const STEPS: { n: Step; label: string; icon: typeof Church }[] = [
+  { n: 1, label: 'الكنيسة', icon: Church },
+  { n: 2, label: 'الكود', icon: IdCard },
+  { n: 3, label: 'البيانات', icon: User },
+  { n: 4, label: 'كلمة المرور', icon: KeyRound },
+];
+
+export default function PriestSignupPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-violet-500" /></div>}>
+      <Wizard />
+    </Suspense>
+  );
+}
+
+function Wizard() {
+  const supabase = createClient();
+  const [step, setStep] = useState<Step>(1);
+  const [requestId, setRequestId] = useState<string | null>(null);
+  useEffect(() => { setRequestId(getPriestSignupRequest()); }, []);
+
+  // step 1
+  const [churchId, setChurchId] = useState('');
+  const [churches, setChurches] = useState<ChurchRow[]>([]);
+  const [structureLoading, setStructureLoading] = useState(true);
+  const [codesCfg, setCodesCfg] = useState<CodesConfig | null>(null);
+  useEffect(() => {
+    (async () => {
+      const [{ data: ch }, { data: cod }] = await Promise.all([
+        supabase.from('churches').select('*').order('name'),
+        supabase.rpc('code_settings'),
+      ]);
+      setChurches(ch ?? []);
+      setCodesCfg(cod ? normalizeCodes(cod) : null);
+      setStructureLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const churchName = churches.find((c) => c.id === churchId)?.name;
+
+  // step 2
+  const [code, setCode] = useState('');
+  const [showScan, setShowScan] = useState(false);
+  const [lookup, setLookup] = useState<PriestSignupLookup | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [lookupDone, setLookupDone] = useState(false);
+  useEffect(() => {
+    const c = code.trim();
+    setLookup(null); setLookupDone(false);
+    if (!c) return;
+    setChecking(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await priestSignupLookupCode(supabase, c);
+        setLookup(r);
+        if (r.exists && r.name && !name) setName(r.name);
+      } catch { setLookup(null); }
+      setChecking(false); setLookupDone(true);
+    }, 450);
+    return () => { clearTimeout(t); setChecking(false); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, supabase]);
+
+  // step 3
+  const [title, setTitle] = useState('القس');
+  const [name, setName] = useState('');
+  const [gender] = useState<Gender>('male');
+  const [phoneLocal, setPhoneLocal] = useState('');
+  const [bDay, setBDay] = useState(''); const [bMonth, setBMonth] = useState(''); const [bYear, setBYear] = useState('');
+  const [address, setAddress] = useState('');
+  const [notes, setNotes] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rawImage, setRawImage] = useState('');
+  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const currentYear = new Date().getFullYear();
+  const years = useMemo(() => Array.from({ length: 80 }, (_, i) => currentYear - 20 - i), [currentYear]);
+  const daysInMonth = useMemo(() => (bMonth ? new Date(Number(bYear) || 2000, Number(bMonth), 0).getDate() : 31), [bMonth, bYear]);
+  const phoneValid = !phoneLocal || phoneLocal.length === PHONE_LOCAL_LENGTH;
+
+  // step 4
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const next = () => {
+    setError('');
+    if (step === 1) { if (!churchId) return setError('اختر الكنيسة'); setStep(2); }
+    else if (step === 2) {
+      if (!code.trim()) return setError('اكتب الكود أو امسحه أو ولّد كودًا');
+      if (lookup?.is_priest) return setError('هذا الكود له حساب كاهن بالفعل — سجّل الدخول به');
+      if (lookup?.pending) return setError('يوجد طلب قيد المراجعة لهذا الكود');
+      setStep(3);
+    } else if (step === 3) {
+      if (!name.trim()) return setError('اكتب الاسم');
+      if (!phoneValid) return setError(`رقم الهاتف يجب أن يكون ${PHONE_LOCAL_LENGTH} رقمًا بعد ${PHONE_PREFIX}`);
+      setStep(4);
+    }
+  };
+  const back = () => { setError(''); setStep((s) => (s > 1 ? ((s - 1) as Step) : s)); };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 6) return setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+    if (password !== confirm) return setError('كلمتا المرور غير متطابقتين');
+    setLoading(true);
+    let imageUrl: string | null = null;
+    if (photoBlob) { try { imageUrl = await uploadPhoto(supabase, 'priests', photoBlob, 'priest.webp'); } catch { /* optional */ } }
+    try {
+      const r = await priestSignup(supabase, {
+        code, name, password, church_id: churchId, title: title || null, gender,
+        birthdate: composeBirthdate(bDay, bMonth, bYear),
+        phone: phoneLocal ? `${PHONE_PREFIX}${phoneLocal}` : null,
+        address: address.trim() || null, notes: notes.trim() || null, image_url: imageUrl,
+      });
+      setPriestSignupRequest(r.request_id);
+      setRequestId(r.request_id);
+    } catch (err) {
+      setError(priestErrorMessage(err, 'تعذر إرسال الطلب، حاول مرة أخرى'));
+    } finally { setLoading(false); }
+  };
+
+  if (requestId) return <PendingScreen requestId={requestId} onReset={() => { setPriestSignupRequest(null); setRequestId(null); setStep(1); }} />;
+
+  return (
+    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-8">
+      <section id="priest-signup-card" className="w-full max-w-md">
+        <div className="mb-5 text-center">
+          <div className="mx-auto mb-3 h-20 w-20 overflow-hidden rounded-3xl shadow-lg ring-2 ring-violet-300/50">
+            <Image src={dioceseLogo(192)} alt={`شعار ${BRANDING.dioceseName}`} width={80} height={80} priority className="h-full w-full object-cover" />
+          </div>
+          <h1 className="flex items-center justify-center gap-2 text-2xl font-extrabold"><Cross className="h-6 w-6 text-violet-600" /> إنشاء حساب كاهن</h1>
+          <p className="mt-1 text-sm text-slate-500">يراجع مالك التطبيق طلبك قبل التفعيل</p>
+        </div>
+
+        <ol id="priest-signup-steps" className="mb-4 grid grid-cols-4 gap-1">
+          {STEPS.map((s) => {
+            const Icon = s.icon; const done = step > s.n; const active = step === s.n;
+            return (
+              <li key={s.n} className="flex flex-col items-center gap-1">
+                <span className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-extrabold transition ${done ? 'bg-emerald-500 text-white' : active ? 'bg-violet-600 text-white shadow ring-4 ring-violet-100' : 'bg-slate-100 text-slate-400'}`}>
+                  {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                </span>
+                <span className={`text-[11px] font-bold ${active ? 'text-violet-700' : 'text-slate-400'}`}>{s.label}</span>
+              </li>
+            );
+          })}
+        </ol>
+
+        <form onSubmit={submit} className="card space-y-4">
+          {step === 1 && (
+            <section id="ps-step-church" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600"><Church className="h-4 w-4 text-violet-500" /> الكنيسة التي تخدم فيها *</p>
+              {structureLoading ? <div className="flex justify-center py-6"><Loader2 className="h-6 w-6 animate-spin text-violet-500" /></div> : (
+                <select id="ps-church" className="input-field" value={churchId} onChange={(e) => setChurchId(e.target.value)}>
+                  <option value="">اختر الكنيسة</option>
+                  {churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+            </section>
+          )}
+
+          {step === 2 && (
+            <section id="ps-step-code" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600"><IdCard className="h-4 w-4 text-violet-500" /> الكود (اسم الدخول)</p>
+              <p className="text-xs text-slate-400">اكتب كودك أو امسح كارتك بالكاميرا — أو ولّد كودًا جديدًا.</p>
+              <div className="flex gap-2">
+                <input id="ps-code" className="input-field flex-1" dir="ltr" placeholder="اكتب الكود" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="username" />
+                <button id="ps-code-generate" type="button" onClick={() => setCode(renderCode(codesCfg, 'servant', { churchId }))} aria-label="توليد كود" title="توليد كود"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow transition hover:bg-violet-700 active:scale-95"><Wand2 className="h-5 w-5" /></button>
+                <button id="ps-code-scan" type="button" onClick={() => setShowScan((v) => !v)} aria-label="مسح الكود" title="مسح الكود" aria-pressed={showScan}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow transition active:scale-95 ${showScan ? 'bg-orange-700' : 'bg-orange-500 hover:bg-orange-600'}`}><ScanLine className="h-5 w-5" /></button>
+              </div>
+              {showScan && <QrScanner idPrefix="ps" autoStart hint="وجّه الكاميرا إلى كود الـ QR" onCode={(v) => { const t = v.trim(); if (t) { setCode(t); setShowScan(false); } }} />}
+              {checking && <p className="flex items-center gap-1 text-[11px] font-bold text-slate-400"><Loader2 className="h-3 w-3 animate-spin" /> جارٍ التحقق...</p>}
+              {lookupDone && lookup?.exists && !lookup.is_priest && !lookup.pending && (
+                <div className="rounded-xl bg-emerald-50 px-3 py-2">
+                  <p className="flex items-center gap-1 text-xs font-extrabold text-emerald-700"><UserCheck className="h-4 w-4" /> شخص مسجّل بالفعل: {lookup.name}</p>
+                  <p className="mt-0.5 text-[11px] font-bold text-emerald-600">سيُربط حساب الكاهن بنفس الشخص بعد موافقة المالك</p>
+                </div>
+              )}
+              {lookupDone && lookup?.is_priest && (
+                <div className="flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>هذا الكود له حساب كاهن بالفعل. <Link href="/login?as=priest" className="underline">سجّل الدخول</Link></span></div>
+              )}
+              {lookupDone && lookup?.pending && (
+                <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700"><Clock className="mt-0.5 h-4 w-4 shrink-0" /><span>يوجد طلب قيد المراجعة لهذا الكود — انتظر رد المالك.</span></div>
+              )}
+              {lookupDone && lookup && !lookup.exists && code.trim() && <p className="text-[11px] font-bold text-slate-400">كود جديد — ستُدخل بياناتك في الخطوة التالية</p>}
+            </section>
+          )}
+
+          {step === 3 && (
+            <section id="ps-step-data" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600"><User className="h-4 w-4 text-violet-500" /> البيانات</p>
+              <div className="flex items-center gap-3">
+                <button id="ps-photo" type="button" onClick={() => fileInputRef.current?.click()} className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-violet-50 ring-2 ring-violet-100 transition active:scale-95">
+                  {photoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={photoPreview} alt="صورتي" className="h-full w-full object-cover" />
+                  ) : <Camera className="h-8 w-8 text-violet-400" />}
+                </button>
+                <div className="text-xs">
+                  <p className="font-extrabold text-slate-600">الصورة <span className="font-normal text-slate-400">(اختياري)</span></p>
+                  {photoBlob && <button type="button" onClick={() => { setPhotoBlob(null); if (photoPreview.startsWith('blob:')) URL.revokeObjectURL(photoPreview); setPhotoPreview(''); }} className="mt-1 flex items-center gap-1 font-bold text-red-500"><Trash2 className="h-3.5 w-3.5" /> إزالة</button>}
+                </div>
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setRawImage(URL.createObjectURL(f)); }} />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label htmlFor="ps-title" className="mb-1 block text-xs font-bold text-slate-500">اللقب</label>
+                  <select id="ps-title" className="input-field !px-2" value={title} onChange={(e) => setTitle(e.target.value)}>
+                    {TITLES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    <option value="">بدون</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label htmlFor="ps-name" className="mb-1 block text-xs font-bold text-slate-500">الاسم *</label>
+                  <input id="ps-name" className="input-field" placeholder="مثال: يوحنا" value={name} onChange={(e) => setName(e.target.value)} required />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="ps-phone" className="mb-1 block text-xs font-bold text-slate-500">رقم الهاتف</label>
+                <div className="flex items-stretch overflow-hidden rounded-xl border border-indigo-100 bg-white focus-within:ring-2 focus-within:ring-violet-300" dir="ltr">
+                  <span className="flex items-center bg-violet-50 px-3 text-sm font-extrabold text-violet-700">{PHONE_PREFIX}</span>
+                  <input id="ps-phone" type="tel" inputMode="numeric" className="w-full px-3 py-2.5 text-sm font-bold outline-none" placeholder="01xxxxxxxxx" value={phoneLocal} maxLength={PHONE_LOCAL_LENGTH}
+                    onChange={(e) => setPhoneLocal(e.target.value.replace(/\D/g, '').slice(0, PHONE_LOCAL_LENGTH))} />
+                </div>
+                {phoneLocal && !phoneValid && <p className="mt-1 text-[11px] font-bold text-red-500">الرقم يجب أن يكون {PHONE_LOCAL_LENGTH} رقمًا</p>}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">تاريخ الميلاد</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <select aria-label="اليوم" className="input-field !px-2 text-center" value={bDay} onChange={(e) => setBDay(e.target.value)}><option value="">اليوم</option>{Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}</option>)}</select>
+                  <select aria-label="الشهر" className="input-field !px-2 text-center" value={bMonth} onChange={(e) => setBMonth(e.target.value)}><option value="">الشهر</option>{MONTHS_AR.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select>
+                  <select aria-label="السنة" className="input-field !px-2 text-center" value={bYear} onChange={(e) => setBYear(e.target.value)}><option value="">السنة</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
+                </div>
+              </div>
+              <div><label htmlFor="ps-address" className="mb-1 block text-xs font-bold text-slate-500">العنوان</label><input id="ps-address" className="input-field" value={address} onChange={(e) => setAddress(e.target.value)} /></div>
+              <div><label htmlFor="ps-notes" className="mb-1 block text-xs font-bold text-slate-500">ملاحظات</label><textarea id="ps-notes" className="input-field min-h-[60px]" value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+            </section>
+          )}
+
+          {step === 4 && (
+            <section id="ps-step-password" className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-slate-600"><KeyRound className="h-4 w-4 text-violet-500" /> كلمة المرور</p>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                <p>الاسم: <b className="text-slate-700">{title ? `${title} ` : ''}{name}</b></p>
+                <p dir="ltr" className="text-right">الكود: <b className="text-slate-700">{code.trim()}</b></p>
+                <p>الكنيسة: <b className="text-slate-700">{churchName}</b></p>
+              </div>
+              <div><label htmlFor="ps-password" className="mb-1 block text-xs font-bold text-slate-500">كلمة المرور *</label>
+                <input id="ps-password" type="password" className="input-field" dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" minLength={6} /></div>
+              <div><label htmlFor="ps-confirm" className="mb-1 block text-xs font-bold text-slate-500">تأكيد كلمة المرور *</label>
+                <input id="ps-confirm" type="password" className="input-field" dir="ltr" value={confirm} onChange={(e) => setConfirm(e.target.value)} required autoComplete="new-password" />
+                {confirm && confirm !== password && <p className="mt-1 text-[11px] font-bold text-red-500">كلمتا المرور غير متطابقتين</p>}</div>
+            </section>
+          )}
+
+          {error && <p id="priest-signup-error" className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p>}
+
+          <div className="flex gap-2 pt-1">
+            {step > 1 && <button id="ps-back" type="button" onClick={back} className="btn-secondary flex items-center justify-center gap-1 !px-4"><ChevronRight className="h-4 w-4" /> السابق</button>}
+            {step < 4 ? (
+              <button id="ps-next" type="button" onClick={next} disabled={step === 1 && structureLoading} className="btn-primary flex flex-1 items-center justify-center gap-1 !bg-gradient-to-br !from-violet-600 !to-violet-800">التالي <ChevronLeft className="h-4 w-4" /></button>
+            ) : (
+              <button id="ps-submit" type="submit" disabled={loading} className="btn-primary flex flex-1 items-center justify-center gap-2 !bg-gradient-to-br !from-violet-600 !to-violet-800">
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <UserPlus className="h-5 w-5" />} إرسال الطلب
+              </button>
+            )}
+          </div>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-slate-500">لديك حساب بالفعل؟ <Link href="/login?as=priest" className="font-bold text-violet-700 hover:underline">تسجيل الدخول</Link></p>
+      </section>
+
+      {rawImage && (
+        <PhotoCropModal src={rawImage}
+          onDone={(blob) => { if (photoPreview.startsWith('blob:')) URL.revokeObjectURL(photoPreview); setPhotoBlob(blob); setPhotoPreview(URL.createObjectURL(blob)); URL.revokeObjectURL(rawImage); setRawImage(''); }}
+          onClose={() => { URL.revokeObjectURL(rawImage); setRawImage(''); }} />
+      )}
+    </main>
+  );
+}
+
+function PendingScreen({ requestId, onReset }: { requestId: string; onReset: () => void }) {
+  const supabase = createClient();
+  const [status, setStatus] = useState<'pending' | 'approved' | 'rejected' | 'missing'>('pending');
+  const [note, setNote] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await priestSignupStatus(supabase, requestId);
+        if (!alive) return;
+        if (!r) { setStatus('missing'); return; }
+        setStatus(r.status); setNote(r.decision_note); setCode(r.code);
+      } catch { if (alive) setStatus('missing'); }
+    };
+    check();
+    const t = setInterval(check, 15000);
+    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, [requestId, supabase]);
+
+  return (
+    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-8">
+      <section id="priest-signup-pending" className="card w-full max-w-md space-y-4 text-center">
+        {status === 'pending' && (<>
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-50 text-amber-500"><Clock className="h-8 w-8" /></span>
+          <h1 className="text-xl font-extrabold">طلبك قيد المراجعة</h1>
+          <p className="text-sm text-slate-500">يراجع مالك التطبيق طلبك ويُفعّل حسابك. تُحدَّث هذه الصفحة تلقائياً.</p>
+          {code && <p className="text-xs text-slate-400" dir="ltr">الكود: <b>{code}</b></p>}
+        </>)}
+        {status === 'approved' && (<>
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCircle2 className="h-8 w-8" /></span>
+          <h1 className="text-xl font-extrabold">تم تفعيل حسابك</h1>
+          <p className="text-sm text-slate-500">يمكنك الآن الدخول إلى بوابة الكاهن بكودك وكلمة المرور.</p>
+          <Link id="ps-go-login" href={`/login?as=priest&code=${encodeURIComponent(code)}`} onClick={() => setPriestSignupRequest(null)} className="btn-primary flex w-full items-center justify-center gap-2 !bg-gradient-to-br !from-violet-600 !to-violet-800"><LogIn className="h-5 w-5" /> تسجيل الدخول</Link>
+        </>)}
+        {status === 'rejected' && (<>
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-red-500"><XCircle className="h-8 w-8" /></span>
+          <h1 className="text-xl font-extrabold">تم رفض الطلب</h1>
+          {note && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">{note}</p>}
+          <button id="ps-retry" type="button" onClick={onReset} className="btn-secondary w-full">تسجيل جديد</button>
+        </>)}
+        {status === 'missing' && (<>
+          <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400"><AlertTriangle className="h-8 w-8" /></span>
+          <h1 className="text-xl font-extrabold">لم نجد الطلب</h1>
+          <button type="button" onClick={onReset} className="btn-secondary w-full">تسجيل جديد</button>
+        </>)}
+        <p className="text-xs text-slate-400"><Link href="/login?as=priest" className="font-bold text-violet-700 hover:underline">الرجوع لصفحة الدخول</Link></p>
+      </section>
+    </main>
+  );
+}

@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Home, CalendarCheck, Star, Database, SlidersHorizontal, Menu, X, LogOut,
-  CalendarDays, Clock, User, GraduationCap, MessageCircle, Video, Trophy, Tent, Bell, Library, type LucideIcon,
+  CalendarDays, Clock, User, GraduationCap, MessageCircle, Video, Trophy, Tent, Bell, Library, Cross, type LucideIcon,
 } from 'lucide-react';
 import { useChild } from '@/lib/child-context';
 import { createClient } from '@/lib/supabase/client';
@@ -23,6 +23,7 @@ import type { ChildAchievements } from '@/lib/achievements';
 import { childOccasionHighlights, type ChildOccasion } from '@/lib/occasions';
 import type { InboxItem } from '@/lib/notifications';
 import { syncPushRegistration, kickDispatcher } from '@/lib/push';
+import { useChildConfession } from '@/components/child/ConfessionBits';
 import { Loader2 } from 'lucide-react';
 
 export const CHILD_NAV: { href: string; label: string; icon: LucideIcon; id: string }[] = [
@@ -225,6 +226,7 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
   const hasOccasions = !!occList && occList.length > 0;
   const { unread: notifUnread } = useChildNotifications();
   const { hasAny: hasLibrary, favorites: libFavs } = useChildLibrary();
+  const { hasAny: hasConfession, pending: confPending, upcoming: confUpcoming } = useChildConfession();
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -322,6 +324,22 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
               <span className="mr-auto rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-extrabold text-white tabular-nums">{notifUnread}</span>
             )}
           </Link>
+          {hasConfession && (
+            <Link
+              id="child-nav-confession"
+              href="/child/confession"
+              onClick={onClose}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                isActive(pathname, '/child/confession') ? 'bg-violet-100 text-violet-700' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Cross className="h-5 w-5 text-violet-600" />
+              الاعتراف
+              {(confPending > 0 || confUpcoming > 0) && (
+                <span className="mr-auto rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-extrabold text-white tabular-nums">{confPending > 0 ? confPending : confUpcoming}</span>
+              )}
+            </Link>
+          )}
           {hasOccasions && (
             <Link
               id="child-nav-occasions"

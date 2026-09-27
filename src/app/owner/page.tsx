@@ -5,7 +5,7 @@
 // added here step by step; the first one is module access control.
 
 import Link from 'next/link';
-import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush, KeyRound, Users } from 'lucide-react';
+import { Crown, Layers, ChevronLeft, ArrowRight, Sparkles, Paintbrush, KeyRound, Users, Cross } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { fetchOwnerPersonsCounts, type OwnerPersonsCounts } from '@/lib/owner-persons';
@@ -24,6 +24,14 @@ export default function OwnerHubPage() {
   const [supabase] = useState(() => createClient());
   const [personsCounts, setPersonsCounts] = useState<OwnerPersonsCounts | null>(null);
   useEffect(() => { fetchOwnerPersonsCounts(supabase).then(setPersonsCounts); }, [supabase]);
+  // priests (20260927120000): count + pending signup requests
+  const [priestStats, setPriestStats] = useState<{ total: number; pending: number } | null>(null);
+  useEffect(() => {
+    Promise.all([
+      supabase.from('priests').select('id', { count: 'exact', head: true }),
+      supabase.rpc('pending_priest_requests_count'),
+    ]).then(([a, b]) => setPriestStats({ total: a.count ?? 0, pending: typeof b.data === 'number' ? b.data : 0 })).catch(() => {});
+  }, [supabase]);
 
   return (
     <AppShell>
@@ -63,6 +71,28 @@ export default function OwnerHubPage() {
               {personsCounts && (
                 <span className="badge bg-gold-100 text-gold-700 tabular-nums">
                   {personsCounts.total} شخص{personsCounts.unenrolled ? ` · ${personsCounts.unenrolled} بدون تسجيل` : ''}
+                </span>
+              )}
+              <ChevronLeft className="h-4 w-4 text-slate-300" />
+            </Link>
+
+            <Link
+              id="owner-priests-link"
+              href="/owner/priests"
+              className="flex items-center gap-3 px-4 py-3.5 hover:bg-indigo-50/50 transition"
+            >
+              <span className="rounded-xl bg-slate-50 p-2">
+                <Cross className="h-5 w-5 text-violet-600" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-bold text-sm">الكهنة</span>
+                <span className="block text-xs text-slate-400 truncate">
+                  بوابة الكاهن — الموافقة على الحسابات · الكنيسة · إيقاف · كلمة المرور
+                </span>
+              </span>
+              {priestStats && (
+                <span className={`badge tabular-nums ${priestStats.pending ? 'bg-rose-100 text-rose-700' : 'bg-violet-100 text-violet-700'}`}>
+                  {priestStats.pending ? `${priestStats.pending} طلب` : `${priestStats.total} كاهن`}
                 </span>
               )}
               <ChevronLeft className="h-4 w-4 text-slate-300" />

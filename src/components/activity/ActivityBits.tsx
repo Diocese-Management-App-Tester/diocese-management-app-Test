@@ -14,8 +14,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight, History, User, Users, Cpu, X, Clock, MapPin, Table2, Hash, Layers, ChevronDown, Loader2, Copy, Check,
-  Filter, Sparkles,
-} from 'lucide-react';
+  Filter, Sparkles, Cross } from 'lucide-react';
 import { useNavLabel } from '@/lib/customization-context';
 import {
   describe, columnLabel, fmtDateTime, relTime, ROLE_LABELS, OP_LABELS, TONE_CLASSES, PAGE_SIZES, ACTOR_KIND_LABELS,
@@ -46,11 +45,12 @@ export function ActivityHeader({ title, badge, back = '/settings', right }: {
 const ACTOR_TONES: Record<ActorKind, string> = {
   servant: 'bg-primary-100 text-primary-700',
   child: 'bg-pink-100 text-pink-700',
+  priest: 'bg-violet-100 text-violet-700',
   system: 'bg-slate-200 text-slate-600',
 };
 
 export function ActorAvatar({ kind, className = 'h-9 w-9' }: { kind: ActorKind; className?: string }) {
-  const Icon = kind === 'servant' ? User : kind === 'child' ? Users : Cpu;
+  const Icon = kind === 'servant' ? User : kind === 'child' ? Users : kind === 'priest' ? Cross : Cpu;
   return (
     <div className={`flex shrink-0 items-center justify-center rounded-full ${ACTOR_TONES[kind]} ${className}`}>
       <Icon className="h-[55%] w-[55%]" />

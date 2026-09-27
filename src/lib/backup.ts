@@ -65,6 +65,12 @@ export const TABLE_META: Record<string, { label: string; group: string }> = {
   person_credentials:       { label: 'كلمات مرور بوابة المخدوم', group: 'people' },
   child_sessions:           { label: 'جلسات بوابة المخدوم', group: 'people' },
   child_join_requests:      { label: 'طلبات تسجيل المخدومين', group: 'people' },
+  priests:                  { label: 'الكهنة', group: 'people' },
+  priest_requests:          { label: 'طلبات حسابات الكهنة', group: 'people' },
+  priest_confessors:        { label: 'المعترفون (الكهنة)', group: 'people' },
+  confessions:              { label: 'سجل الاعترافات', group: 'activity' },
+  confession_appointments:  { label: 'مواعيد الاعتراف', group: 'activity' },
+  priest_contacts:          { label: 'افتقاد الكهنة', group: 'activity' },
   data_change_requests:     { label: 'طلبات تعديل البيانات', group: 'people' },
   // servants
   servant_enrollments:      { label: 'تسجيلات الخدام (الأدوار والنطاق)', group: 'servants' },
