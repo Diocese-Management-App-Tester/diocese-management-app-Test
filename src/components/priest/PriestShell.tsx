@@ -2,27 +2,46 @@
 
 // ---------- Priest portal shell (بوابة الكاهن) ----------
 // Same look as the other two portals: gradient header (church logo · church
-// name · priest name), a side menu and a 5-tab bottom bar:
-// الرئيسية · المعترفين · المواعيد · الافتقاد · الخيارات
+// name · priest name), a side menu (every page) and a 5-tab bottom bar:
+// الرئيسية · المعترفين · العائلات · الزيارات · الخيارات
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Home, Users, CalendarClock, PhoneCall, SlidersHorizontal, Menu, X, LogOut, CalendarDays, Clock, User, Loader2, Cross, type LucideIcon,
+  Home, Users, CalendarClock, PhoneCall, SlidersHorizontal, Menu, X, LogOut, CalendarDays, Clock, User, Loader2, Cross, UsersRound, MapPinned, Footprints, type LucideIcon,
 } from 'lucide-react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
 import { usePriest } from '@/lib/priest-context';
 import { formatCairoDate, formatCairoTime } from '@/lib/time';
 
-export const PRIEST_NAV: { href: string; label: string; icon: LucideIcon; id: string }[] = [
+interface NavItem { href: string; label: string; icon: LucideIcon; id: string; group?: string }
+/** every page (side menu) */
+export const PRIEST_MENU: NavItem[] = [
   { href: '/priest', label: 'الرئيسية', icon: Home, id: 'priest-nav-home' },
-  { href: '/priest/confessors', label: 'المعترفين', icon: Users, id: 'priest-nav-confessors' },
-  { href: '/priest/appointments', label: 'المواعيد', icon: CalendarClock, id: 'priest-nav-appointments' },
-  { href: '/priest/followup', label: 'الافتقاد', icon: PhoneCall, id: 'priest-nav-followup' },
+  { href: '/priest/confessors', label: 'المعترفين', icon: Users, id: 'priest-nav-confessors', group: 'الاعتراف' },
+  { href: '/priest/appointments', label: 'مواعيد الاعتراف', icon: CalendarClock, id: 'priest-nav-appointments', group: 'الاعتراف' },
+  { href: '/priest/followup', label: 'افتقاد المعترفين', icon: PhoneCall, id: 'priest-nav-followup', group: 'الاعتراف' },
+  { href: '/priest/areas', label: 'المناطق والشوارع', icon: MapPinned, id: 'priest-nav-areas', group: 'الافتقاد الأسري' },
+  { href: '/priest/families', label: 'العائلات', icon: UsersRound, id: 'priest-nav-families', group: 'الافتقاد الأسري' },
+  { href: '/priest/visits', label: 'الزيارات', icon: Footprints, id: 'priest-nav-visits', group: 'الافتقاد الأسري' },
   { href: '/priest/options', label: 'الخيارات', icon: SlidersHorizontal, id: 'priest-nav-options' },
 ];
+/** the 5 tabs of the bottom bar */
+export const PRIEST_NAV: NavItem[] = [PRIEST_MENU[0], PRIEST_MENU[1], PRIEST_MENU[5], PRIEST_MENU[6], PRIEST_MENU[7]];
+
+type Counts = { pending_appointments: number; overdue: number; pending_visits: number; today_visits: number } | undefined;
+function navBadge(href: string, counts: Counts): number {
+  if (!counts) return 0;
+  switch (href) {
+    case '/priest/appointments': return counts.pending_appointments;
+    case '/priest/confessors': return counts.pending_appointments;
+    case '/priest/followup': return counts.overdue;
+    case '/priest/visits': return counts.pending_visits + counts.today_visits;
+    default: return 0;
+  }
+}
 
 const isActive = (pathname: string, href: string) => (href === '/priest' ? pathname === '/priest' : pathname.startsWith(href));
 
@@ -82,15 +101,18 @@ function PriestSideMenu({ open, onClose }: { open: boolean; onClose: () => void 
           <p className="mt-1 flex items-center gap-1.5 text-sm font-extrabold text-violet-700 tabular-nums"><Clock className="h-4 w-4 shrink-0 text-violet-600" />{now ? formatCairoTime(now) : '—'}<span className="mr-auto text-[10px] font-bold text-slate-400">بتوقيت القاهرة</span></p>
         </div>
         <nav className="flex-1 overflow-y-auto p-3">
-          <p className="mb-1 px-2 text-[11px] font-extrabold text-slate-400">الصفحات</p>
-          {PRIEST_NAV.map(({ href, label, icon: Icon }) => {
+          {PRIEST_MENU.map(({ href, label, icon: Icon, group }, i) => {
             const active = isActive(pathname, href);
-            const badge = href === '/priest/appointments' ? counts?.pending_appointments : href === '/priest/followup' ? counts?.overdue : 0;
+            const badge = navBadge(href, counts);
+            const showGroup = group && PRIEST_MENU[i - 1]?.group !== group;
             return (
-              <Link key={href} href={href} onClick={onClose} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${active ? 'bg-violet-100 text-violet-700' : 'text-slate-600 hover:bg-slate-50'}`}>
-                <Icon className="h-5 w-5" />{label}
-                {!!badge && <span className="mr-auto rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-extrabold text-white tabular-nums">{badge}</span>}
-              </Link>
+              <div key={href}>
+                {showGroup && <p className="mb-1 mt-2 px-2 text-[11px] font-extrabold text-slate-400">{group}</p>}
+                <Link href={href} onClick={onClose} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${active ? 'bg-violet-100 text-violet-700' : 'text-slate-600 hover:bg-slate-50'}`}>
+                  <Icon className="h-5 w-5" />{label}
+                  {!!badge && <span className="mr-auto rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-extrabold text-white tabular-nums">{badge}</span>}
+                </Link>
+              </div>
             );
           })}
         </nav>
@@ -111,7 +133,7 @@ function PriestBottomNav() {
       <div className="mx-auto grid max-w-3xl grid-cols-5">
         {PRIEST_NAV.map(({ href, label, icon: Icon, id }) => {
           const active = isActive(pathname, href);
-          const badge = href === '/priest/appointments' ? counts?.pending_appointments : href === '/priest/followup' ? counts?.overdue : 0;
+          const badge = navBadge(href, counts);
           return (
             <Link key={href} id={id} href={href} className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-bold transition ${active ? 'text-violet-700' : 'text-slate-400 hover:text-slate-600'}`}>
               <span className={`relative rounded-xl px-3 py-1 transition ${active ? 'bg-violet-100' : ''}`}>

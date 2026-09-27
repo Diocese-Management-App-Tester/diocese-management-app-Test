@@ -39,7 +39,11 @@ export interface PriestProfile {
   priest: { id: string; title: string | null; status: PriestStatus; reminder_days: number; church_id: string; created_at: string };
   person: PriestPerson;
   church: { id: string; name: string; logo_url: string | null };
-  counts: { confessors: number; overdue: number; pending_appointments: number; today_appointments: number };
+  counts: {
+    confessors: number; overdue: number; pending_appointments: number; today_appointments: number;
+    /** الافتقاد الأسري (migration 20260928120000) */
+    areas: number; my_areas: number; families: number; never_visited: number; pending_visits: number; today_visits: number;
+  };
   server_today: string;
 }
 
