@@ -37,11 +37,18 @@ export default function AddConfessorPanel({ onAdded, onClose }: { onAdded: (c: C
   const [flash, setFlash] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   useEffect(() => { document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = ''; }; }, []);
 
-  const ok = (c: Confessor) => { setFlash({ kind: 'ok', text: `تمت إضافة ${c.person.name} إلى المعترفين ✔` }); onAdded(c); };
+  // one confession father per person: moving him here removes him from the other priest
+  const ok = (c: Confessor) => {
+    setFlash({ kind: 'ok', text: c.moved_from
+      ? `تمت إضافة ${c.person.name} إلى المعترفين ✔ — وتم نقله من ${c.moved_from}`
+      : `تمت إضافة ${c.person.name} إلى المعترفين ✔` });
+    onAdded(c);
+  };
   const fail = (e: unknown) => setFlash({ kind: 'err', text: priestErrorMessage(e) });
 
-  const add = async (personId: string) => {
+  const add = async (personId: string, otherPriest?: string | null) => {
     if (!token) return;
+    if (otherPriest && !confirm(`هذا الشخص يعترف حاليًا عند ${otherPriest}.\nلا يمكن أن يكون له أبَوا اعتراف — إضافته إليك ستنقله من ${otherPriest} إليك. متابعة؟`)) return;
     setBusy(true); setFlash(null);
     try { ok(await addConfessor(supabase, token, personId, null, lastConf || null)); } catch (e) { fail(e); } finally { setBusy(false); }
   };
@@ -97,7 +104,7 @@ function PersonLine({ name, url, code, phone, places, right }: { name: string; u
   );
 }
 
-function ScanMode({ token, busy, onAdd }: { token: string; busy: boolean; onAdd: (id: string) => Promise<void> }) {
+function ScanMode({ token, busy, onAdd }: { token: string; busy: boolean; onAdd: (id: string, otherPriest?: string | null) => Promise<void> }) {
   const [supabase] = useState(() => createClient());
   const [code, setCode] = useState('');
   const [scan, setScan] = useState(true);
@@ -121,14 +128,17 @@ function ScanMode({ token, busy, onAdd }: { token: string; busy: boolean; onAdd:
       {look?.found && look.person && (
         <PersonLine name={look.person.name} url={look.person.image_url} code={look.person.national_id} phone={look.person.phone} places={look.places}
           right={look.is_confessor ? <span className="badge bg-emerald-100 text-emerald-700">من المعترفين ✓</span> : (
-            <button type="button" disabled={busy} onClick={() => onAdd(look.person!.id)} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-extrabold text-white">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'إضافة'}</button>
+            <div className="flex flex-col items-end gap-1">
+              {look.other_priest && <span className="text-[10px] font-bold text-amber-600">يعترف عند {look.other_priest}</span>}
+              <button type="button" disabled={busy} onClick={() => onAdd(look.person!.id, look.other_priest)} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-extrabold text-white">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : look.other_priest ? 'نقل إليّ' : 'إضافة'}</button>
+            </div>
           )} />
       )}
     </div>
   );
 }
 
-function SearchMode({ token, busy, onAdd }: { token: string; busy: boolean; onAdd: (id: string) => Promise<void> }) {
+function SearchMode({ token, busy, onAdd }: { token: string; busy: boolean; onAdd: (id: string, otherPriest?: string | null) => Promise<void> }) {
   const [supabase] = useState(() => createClient());
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<PersonHit[] | null>(null);
@@ -157,7 +167,7 @@ function SearchMode({ token, busy, onAdd }: { token: string; busy: boolean; onAd
             right={h.is_confessor || added.has(h.person.id) ? <span className="badge bg-emerald-100 text-emerald-700">✓</span> : (
               <div className="flex flex-col items-end gap-1">
                 {h.other_priest && <span className="text-[10px] font-bold text-amber-600">يعترف عند {h.other_priest}</span>}
-                <button type="button" disabled={busy} onClick={async () => { await onAdd(h.person.id); setAdded((s) => new Set(s).add(h.person.id)); }} className="rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-extrabold text-white">إضافة</button>
+                <button type="button" disabled={busy} onClick={async () => { await onAdd(h.person.id, h.other_priest); setAdded((s) => new Set(s).add(h.person.id)); }} className="rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-extrabold text-white">{h.other_priest ? 'نقل إليّ' : 'إضافة'}</button>
               </div>
             )} />
         ))}

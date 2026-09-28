@@ -63,7 +63,7 @@ function Wizard() {
   useEffect(() => {
     (async () => {
       const [{ data: ch }, { data: cod }] = await Promise.all([
-        supabase.from('churches').select('*').order('name'),
+        supabase.from('churches').select('*').order('sort_order').order('name'),
         supabase.rpc('code_settings'),
       ]);
       setChurches(ch ?? []);

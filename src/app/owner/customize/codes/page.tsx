@@ -104,9 +104,9 @@ export default function CustomizeCodesPage() {
     if (profile?.status !== 'approved') return;
     (async () => {
       const [{ data: ch }, { data: sv }, { data: cl }] = await Promise.all([
-        supabase.from('churches').select('*').order('name'),
-        supabase.from('services').select('*').order('name'),
-        supabase.from('classes').select('*').order('name'),
+        supabase.from('churches').select('*').order('sort_order').order('name'),
+        supabase.from('services').select('*').order('sort_order').order('name'),
+        supabase.from('classes').select('*').order('sort_order').order('name'),
       ]);
       setChurches(ch ?? []); setServices(sv ?? []); setClasses(cl ?? []);
     })();

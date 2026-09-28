@@ -76,6 +76,8 @@ export interface Confessor {
   overdue: boolean;
   last_contact: { kind: ContactKind; created_at: string } | null;
   next_appointment: { id: string; status: AppointmentStatus; on: string; time: string | null; requested_by: 'priest' | 'child' } | null;
+  /** set by `priest_add_confessor` when the person was moved here from another priest (his name) — 20260928130000 */
+  moved_from?: string | null;
 }
 
 export type AppointmentStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'done';
@@ -118,6 +120,8 @@ export interface CodeLookup {
   places?: PriestPlace[];
   is_confessor?: boolean;
   confessor?: Confessor | null;
+  /** the priest he confesses at today, when it is another one (one confession father per person) */
+  other_priest?: string | null;
 }
 
 export interface PersonHit {
