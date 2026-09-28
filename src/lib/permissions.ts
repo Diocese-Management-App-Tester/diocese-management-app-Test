@@ -13,7 +13,7 @@ import {
   Users, UserPlus, Pencil, Trash2, ScanLine, Star, Phone, MessageSquare, IdCard,
   Church, Layers, School, CalendarDays, Coins, PhoneCall, UserCheck, ShieldCheck,
   QrCode, BarChart3, FileSpreadsheet, ClipboardList, KeyRound, ClipboardCheck, ListOrdered, Percent, Lock, FileUp, FileDown, PieChart,
-  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer, UsersRound, DoorOpen,
+  Library, BookOpen, History, Eye, Cog, FileBarChart2, LayoutTemplate, Printer, UsersRound, DoorOpen, Wallet,
   Plus, ArrowUpDown, Check, XCircle,
 } from 'lucide-react';
 
@@ -47,6 +47,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   { key: 'reports', label: 'تقارير وجداول', icon: FileBarChart2, color: 'text-fuchsia-600' },
   { key: 'family', label: 'العائلات', icon: UsersRound, color: 'text-teal-700' },
   { key: 'access', label: 'التحكم في الدخول', icon: DoorOpen, color: 'text-emerald-700' },
+  { key: 'finance', label: 'الخزينة', icon: Wallet, color: 'text-green-700' },
 ];
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -148,6 +149,12 @@ export const PERMISSIONS: PermissionDef[] = [
   // the door by default and need a profile to configure events / rules ----
   { key: 'access.check', group: 'access', label: 'التحقق عند البوابة', desc: 'مسح الكود أو البحث عن الشخص ورؤية مسموح / مرفوض وحالة كل قاعدة (افتراضي لكل خادم يرى الوحدة)' },
   { key: 'access.manage', group: 'access', label: 'إدارة بوابات الدخول', desc: 'إنشاء وتعديل وحذف بوابات الدخول وقواعدها ومجموعاتها وقائمة المسموح لهم في نطاقه' },
+
+  // ---- الخزينة — managers hold them all; class servants view by default
+  // and need a profile to record or manage money ----
+  { key: 'finance.view', group: 'finance', label: 'عرض الخزينة', desc: 'رؤية الرصيد والإيرادات والمصروفات والقيود في نطاقه (افتراضي لكل خادم يرى الوحدة)' },
+  { key: 'finance.add', group: 'finance', label: 'تسجيل إيراد / مصروف', desc: 'إضافة قيد جديد بمبلغ وسبب في نطاقه' },
+  { key: 'finance.manage', group: 'finance', label: 'إدارة الخزينة', desc: 'تعديل وحذف القيود وإنشاء وتعديل الأسباب الثابتة في نطاقه' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(
