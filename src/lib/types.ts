@@ -8,6 +8,8 @@ export interface Church {
   name: string;
   logo_url: string | null;
   address: string | null;
+  /** manual order — the smaller shows first in every list (20260928130000) */
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -18,6 +20,8 @@ export interface Service {
   name: string;
   description: string | null;
   photo_url: string | null;
+  /** manual order inside the church (20260928130000) */
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +33,8 @@ export interface ClassRoom {
   name: string;
   description: string | null;
   photo_url: string | null;
+  /** manual order inside the service (20260928130000) */
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }

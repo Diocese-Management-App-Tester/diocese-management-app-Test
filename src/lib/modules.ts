@@ -8,10 +8,10 @@
 // To add a module later: add one entry here + guard its pages with
 // `useModuleVisible(key)` (or `<ModuleGate module="key">`).
 
-import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, UsersRound, DoorOpen, type LucideIcon } from 'lucide-react';
+import { IdCard, Crown, HeartHandshake, ShoppingBag, GraduationCap, Cake, MessageCircle, Video, Trophy, Tent, Bell, ClipboardCheck, Library, History, FileBarChart2, UsersRound, DoorOpen, Wallet, type LucideIcon } from 'lucide-react';
 import type { Profile } from '@/lib/types';
 
-export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports' | 'family' | 'access';
+export type ModuleKey = 'cards' | 'shepherds' | 'store' | 'exams' | 'birthdays' | 'messages' | 'online' | 'achievements' | 'occasions' | 'notifications' | 'results' | 'library' | 'activity' | 'reports' | 'family' | 'access' | 'finance';
 
 export interface AppModule {
   key: ModuleKey;
@@ -154,7 +154,7 @@ export const MODULES: AppModule[] = [
   {
     key: 'family',
     label: 'العائلات',
-    desc: 'عائلات من المخدومين والخدام: أضف الأفراد بمسح كود كل واحد (QR) — وعند مسح كود أي فرد في الماسح تظهر كل العائلة لاختيار الشخص والخدمة المطلوبة، مع التعرف على الخدمة التي حضرها اليوم',
+    desc: 'عرض العائلات وأفرادها (يُنشئها ويديرها الكاهن من بوابته مع المنطقة والشارع والعمارة والزيارات) — وعند مسح كود أي فرد في الماسح تظهر كل العائلة لاختيار الشخص والخدمة المطلوبة، مع التعرف على الخدمة التي حضرها اليوم',
     href: '/family',
     icon: UsersRound,
     color: 'text-teal-700',
@@ -168,6 +168,15 @@ export const MODULES: AppModule[] = [
     icon: DoorOpen,
     color: 'text-emerald-700',
     paths: ['/access'],
+  },
+  {
+    key: 'finance',
+    label: 'الخزينة',
+    desc: 'إيرادات ومصروفات: سجّل مبلغاً وسببه (أسباب ثابتة تُنشأ مرة أو سبب مكتوب «أخرى») — ويحسب الرصيد الحالي وما دخل وما خرج خلال يوم أو شهر أو سنة، وحسب السبب، لكل كنيسة أو خدمة أو فصل',
+    href: '/finance',
+    icon: Wallet,
+    color: 'text-green-700',
+    paths: ['/finance'],
   },
 ];
 

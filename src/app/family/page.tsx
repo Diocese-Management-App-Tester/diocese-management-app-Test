@@ -1,14 +1,12 @@
 'use client';
 
-// ---------- FAMILY MODULE (العائلات) ----------
-// Tabs:
-//   العائلات  → every family visible to the caller (search), each with its
-//               members; create · edit · delete · show the family QR
-//   إضافة أفراد → pick the family (or create one) then add members by
-//               scanning their codes · searching existing persons (name /
-//               phone / code) · creating a new person
-// URL: /family?tab=qr|list[&family=<id>]  (tab=qr kept for links)
-// The scanner (/scanner) resolves ANY member's code to the whole family.
+// ---------- FAMILY MODULE (العائلات) — servants' app: READ ONLY ----------
+// Since migration 20260928120000 the families are CREATED AND MANAGED BY THE
+// PRIEST from his portal (/priest/families — area · street · building ·
+// visits). Servants keep this page to SEE the families of their scope (with
+// their members and place) — the scanner (/scanner) still resolves ANY
+// member's code to the whole family.
+// URL: /family (the old ?tab=qr links fall back to the list)
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -47,7 +45,7 @@ function FamilyModule() {
   const params = useSearchParams();
   const [supabase] = useState(() => createClient());
 
-  const tab: Tab = params.get('tab') === 'qr' ? 'qr' : 'list';
+  const tab = 'list' as Tab;   // the «إضافة أفراد» tab moved to the priest portal
   const qrFamilyId = params.get('family') ?? '';
   const go = (t: Tab, familyId?: string) => {
     const q = new URLSearchParams();
@@ -58,7 +56,9 @@ function FamilyModule() {
   };
 
   // ---------- data ----------
-  const [perms, setPerms] = useState<FamilyPermissions>({ view: false, manage: false });
+  const [perms, setPermsRaw] = useState<FamilyPermissions>({ view: false, manage: false });
+  // the servants' app is read-only now — management lives in the priest portal
+  const setPerms = (p: FamilyPermissions) => setPermsRaw({ view: p.view, manage: false });
   const [families, setFamilies] = useState<Family[]>([]);
   const [members, setMembers] = useState<FamilyMemberWithPerson[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +146,7 @@ function FamilyModule() {
             <UsersRound className="h-5 w-5 text-teal-700" /> {pageName}
           </h2>
           <p className="mt-0.5 text-xs text-slate-500">
-            أنشئ العائلة بكودها، وأضف أفرادها بالمسح أو البحث أو إنشاء فرد جديد — وعند مسح كود أي فرد في الماسح تظهر العائلة كلها لاختيار الشخص والخدمة
+            عائلات نطاقك وأفرادها — وعند مسح كود أي فرد في الماسح تظهر العائلة كلها لاختيار الشخص والخدمة
           </p>
         </div>
         <Link href="/scanner" className="btn-secondary flex items-center gap-1.5 !py-2 !px-3 text-xs" title="الماسح">
@@ -160,22 +160,10 @@ function FamilyModule() {
         </p>
       )}
 
-      {/* tabs */}
-      <div id="family-tabs" className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-teal-50 p-1">
-        {([
-          { key: 'list' as Tab, label: 'العائلات', icon: UsersRound },
-          { key: 'qr' as Tab, label: 'إضافة أفراد', icon: UserPlus },
-        ]).map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button key={t.key} id={`family-tab-${t.key}`} onClick={() => go(t.key, t.key === 'qr' ? qrFamilyId || undefined : undefined)} aria-pressed={active}
-              className={`flex items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-sm font-extrabold transition ${active ? 'bg-white text-teal-700 shadow' : 'text-slate-500'}`}>
-              <Icon className="h-4 w-4" /> {t.label}
-            </button>
-          );
-        })}
-      </div>
+      <p id="family-moved" className="mb-4 flex items-start gap-2 rounded-2xl bg-violet-50 px-3 py-2.5 text-xs font-bold text-violet-800">
+        <Info className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>إنشاء العائلات وإضافة أفرادها وربطها بالمنطقة والشارع والعمارة وتسجيل الزيارات — كله انتقل إلى <b>بوابة الكاهن</b> (الافتقاد الأسري). هنا ترى عائلات نطاقك فقط.</span>
+      </p>
 
       {/* ================= LIST ================= */}
       {tab === 'list' && (
@@ -192,16 +180,12 @@ function FamilyModule() {
             )}
           </div>
 
-          {!perms.manage && (
-            <p className="mb-3 flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-500">
-              <Lock className="h-3.5 w-3.5" /> عرض فقط — إنشاء العائلات وإضافة الأفراد يحتاج صلاحية «إدارة العائلات»
-            </p>
-          )}
+
 
           {filtered.length === 0 ? (
             <div className="card py-10 text-center">
               <UsersRound className="mx-auto mb-2 h-10 w-10 text-slate-300" />
-              <p className="font-bold text-slate-500">{families.length === 0 ? 'لا توجد عائلات بعد' : 'لا نتائج للبحث'}</p>
+              <p className="font-bold text-slate-500">{families.length === 0 ? 'لا توجد عائلات في نطاقك بعد — ينشئها الكاهن من بوابته' : 'لا نتائج للبحث'}</p>
               {perms.manage && families.length === 0 && (
                 <button type="button" onClick={() => setForm({ open: true, family: null, thenQr: true })} className="btn-primary mt-4 inline-flex items-center gap-1.5 !py-2 !px-4 text-sm">
                   <Plus className="h-4 w-4" /> أنشئ أول عائلة ثم أضف أفرادها
@@ -231,7 +215,7 @@ function FamilyModule() {
                           <p className="mb-2 text-[11px] font-bold text-slate-500">{[f.address, f.notes].filter(Boolean).join(' · ')}</p>
                         )}
                         {ms.length === 0 ? (
-                          <p className="py-3 text-center text-xs font-bold text-slate-400">لا يوجد أفراد — {perms.manage ? 'اضغط «إضافة أفراد»' : 'لم يُضَف أحد بعد'}</p>
+                          <p className="py-3 text-center text-xs font-bold text-slate-400">لا يوجد أفراد — لم يُضَف أحد بعد</p>
                         ) : (
                           <ul className="space-y-1.5">
                             {ms.map((m) => (

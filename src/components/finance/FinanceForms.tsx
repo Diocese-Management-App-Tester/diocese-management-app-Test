@@ -1,0 +1,282 @@
+'use client';
+
+// ---------- Finance module forms ----------
+//   EntryFormModal — record / edit an income or expense: kind · amount ·
+//                    cause (static list of the scope, or «أخرى» + free text)
+//                    · day · note · scope
+//   CauseFormModal — create / edit a static cause of a scope (name · kind)
+
+import { useEffect, useMemo, useState } from 'react';
+import { Save, Loader2, TrendingUp, TrendingDown, Tag, PenLine, Wallet } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/lib/auth-context';
+import { ModalFrame } from '@/components/PersonDataModals';
+import type { Church, Service, ClassRoom } from '@/lib/types';
+import {
+  saveFinanceEntry, saveFinanceCause, causesFor, financeErrorMessage,
+  KIND_LABELS, CAUSE_KIND_LABELS, CURRENCY,
+  type FinanceEntry, type FinanceCause, type FinanceKind, type CauseKind,
+} from '@/lib/finance';
+
+const ALL = 'all';
+const OTHER = '__other__';
+
+export interface ScopeLookups { churches: Church[]; services: Service[]; classes: ClassRoom[] }
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-bold text-slate-500">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-[10px] font-bold text-slate-400">{hint}</span>}
+    </label>
+  );
+}
+
+/** church → service → class selects, locked to the caller's own level. */
+function useScopeState(lookups: ScopeLookups, initial?: { church_id: string; service_id: string | null; class_id: string | null } | null) {
+  const { profile } = useAuth();
+  const { churches, services, classes } = lookups;
+  const defaultChurch = initial?.church_id ?? profile?.church_id ?? (churches.length === 1 ? churches[0].id : '');
+  const [churchId, setChurchId] = useState(defaultChurch);
+  const [serviceId, setServiceId] = useState(initial ? (initial.service_id ?? ALL) : (profile?.service_id ?? ALL));
+  const [classId, setClassId] = useState(initial ? (initial.class_id ?? ALL) : (profile?.class_id ?? ALL));
+  const churchLocked = !!profile && profile.role !== 'owner';
+  const serviceLocked = !!profile && !!profile.service_id && profile.role !== 'owner' && profile.role !== 'church_manager';
+  const classLocked = !!profile && !!profile.class_id && profile.role === 'class_servant';
+  const visibleServices = useMemo(() => services.filter((s) => s.church_id === churchId), [services, churchId]);
+  const visibleClasses = useMemo(() => classes.filter((c) => c.church_id === churchId && (serviceId === ALL || c.service_id === serviceId)), [classes, churchId, serviceId]);
+  const scope = { church_id: churchId, service_id: serviceId === ALL ? null : serviceId, class_id: serviceId === ALL || classId === ALL ? null : classId };
+  return { churchId, setChurchId, serviceId, setServiceId, classId, setClassId, churchLocked, serviceLocked, classLocked, visibleServices, visibleClasses, scope, churches };
+}
+
+function ScopeSelects({ id, s }: { id: string; s: ReturnType<typeof useScopeState> }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <select id={`${id}-church`} className={`input-field !px-2 text-xs font-bold ${s.churchLocked ? 'pointer-events-none bg-primary-50 opacity-80' : ''}`}
+        value={s.churchId} onChange={(e) => { s.setChurchId(e.target.value); s.setServiceId(ALL); s.setClassId(ALL); }} required>
+        <option value="">الكنيسة</option>
+        {s.churches.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <select id={`${id}-service`} className={`input-field !px-2 text-xs font-bold ${s.serviceLocked ? 'pointer-events-none bg-primary-50 opacity-80' : ''}`}
+        value={s.serviceId} onChange={(e) => { s.setServiceId(e.target.value); s.setClassId(ALL); }}>
+        <option value={ALL}>كل الخدمات</option>
+        {s.visibleServices.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+      </select>
+      <select id={`${id}-class`} className={`input-field !px-2 text-xs font-bold ${s.classLocked ? 'pointer-events-none bg-primary-50 opacity-80' : ''}`}
+        value={s.classId} onChange={(e) => s.setClassId(e.target.value)} disabled={s.serviceId === ALL}>
+        <option value={ALL}>كل الفصول</option>
+        {s.visibleClasses.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
+// =====================================================================
+// EntryFormModal
+// =====================================================================
+export function EntryFormModal({
+  item, defaultKind = 'expense', causes, lookups, today, onSaved, onClose, onNewCause,
+}: {
+  item: FinanceEntry | null;
+  defaultKind?: FinanceKind;
+  causes: FinanceCause[];
+  lookups: ScopeLookups;
+  today: string;
+  onSaved: (e: FinanceEntry) => void;
+  onClose: () => void;
+  /** open the cause form pre-filled for the current scope (optional — only for managers) */
+  onNewCause?: (scope: { church_id: string; service_id: string | null; class_id: string | null }, kind: FinanceKind) => void;
+}) {
+  const [supabase] = useState(() => createClient());
+  const s = useScopeState(lookups, item);
+  const [kind, setKind] = useState<FinanceKind>(item?.kind ?? defaultKind);
+  const [amount, setAmount] = useState(item ? String(item.amount) : '');
+  const [causeSel, setCauseSel] = useState<string>(item ? (item.cause_id ?? OTHER) : '');
+  const [causeText, setCauseText] = useState(item && !item.cause_id ? (item.cause_text ?? '') : '');
+  const [date, setDate] = useState(item?.entry_date ?? today);
+  const [note, setNote] = useState(item?.note ?? '');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const available = useMemo(() => (s.scope.church_id ? causesFor(causes, s.scope, kind) : []), [causes, s.scope, kind]);
+
+  // when the kind / scope changes and the picked static cause no longer fits → reset
+  useEffect(() => {
+    if (causeSel && causeSel !== OTHER && !available.some((c) => c.id === causeSel)) setCauseSel('');
+  }, [available, causeSel]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const amt = Number(amount.replace(/[^\d.]/g, ''));
+    if (!s.scope.church_id) return setError('اختر الكنيسة');
+    if (!amt || amt <= 0) return setError('اكتب المبلغ (أكبر من صفر)');
+    if (!causeSel) return setError('اختر السبب أو «أخرى» واكتبه');
+    if (causeSel === OTHER && !causeText.trim()) return setError('اكتب السبب');
+    if (!date) return setError('اختر اليوم');
+    setSaving(true);
+    try {
+      const saved = await saveFinanceEntry(supabase, {
+        ...s.scope,
+        kind,
+        amount: Math.round(amt * 100) / 100,
+        cause_id: causeSel === OTHER ? null : causeSel,
+        cause_text: causeSel === OTHER ? causeText.trim() : null,
+        note: note.trim() || null,
+        entry_date: date,
+      }, item?.id);
+      onSaved(saved);
+    } catch (err) {
+      setError(financeErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isIncome = kind === 'income';
+  return (
+    <ModalFrame title={item ? 'تعديل القيد' : (isIncome ? 'تسجيل إيراد' : 'تسجيل مصروف')} icon={<Wallet className="h-5 w-5 text-green-700" />} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        {/* kind */}
+        <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+          {(['income', 'expense'] as FinanceKind[]).map((k) => {
+            const on = kind === k;
+            const Icon = k === 'income' ? TrendingUp : TrendingDown;
+            return (
+              <button key={k} id={`finance-entry-kind-${k}`} type="button" onClick={() => setKind(k)} aria-pressed={on}
+                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-sm font-extrabold transition ${on ? (k === 'income' ? 'bg-emerald-500 text-white shadow' : 'bg-rose-500 text-white shadow') : 'text-slate-500'}`}>
+                <Icon className="h-4 w-4" /> {KIND_LABELS[k]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* amount */}
+        <Field label={`المبلغ (${CURRENCY}) *`}>
+          <div className="relative">
+            <input id="finance-entry-amount" inputMode="decimal" className={`input-field !text-2xl font-extrabold tabular-nums ${isIncome ? 'text-emerald-700' : 'text-rose-700'}`}
+              value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus={!item} required />
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xs font-extrabold text-slate-400">{CURRENCY}</span>
+          </div>
+        </Field>
+
+        {/* cause */}
+        <Field label="السبب *" hint={available.length === 0 ? 'لا توجد أسباب ثابتة لهذا النطاق والنوع بعد — اكتب السبب في «أخرى» أو أنشئ أسباباً ثابتة من تبويب «الأسباب»' : undefined}>
+          <div className="flex flex-wrap gap-1.5">
+            {available.map((c) => {
+              const on = causeSel === c.id;
+              return (
+                <button key={c.id} type="button" onClick={() => setCauseSel(c.id)} aria-pressed={on}
+                  className={`inline-flex items-center gap-1 rounded-full border-2 px-3 py-1.5 text-xs font-extrabold transition ${on ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+                  <Tag className="h-3 w-3" /> {c.name}
+                </button>
+              );
+            })}
+            <button id="finance-entry-cause-other" type="button" onClick={() => setCauseSel(OTHER)} aria-pressed={causeSel === OTHER}
+              className={`inline-flex items-center gap-1 rounded-full border-2 border-dashed px-3 py-1.5 text-xs font-extrabold transition ${causeSel === OTHER ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-300 bg-white text-slate-600'}`}>
+              <PenLine className="h-3 w-3" /> أخرى
+            </button>
+          </div>
+          {causeSel === OTHER && (
+            <input id="finance-entry-cause-text" className="input-field mt-2" value={causeText} onChange={(e) => setCauseText(e.target.value)}
+              placeholder={isIncome ? 'مثال: تبرع من أحد الآباء' : 'مثال: شراء بالونات للحفلة'} maxLength={160} autoFocus />
+          )}
+          {onNewCause && s.scope.church_id && (
+            <button type="button" onClick={() => onNewCause(s.scope, kind)} className="mt-2 text-[11px] font-extrabold text-primary-600 underline-offset-2 hover:underline">
+              + إنشاء سبب ثابت جديد لهذا النطاق
+            </button>
+          )}
+        </Field>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="اليوم *"><input id="finance-entry-date" type="date" className="input-field !px-2 text-xs" value={date} onChange={(e) => setDate(e.target.value)} required /></Field>
+          <Field label="ملاحظة (اختياري)"><input id="finance-entry-note" className="input-field !px-2 text-xs" value={note} onChange={(e) => setNote(e.target.value)} placeholder="تفاصيل…" /></Field>
+        </div>
+
+        <Field label="النطاق (كنيسة ← خدمة ← فصل)" hint="الخزينة التي يُسجَّل فيها هذا القيد — اترك «الكل» لخزينة الكنيسة أو الخدمة">
+          <ScopeSelects id="finance-entry" s={s} />
+        </Field>
+
+        {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button id="finance-entry-save" type="submit" disabled={saving} className={`flex items-center justify-center gap-1.5 rounded-xl py-3 font-extrabold text-white shadow-md active:scale-[0.98] disabled:opacity-50 ${isIncome ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {item ? 'حفظ' : (isIncome ? 'تسجيل الإيراد' : 'تسجيل المصروف')}
+          </button>
+          <button type="button" onClick={onClose} className="btn-secondary">إلغاء</button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}
+
+// =====================================================================
+// CauseFormModal
+// =====================================================================
+export function CauseFormModal({
+  item, lookups, initialScope, initialKind, onSaved, onClose,
+}: {
+  item: FinanceCause | null;
+  lookups: ScopeLookups;
+  initialScope?: { church_id: string; service_id: string | null; class_id: string | null } | null;
+  initialKind?: CauseKind;
+  onSaved: (c: FinanceCause) => void;
+  onClose: () => void;
+}) {
+  const [supabase] = useState(() => createClient());
+  const s = useScopeState(lookups, item ?? initialScope ?? null);
+  const [name, setName] = useState(item?.name ?? '');
+  const [kind, setKind] = useState<CauseKind>(item?.kind ?? initialKind ?? 'both');
+  const [active, setActive] = useState(item?.is_active ?? true);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!s.scope.church_id) return setError('اختر الكنيسة');
+    if (!name.trim()) return setError('اسم السبب مطلوب');
+    setSaving(true);
+    try {
+      const saved = await saveFinanceCause(supabase, { ...s.scope, name: name.trim(), kind, is_active: active }, item?.id);
+      onSaved(saved);
+    } catch (err) {
+      setError(financeErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalFrame title={item ? 'تعديل السبب' : 'سبب ثابت جديد'} icon={<Tag className="h-5 w-5 text-primary-600" />} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        <Field label="الاسم *">
+          <input id="finance-cause-name" className="input-field" value={name} onChange={(e) => setName(e.target.value)} placeholder="مثال: عشور · تبرعات · رحلة · مطبوعات · ضيافة" maxLength={80} required autoFocus />
+        </Field>
+        <Field label="يُستخدم في">
+          <div className="grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 p-1">
+            {(['income', 'expense', 'both'] as CauseKind[]).map((k) => (
+              <button key={k} id={`finance-cause-kind-${k}`} type="button" onClick={() => setKind(k)} aria-pressed={kind === k}
+                className={`rounded-xl py-2 text-[11px] font-extrabold ${kind === k ? 'bg-white shadow text-primary-700' : 'text-slate-500'}`}>{CAUSE_KIND_LABELS[k]}</button>
+            ))}
+          </div>
+        </Field>
+        <Field label="النطاق (كنيسة ← خدمة ← فصل)" hint="سبب الكنيسة يظهر لكل خدماتها وفصولها؛ سبب الخدمة يظهر لفصولها؛ سبب الفصل يظهر له فقط">
+          <ScopeSelects id="finance-cause" s={s} />
+        </Field>
+        {item && (
+          <label className="flex items-center gap-2 text-sm font-bold text-slate-600">
+            <input type="checkbox" className="h-4 w-4" checked={active} onChange={(e) => setActive(e.target.checked)} /> مفعّل (يظهر عند التسجيل)
+          </label>
+        )}
+        {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button id="finance-cause-save" type="submit" disabled={saving} className="btn-primary flex items-center justify-center gap-1.5">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ
+          </button>
+          <button type="button" onClick={onClose} className="btn-secondary">إلغاء</button>
+        </div>
+      </form>
+    </ModalFrame>
+  );
+}

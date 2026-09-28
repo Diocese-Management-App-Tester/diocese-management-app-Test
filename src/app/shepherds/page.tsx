@@ -195,7 +195,8 @@ export default function ShepherdsPage() {
     );
   }, [mine, searchQ, churchFilter, serviceFilter, classFilter]);
 
-  // group by class, sorted by class name then person name
+  // group by class — the manager's manual order of the classes (then name), persons by name
+  const classOrder = (id: string) => classes.find((c) => c.id === id)?.sort_order ?? Number.MAX_SAFE_INTEGER;
   const groupByClass = (list: EnrollmentWithPerson[]) => {
     const m = new Map<string, EnrollmentWithPerson[]>();
     list.forEach((e) => { const a = m.get(e.class_id) ?? []; a.push(e); m.set(e.class_id, a); });
@@ -204,7 +205,7 @@ export default function ShepherdsPage() {
         classId, name: className(classId),
         kids: [...kids].sort((a, b) => a.person.name.localeCompare(b.person.name, 'ar')),
       }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+      .sort((a, b) => (classOrder(a.classId) - classOrder(b.classId)) || a.name.localeCompare(b.name, 'ar'));
   };
   const myGroups = useMemo(() => groupByClass(myFiltered), [myFiltered, classes]); // eslint-disable-line react-hooks/exhaustive-deps
   const poolGroups = useMemo(() => groupByClass(pool), [pool, classes]); // eslint-disable-line react-hooks/exhaustive-deps

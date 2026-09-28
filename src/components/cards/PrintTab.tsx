@@ -142,9 +142,15 @@ export default function PrintTab({
     const cn = (id: string | null) => churches.find((c) => c.id === id)?.name ?? '';
     const sn = (id: string | null) => services.find((s) => s.id === id)?.name ?? '';
     const kn = (id: string | null) => classes.find((c) => c.id === id)?.name ?? '';
+    // the manager's manual order first (null scope = «all» comes first), the name breaks ties
+    const orderOf = (list: { id: string; sort_order: number }[], id: string | null) =>
+      id === null ? -1 : (list.find((x) => x.id === id)?.sort_order ?? Number.MAX_SAFE_INTEGER);
     return (
+      (orderOf(churches, a.church_id) - orderOf(churches, b.church_id)) ||
       cn(a.church_id).localeCompare(cn(b.church_id), 'ar') ||
+      (orderOf(services, a.service_id) - orderOf(services, b.service_id)) ||
       sn(a.service_id).localeCompare(sn(b.service_id), 'ar') ||
+      (orderOf(classes, a.class_id) - orderOf(classes, b.class_id)) ||
       kn(a.class_id).localeCompare(kn(b.class_id), 'ar') ||
       a.personName.localeCompare(b.personName, 'ar')
     );

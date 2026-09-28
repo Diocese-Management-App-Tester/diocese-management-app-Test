@@ -38,9 +38,9 @@ export default function EventsPage() {
   const load = useCallback(async () => {
     const [{ data: ev }, { data: cl }, { data: sv }, { data: ch }] = await Promise.all([
       supabase.from('events').select('*').order('created_at', { ascending: false }),
-      supabase.from('classes').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('churches').select('*').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
     ]);
     setEvents(ev ?? []);
     setClasses(cl ?? []);

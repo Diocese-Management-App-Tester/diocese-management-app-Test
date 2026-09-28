@@ -19,7 +19,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { ChevronDown, Search, Church as ChurchIcon, Layers, School, FolderTree } from 'lucide-react';
 import { ALL } from '@/lib/queries';
 import type { Church, Service, ClassRoom } from '@/lib/types';
-import { ScopeSelect, type Lookups, type ScopeSelection, type ScopedRow, type ScopeLevel } from '@/components/ScopeTree';
+import { ScopeSelect, scopeOrderOf, type Lookups, type ScopeSelection, type ScopedRow, type ScopeLevel } from '@/components/ScopeTree';
 
 export type { Lookups, ScopeSelection, ScopedRow } from '@/components/ScopeTree';
 
@@ -158,12 +158,17 @@ function buildGroups<T>(rows: T[], lk: Lookups, itemName: ((r: T) => string) | n
     k.items.push(row);
   }
 
+  // groups follow the MANUAL order of the settings pages (sort_order), then the name
+  const cmpNode = (a: GroupNode<T>, b: GroupNode<T>) =>
+    (a.id === null ? 1 : 0) - (b.id === null ? 1 : 0)
+    || scopeOrderOf(lk, a.level, a.id) - scopeOrderOf(lk, b.level, b.id)
+    || cmp(a.name, b.name);
   const sortNode = (n: GroupNode<T>) => {
     if (itemName) n.items.sort((a, b) => cmp(itemName(a), itemName(b)));
-    n.children.sort((a, b) => cmp(a.name, b.name));
+    n.children.sort(cmpNode);
     n.children.forEach(sortNode);
   };
-  const out = Array.from(churches.values()).sort((a, b) => (a.id === null ? 1 : 0) - (b.id === null ? 1 : 0) || cmp(a.name, b.name));
+  const out = Array.from(churches.values()).sort(cmpNode);
   out.forEach(sortNode);
   return out;
 }

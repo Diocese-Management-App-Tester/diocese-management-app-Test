@@ -56,9 +56,9 @@ export default function ApprovalsPanel() {
   const load = useCallback(async () => {
     const [{ data: p }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
       supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').eq('status', 'pending').order('created_at'),
-      supabase.from('churches').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('classes').select('*').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
     ]);
     const reqs = (p ?? []) as Request[];
     // 0045: the other places each request asked for

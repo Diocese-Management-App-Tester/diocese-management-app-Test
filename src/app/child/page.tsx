@@ -7,8 +7,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  CalendarCheck, Star, ChevronLeft, School, Layers, Church, Sparkles, Database, GraduationCap, MessageCircle, Video, Trophy, Tent, Library,
+  CalendarCheck, Star, ChevronLeft, School, Layers, Church, Sparkles, Database, GraduationCap, MessageCircle, Video, Trophy, Tent, Library, Cross, UsersRound,
 } from 'lucide-react';
+import { useChildConfession } from '@/components/child/ConfessionBits';
+import { useChildFamily } from '@/components/child/FamilyBits';
 import ChildShell, { useChildExams, useChildMessages, useChildOnline, useChildAchievements, useChildOccasions, useChildLibrary } from '@/components/child/ChildShell';
 import { Avatar, Kpi, fmtDateTime, usePortalList } from '@/components/child/ChildBits';
 import { useChild } from '@/lib/child-context';
@@ -37,6 +39,8 @@ function HomeContent() {
   const { classes: onlineList, liveCount, upcomingCount } = useChildOnline();
   const { hasAny: hasAchievements, earnedCount, inProgress, data: achData } = useChildAchievements();
   const { list: occList, upcoming: occUpcoming, open: occOpen, withTicket } = useChildOccasions();
+  const { hasAny: hasConfession, mine: myPriest, pending: confPending, upcoming: confUpcoming } = useChildConfession();
+  const { data: famData, hasFamily, hasPriests: hasFamilyPriests, pending: famPending, upcoming: famUpcoming } = useChildFamily();
   const { hasAny: hasLibrary, subjects: libSubjects, books: libBooks, lectures: libLectures } = useChildLibrary();
 
   const { rows: attendance } = usePortalList<ChildAttendanceRow>(
@@ -155,6 +159,40 @@ function HomeContent() {
               </span>
             </span>
             {liveCount > 0 && <span className="flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-1 text-xs font-extrabold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> مباشر</span>}
+            <ChevronLeft className="h-4 w-4 text-slate-300" />
+          </Link>
+        </section>
+      )}
+
+      {/* Confession (الاعتراف) — only when the child's church has an approved priest */}
+      {hasConfession && (
+        <section className="mb-4">
+          <Link id="child-home-confession" href="/child/confession" className={`card flex items-center gap-3 !p-3 transition hover:bg-violet-50/40 ${confUpcoming > 0 ? 'ring-2 ring-violet-200' : ''}`}>
+            <span className="rounded-xl bg-violet-600 p-2.5 text-white"><Cross className="h-6 w-6" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-extrabold">الاعتراف</span>
+              <span className="block truncate text-xs text-slate-500">
+                {confUpcoming > 0 ? 'لديك موعد اعتراف مؤكَّد' : confPending > 0 ? 'طلبك بانتظار موافقة الكاهن' : myPriest ? `أب اعترافك: ${myPriest.title ? `${myPriest.title} ` : ''}${myPriest.name}${myPriest.last_confession ? '' : ' — اطلب موعدًا'}` : 'اطلب موعد اعتراف من كاهن كنيستك'}
+              </span>
+            </span>
+            {(confPending > 0 || confUpcoming > 0) && <span className="rounded-full bg-violet-600 px-2.5 py-1 text-xs font-extrabold text-white tabular-nums">{confUpcoming > 0 ? confUpcoming : confPending}</span>}
+            <ChevronLeft className="h-4 w-4 text-slate-300" />
+          </Link>
+        </section>
+      )}
+
+      {/* My family (عائلتي) — when the child is in a family or his church has priests */}
+      {(hasFamily || hasFamilyPriests) && (
+        <section className="mb-4">
+          <Link id="child-home-family" href="/child/family" className={`card flex items-center gap-3 !p-3 transition hover:bg-violet-50/40 ${famUpcoming > 0 ? 'ring-2 ring-violet-200' : ''}`}>
+            <span className="rounded-xl bg-fuchsia-600 p-2.5 text-white"><UsersRound className="h-6 w-6" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-extrabold">عائلتي</span>
+              <span className="block truncate text-xs text-slate-500">
+                {famUpcoming > 0 ? 'زيارة الكاهن لعائلتك مرتَّبة' : famPending > 0 ? 'طلب الزيارة بانتظار موافقة الكاهن' : famData?.family ? `${famData.family.name}${famData.priests[0] ? ` — كاهن منطقتك: ${famData.priests[0].title ? `${famData.priests[0].title} ` : ''}${famData.priests[0].name}` : ''}` : 'كاهن كنيستك — اتصل به'}
+              </span>
+            </span>
+            {(famPending > 0 || famUpcoming > 0) && <span className="rounded-full bg-violet-600 px-2.5 py-1 text-xs font-extrabold text-white tabular-nums">{famUpcoming > 0 ? famUpcoming : famPending}</span>}
             <ChevronLeft className="h-4 w-4 text-slate-300" />
           </Link>
         </section>

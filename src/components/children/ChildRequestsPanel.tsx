@@ -47,9 +47,9 @@ export default function ChildRequestsPanel() {
       : q.neq('status', 'pending').order('decided_at', { ascending: false }).limit(100);
     const [{ data: p }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
       q,
-      supabase.from('churches').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('classes').select('*').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
     ]);
     setRows((p ?? []) as unknown as ChildJoinRequest[]);
     setChurches(ch ?? []);

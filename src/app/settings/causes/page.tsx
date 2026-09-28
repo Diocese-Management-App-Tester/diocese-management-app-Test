@@ -37,9 +37,9 @@ export default function CausesPage() {
   const load = useCallback(async () => {
     const [{ data: ca }, { data: cl }, { data: sv }, { data: ch }] = await Promise.all([
       supabase.from('causes').select('*').order('name'),
-      supabase.from('classes').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('churches').select('*').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
     ]);
     setCauses(ca ?? []);
     setClasses(cl ?? []);

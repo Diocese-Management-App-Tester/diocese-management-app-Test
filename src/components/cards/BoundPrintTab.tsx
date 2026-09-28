@@ -196,20 +196,25 @@ export default function BoundPrintTab() {
     };
   }, [churches, services, classes]);
 
-  // ---------- sort: church → service → class → name (Arabic alphabetical) ----------
+  // ---------- sort: church → service → class (manual order, then name) → person name ----------
   const churchName = useCallback((id: string | null) => churches.find((c) => c.id === id)?.name ?? '', [churches]);
   const serviceName = useCallback((id: string | null) => services.find((s) => s.id === id)?.name ?? '', [services]);
   const className = useCallback((id: string | null) => classes.find((c) => c.id === id)?.name ?? '', [classes]);
+  const orderOf = (list: { id: string; sort_order: number }[], id: string | null) =>
+    id === null ? -1 : (list.find((x) => x.id === id)?.sort_order ?? Number.MAX_SAFE_INTEGER);
 
   const compareScope = useCallback((
     a: { church_id: string; service_id: string | null; class_id: string | null; personName: string },
     b: { church_id: string; service_id: string | null; class_id: string | null; personName: string },
   ) =>
+    (orderOf(churches, a.church_id) - orderOf(churches, b.church_id)) ||
     churchName(a.church_id).localeCompare(churchName(b.church_id), 'ar') ||
+    (orderOf(services, a.service_id) - orderOf(services, b.service_id)) ||
     serviceName(a.service_id).localeCompare(serviceName(b.service_id), 'ar') ||
+    (orderOf(classes, a.class_id) - orderOf(classes, b.class_id)) ||
     className(a.class_id).localeCompare(className(b.class_id), 'ar') ||
     a.personName.localeCompare(b.personName, 'ar'),
-  [churchName, serviceName, className]);
+  [churches, services, classes, churchName, serviceName, className]);
 
   const compareEnrollments = useCallback((a: EnrollmentWithPerson, b: EnrollmentWithPerson) =>
     compareScope(

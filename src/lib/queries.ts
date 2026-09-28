@@ -207,6 +207,9 @@ export async function fetchAllRows<T extends { id: string }>(
 const lookupCache = new Map<string, { at: number; data: unknown[] }>();
 const LOOKUP_TTL_MS = 60_000;
 
+/** churches · services · classes carry a MANUAL order (20260928130000) — every list follows it */
+const MANUAL_ORDER_TABLES = new Set(['churches', 'services', 'classes']);
+
 export async function cachedLookup<T>(
   supabase: SupabaseClient,
   table: 'churches' | 'services' | 'classes' | 'events' | 'causes' | 'call_feedbacks',
@@ -216,10 +219,11 @@ export async function cachedLookup<T>(
   const key = table;
   const hit = lookupCache.get(key);
   if (!force && hit && Date.now() - hit.at < LOOKUP_TTL_MS) return hit.data as T[];
-  const { data } = await supabase
-    .from(table)
-    .select('*')
-    .order(orderBy.column, { ascending: orderBy.ascending ?? true, nullsFirst: orderBy.nullsFirst });
+  // structural tables: the manager's order first, the name only breaks ties
+  const manual = MANUAL_ORDER_TABLES.has(table) && orderBy.column === 'name';
+  let q = supabase.from(table).select('*');
+  if (manual) q = q.order('sort_order');
+  const { data } = await q.order(orderBy.column, { ascending: orderBy.ascending ?? true, nullsFirst: orderBy.nullsFirst });
   const rows = (data ?? []) as T[];
   lookupCache.set(key, { at: Date.now(), data: rows });
   return rows;
