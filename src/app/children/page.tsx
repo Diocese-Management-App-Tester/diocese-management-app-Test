@@ -864,8 +864,9 @@ export default function ChildrenPage() {
     return arr;
   }, [filtered, sortKey, sortDir]);
 
-  // ---------- Group by class (sorted by class name) ----------
+  // ---------- Group by class (manual order of the classes, then name) ----------
   const groups = useMemo(() => {
+    const classOrder = (id: string) => classes.find((c) => c.id === id)?.sort_order ?? Number.MAX_SAFE_INTEGER;
     const byClass = new Map<string, EnrollmentWithPerson[]>();
     sorted.forEach((e) => {
       const arr = byClass.get(e.class_id) ?? [];
@@ -879,7 +880,8 @@ export default function ChildrenPage() {
         kids,
         offset: 0, // running number of the first child in this group (filled below)
       }))
-      .sort((a, b) => a.className.localeCompare(b.className, 'ar'));
+      // the manager's manual order of the classes, then the name
+      .sort((a, b) => (classOrder(a.classId) - classOrder(b.classId)) || a.className.localeCompare(b.className, 'ar'));
     // Card numbering runs across the whole visible list (current filters +
     // sort), group after group: 1 = first card on screen.
     let n = 0;

@@ -10,6 +10,8 @@ import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
 import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
+import { invalidateLookup } from '@/lib/queries';
+import { ReorderButtons, moveScopeItem } from '@/components/ReorderButtons';
 import type { ClassRoom, Service, Church } from '@/lib/types';
 
 export default function ClassesPage() {
@@ -21,8 +23,35 @@ export default function ClassesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<ClassRoom | null>(null);
   const [loading, setLoading] = useState(true);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState('');
 
   const canAdd = profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
+
+  // ▲ ▼ — owner / church manager / service manager order the classes of a service (shows everywhere)
+  const canReorder = (c: ClassRoom) => {
+    if (!profile) return false;
+    if (profile.role === 'owner') return true;
+    if (profile.role === 'church_manager') return c.church_id === profile.church_id;
+    if (profile.role === 'service_manager') return c.service_id === profile.service_id;
+    return false;
+  };
+  const siblingsOf = (c: ClassRoom) => classes.filter((x) => x.service_id === c.service_id);
+  const move = async (c: ClassRoom, dir: -1 | 1) => {
+    setMoving(c.id); setOrderError('');
+    try {
+      const next = await moveScopeItem(supabase, 'classes', siblingsOf(c), c.id, dir);
+      if (next) {
+        const pos = new Map(next.map((x, i) => [x.id, i + 1]));
+        setClasses((all) => all
+          .map((x) => (pos.has(x.id) ? { ...x, sort_order: pos.get(x.id)! } : x))
+          .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar')));
+        invalidateLookup('classes');
+      }
+    } catch {
+      setOrderError('تعذر حفظ الترتيب، تأكد من الصلاحيات');
+    } finally { setMoving(null); }
+  };
 
   // Edit per level: owner → all, church manager → his church's classes,
   // service manager → his service's classes, class servant → his own class
@@ -37,9 +66,9 @@ export default function ClassesPage() {
 
   const load = useCallback(async () => {
     const [{ data: cl }, { data: sv }, { data: ch }] = await Promise.all([
-      supabase.from('classes').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('churches').select('*').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
     ]);
     setClasses(cl ?? []);
     setServices(sv ?? []);
@@ -88,16 +117,24 @@ export default function ClassesPage() {
         <>
         <ScopeGroupFilters idPrefix="classes" scope={scope} onScope={setScope} lookups={lookups} deepest="service"
           search={search} onSearch={setSearch} placeholder="بحث باسم الفصل..." />
+        {orderError && <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{orderError}</p>}
+        {canAdd && classes.length > 1 && !search && (
+          <p className="mb-2 px-1 text-[11px] font-bold text-slate-400">استخدم ▲ ▼ لترتيب فصول كل خدمة — هذا الترتيب يظهر في كل القوائم</p>
+        )}
         <ScopeGroups
           idPrefix="classes"
           rows={visible}
           lookups={lookups}
           deepest="service"
           tone="sky"
-          itemName={(c) => c.name}
+          itemName={null}
           emptyText={classes.length === 0 ? 'لا توجد فصول بعد' : 'لا توجد فصول مطابقة'}
           renderItem={(c) => (
             <li key={c.id} className="card flex items-start gap-3">
+              {canReorder(c) && !search && (
+                <ReorderButtons index={siblingsOf(c).findIndex((x) => x.id === c.id)} count={siblingsOf(c).length}
+                  busy={moving === c.id} label={c.name} tone="sky" onMove={(d) => move(c, d)} />
+              )}
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-sky-50 ring-2 ring-sky-100 flex items-center justify-center">
                 {c.photo_url ? (
                   <Image src={c.photo_url} alt={c.name} fill sizes="48px" className="object-cover" />

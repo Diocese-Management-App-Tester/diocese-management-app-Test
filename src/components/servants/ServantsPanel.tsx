@@ -86,9 +86,9 @@ export default function ServantsPanel() {
   const load = useCallback(async () => {
     const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }, { data: xs }] = await Promise.all([
       supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').in('status', ['approved', 'suspended']).order('full_name'),
-      supabase.from('churches').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('classes').select('*').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
       supabase.from(SERVANT_SCOPES_TABLE).select('*'),
     ]);
     // 0045: attach the extra places

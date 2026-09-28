@@ -37,9 +37,9 @@ export default function CardTemplatesPage() {
   const load = useCallback(async () => {
     const [t, c, s, cl] = await Promise.all([
       supabase.from('card_templates').select('*').order('created_at', { ascending: false }),
-      supabase.from('churches').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('classes').select('*').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
     ]);
     setTemplates((t.data as CardTemplate[]) ?? []);
     setChurches(c.data ?? []);

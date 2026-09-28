@@ -8,6 +8,8 @@ import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
+import { invalidateLookup } from '@/lib/queries';
+import { ReorderButtons, moveScopeItem } from '@/components/ReorderButtons';
 import type { Church } from '@/lib/types';
 
 export default function ChurchesPage() {
@@ -17,6 +19,8 @@ export default function ChurchesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Church | null>(null);
   const [loading, setLoading] = useState(true);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState('');
   // Edit per level: owner → all churches, church manager → his own church (matches RLS)
   const canEditChurch = (c: Church) => {
     if (!profile) return false;
@@ -26,7 +30,7 @@ export default function ChurchesPage() {
   };
 
   const load = useCallback(async () => {
-    const { data } = await supabase.from('churches').select('*').order('name');
+    const { data } = await supabase.from('churches').select('*').order('sort_order').order('name');
     setChurches(data ?? []);
     setLoading(false);
   }, [supabase]);
@@ -38,6 +42,18 @@ export default function ChurchesPage() {
   }, [profile?.status, load]);
 
   useDebouncedRealtime(supabase, 'churches-page', [{ table: 'churches' }], load, { enabled: !!profile });
+
+  // ▲ ▼ — the owner decides which church comes first everywhere in the app
+  const canReorder = profile?.role === 'owner';
+  const move = async (c: Church, dir: -1 | 1) => {
+    setMoving(c.id); setOrderError('');
+    try {
+      const next = await moveScopeItem(supabase, 'churches', churches, c.id, dir);
+      if (next) { setChurches(next.map((x, i) => ({ ...x, sort_order: i + 1 }))); invalidateLookup('churches'); }
+    } catch {
+      setOrderError('تعذر حفظ الترتيب، تأكد من الصلاحيات');
+    } finally { setMoving(null); }
+  };
 
   return (
     <AppShell>
@@ -63,8 +79,15 @@ export default function ChurchesPage() {
         <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary-500" /></div>
       ) : (
         <ul className="space-y-3">
-          {churches.map((c) => (
+          {orderError && <li className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{orderError}</li>}
+          {canReorder && churches.length > 1 && (
+            <li className="px-1 text-[11px] font-bold text-slate-400">استخدم ▲ ▼ لترتيب الكنائس — هذا الترتيب يظهر في كل القوائم</li>
+          )}
+          {churches.map((c, i) => (
             <li key={c.id} className="card flex items-center gap-3">
+              {canReorder && (
+                <ReorderButtons index={i} count={churches.length} busy={moving === c.id} label={c.name} tone="primary" onMove={(d) => move(c, d)} />
+              )}
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-primary-50 ring-2 ring-primary-100 flex items-center justify-center">
                 {c.logo_url ? (
                   <Image src={c.logo_url} alt={c.name} fill sizes="48px" className="object-cover" />

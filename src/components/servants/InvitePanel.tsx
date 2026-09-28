@@ -38,9 +38,9 @@ export default function InvitePanel() {
   }, [profile]);
 
   useEffect(() => {
-    supabase.from('churches').select('*').order('name').then(({ data }) => setChurches(data ?? []));
-    supabase.from('services').select('*').order('name').then(({ data }) => setServices(data ?? []));
-    supabase.from('classes').select('*').order('name').then(({ data }) => setClasses(data ?? []));
+    supabase.from('churches').select('*').order('sort_order').order('name').then(({ data }) => setChurches(data ?? []));
+    supabase.from('services').select('*').order('sort_order').order('name').then(({ data }) => setServices(data ?? []));
+    supabase.from('classes').select('*').order('sort_order').order('name').then(({ data }) => setClasses(data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -81,15 +81,29 @@ const NO_SCOPE: Record<ScopeLevel, string> = {
 const nameOf = (list: { id: string; name: string }[], id: string | null, level: ScopeLevel) =>
   id ? list.find((x) => x.id === id)?.name ?? '—' : NO_SCOPE[level];
 
+/**
+ * Manual order of a church / service / class (20260928130000): the position
+ * the manager gave it in the settings pages. Unknown id → after everything.
+ */
+export function scopeOrderOf(lk: Lookups, level: ScopeLevel, id: string | null): number {
+  if (id === null) return Number.MAX_SAFE_INTEGER;
+  const list: { id: string; sort_order?: number }[] = level === 'church' ? lk.churches : level === 'service' ? lk.services : lk.classes;
+  const row = list.find((x) => x.id === id);
+  return row ? (row.sort_order ?? 0) : Number.MAX_SAFE_INTEGER - 1;
+}
+
 export function buildScopeTree<T extends ScopedRow>(
   rows: T[],
   lk: Lookups,
   rowName: (r: T) => string
 ): ScopeNode<T>[] {
   const cmpName = (a: string, b: string) => a.localeCompare(b, 'ar');
-  // nodes without an id (no scope) always sink to the bottom of their level
+  // nodes without an id (no scope) always sink to the bottom of their level;
+  // the rest follow the MANUAL order of the settings pages, then the name
   const cmpNode = <R,>(a: ScopeNode<R>, b: ScopeNode<R>) =>
-    (a.id === null ? 1 : 0) - (b.id === null ? 1 : 0) || cmpName(a.name, b.name);
+    (a.id === null ? 1 : 0) - (b.id === null ? 1 : 0)
+    || scopeOrderOf(lk, a.level, a.id) - scopeOrderOf(lk, b.level, b.id)
+    || cmpName(a.name, b.name);
 
   const churches = new Map<string, ScopeNode<T>>();
   const services = new Map<string, ScopeNode<T>>();

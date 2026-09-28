@@ -10,6 +10,8 @@ import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
 import { ScopeGroups, ScopeGroupFilters, useScopeGroups, toLookups } from '@/components/ScopeGroups';
+import { invalidateLookup } from '@/lib/queries';
+import { ReorderButtons, moveScopeItem } from '@/components/ReorderButtons';
 import type { Service, Church } from '@/lib/types';
 
 export default function ServicesPage() {
@@ -20,8 +22,34 @@ export default function ServicesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
   const [loading, setLoading] = useState(true);
+  const [moving, setMoving] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState('');
 
   const canAdd = profile && ['owner', 'church_manager'].includes(profile.role);
+
+  // ▲ ▼ — owner / church manager order the services of a church (the order shows everywhere)
+  const canReorder = (s: Service) => {
+    if (!profile) return false;
+    if (profile.role === 'owner') return true;
+    if (profile.role === 'church_manager') return s.church_id === profile.church_id;
+    return false;
+  };
+  const siblingsOf = (s: Service) => services.filter((x) => x.church_id === s.church_id);
+  const move = async (s: Service, dir: -1 | 1) => {
+    setMoving(s.id); setOrderError('');
+    try {
+      const next = await moveScopeItem(supabase, 'services', siblingsOf(s), s.id, dir);
+      if (next) {
+        const pos = new Map(next.map((x, i) => [x.id, i + 1]));
+        setServices((all) => all
+          .map((x) => (pos.has(x.id) ? { ...x, sort_order: pos.get(x.id)! } : x))
+          .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar')));
+        invalidateLookup('services');
+      }
+    } catch {
+      setOrderError('تعذر حفظ الترتيب، تأكد من الصلاحيات');
+    } finally { setMoving(null); }
+  };
 
   // Edit per level: owner → all, church manager → his church's services,
   // service manager → his own service only
@@ -35,8 +63,8 @@ export default function ServicesPage() {
 
   const load = useCallback(async () => {
     const [{ data: sv }, { data: ch }] = await Promise.all([
-      supabase.from('services').select('*').order('name'),
-      supabase.from('churches').select('*').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
     ]);
     setServices(sv ?? []);
     setChurches(ch ?? []);
@@ -84,16 +112,24 @@ export default function ServicesPage() {
         <>
         <ScopeGroupFilters idPrefix="services" scope={scope} onScope={setScope} lookups={lookups} deepest="church"
           search={search} onSearch={setSearch} placeholder="بحث باسم الخدمة..." />
+        {orderError && <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{orderError}</p>}
+        {canAdd && services.length > 1 && !search && (
+          <p className="mb-2 px-1 text-[11px] font-bold text-slate-400">استخدم ▲ ▼ لترتيب خدمات كل كنيسة — هذا الترتيب يظهر في كل القوائم</p>
+        )}
         <ScopeGroups
           idPrefix="services"
           rows={visible}
           lookups={lookups}
           deepest="church"
           tone="indigo"
-          itemName={(s) => s.name}
+          itemName={null}
           emptyText={services.length === 0 ? 'لا توجد خدمات بعد' : 'لا توجد خدمات مطابقة'}
           renderItem={(s) => (
             <li key={s.id} className="card flex items-start gap-3">
+              {canReorder(s) && !search && (
+                <ReorderButtons index={siblingsOf(s).findIndex((x) => x.id === s.id)} count={siblingsOf(s).length}
+                  busy={moving === s.id} label={s.name} tone="accent" onMove={(d) => move(s, d)} />
+              )}
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-accent-50 ring-2 ring-accent-100 flex items-center justify-center">
                 {s.photo_url ? (
                   <Image src={s.photo_url} alt={s.name} fill sizes="48px" className="object-cover" />

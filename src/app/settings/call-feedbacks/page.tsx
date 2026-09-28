@@ -48,9 +48,9 @@ export default function CallFeedbacksPage() {
   const load = useCallback(async () => {
     const [{ data: fb }, { data: cl }, { data: sv }, { data: ch }, { data: ev }] = await Promise.all([
       supabase.from('call_feedbacks').select('*').order('sort_order').order('name'),
-      supabase.from('classes').select('*').order('name'),
-      supabase.from('services').select('*').order('name'),
-      supabase.from('churches').select('*').order('name'),
+      supabase.from('classes').select('*').order('sort_order').order('name'),
+      supabase.from('services').select('*').order('sort_order').order('name'),
+      supabase.from('churches').select('*').order('sort_order').order('name'),
       supabase.from('events').select('*').order('name'),
     ]);
     setFeedbacks(fb ?? []);
