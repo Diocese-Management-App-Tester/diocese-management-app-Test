@@ -17,6 +17,10 @@
 //
 // Submit: auth.signUp (login name = the code) → RPC `servant_signup` which
 // upserts the person by code and creates the PENDING servant enrollment.
+//
+// 20261004120000: the page opens ONLY through ?invite=<token> generated in
+// the app (دعوة خادم). The invite's scope is locked; the token is passed as
+// p_invite and consumed by the RPC.
 
 import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
@@ -37,6 +41,9 @@ import {
   userIdToEmail, codeToUserId, PHONE_PREFIX, PHONE_LOCAL_LENGTH, GENDER_LABELS,
   type Gender, type Church, type Service, type ClassRoom, type SignupCodeLookup, type ServantSignupResult, type ScopeRef,
 } from '@/lib/types';
+import { verifyPersonPassword, existingKinds, kindsLabel, checkSignupInvite, type InviteCheck } from '@/lib/accounts';
+import InviteGate, { useSignupInvite } from '@/components/InviteGate';
+import ExistingCodeDialog from '@/components/ExistingCodeDialog';
 
 const MONTHS_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -74,10 +81,24 @@ function SignupWizard() {
   const params = useSearchParams();
   const supabase = createClient();
 
-  // ---- Invite-link scope (locked when present) ----
-  const inviteChurch = params.get('church') ?? '';
-  const inviteService = params.get('service') ?? '';
-  const inviteClass = params.get('class') ?? '';
+  // ---- 20261004120000: invite-only — ?invite=<token> must be valid ----
+  const inviteToken = params.get('invite');
+  const invite = useSignupInvite(supabase, inviteToken, 'servant');
+  return (
+    <InviteGate invite={invite} kind="servant" token={inviteToken}>
+      {invite?.valid && <SignupForm invite={invite} inviteToken={inviteToken ?? ''} />}
+    </InviteGate>
+  );
+}
+
+function SignupForm({ invite, inviteToken }: { invite: InviteCheck; inviteToken: string }) {
+  const params = useSearchParams();
+  const supabase = createClient();
+
+  // ---- Invite scope (locked when present — the DB applies it anyway) ----
+  const inviteChurch = invite.church_id ?? '';
+  const inviteService = invite.service_id ?? '';
+  const inviteClass = invite.class_id ?? '';
   const churchLocked = !!inviteChurch;
   const serviceLocked = !!inviteService;
   const classLocked = !!inviteClass;
@@ -122,7 +143,8 @@ function SignupWizard() {
   const className = classes.find((c) => c.id === classId)?.name;
 
   // ---- Step 2: code ----
-  const [code, setCode] = useState('');
+  // 20261003120000: «تغيير الحساب → إضافة حساب» arrives with ?code=<the person's code>
+  const [code, setCode] = useState(params.get('code') ?? '');
   const [showScan, setShowScan] = useState(false);
   const [lookup, setLookup] = useState<SignupCodeLookup | null>(null);
   const [checking, setChecking] = useState(false);
@@ -185,9 +207,51 @@ function SignupWizard() {
 
   const phoneValid = phoneLocal.length === PHONE_LOCAL_LENGTH;
 
+  // 20261003120000: the code already belongs to a person WITH a password
+  // (child / priest account) → same person, same password, new servant account
+  const linkedAccount = !!lookup && !lookup.family && !lookup.has_account && !!lookup.has_password;
+  const linkedKinds = kindsLabel(existingKinds(lookup as never));
+
   // ---- Step 4: password ----
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+
+  // 20261005120000: «الكود مسجّل بالفعل — هل أنت نفس الشخص؟» dialog on step 2.
+  // Verified password → it is reused on step 4 (one password per person).
+  const [askExisting, setAskExisting] = useState(false);
+  const [claimedPassword, setClaimedPassword] = useState('');
+  useEffect(() => { setClaimedPassword(''); }, [code]);
+
+  // 20261006120000: the code ALREADY owns a servant account and he opened
+  // another invite link (another service / class) → after proving the
+  // password we sign him in and file a servant_scope_request for the new
+  // places (approved by the responsible person). No second account.
+  const [requested, setRequested] = useState<{ requested: number; skipped: number } | null>(null);
+  const requestMorePlaces = async (pw: string) => {
+    setError('');
+    setLoading(true);
+    try {
+      const { error: signErr } = await supabase.auth.signInWithPassword({ email: userIdToEmail(codeToUserId(code)), password: pw });
+      if (signErr) throw new Error('bad_login');
+      const { data, error: rpcErr } = await supabase.rpc('servant_request_scopes', {
+        p_scopes: scopes.length ? scopes : null,
+        p_invite: inviteToken || null,
+      });
+      if (rpcErr) throw rpcErr;
+      setRequested((data ?? { requested: 0, skipped: 0 }) as { requested: number; skipped: number });
+    } catch (e) {
+      const m = (e as Error).message ?? '';
+      setError(
+        m === 'bad_login' ? 'كلمة المرور غير صحيحة — لا يمكن إضافة مكان خدمة دون إثبات الهوية'
+        : m.includes('scopes_required') ? 'اختر مكان الخدمة الجديد في الخطوة الأولى أولًا'
+        : m.includes('account_not_approved') ? 'حسابك لم يُعتمد بعد — انتظر اعتماده ثم افتح الرابط مجددًا'
+        : m.includes('invite_') ? 'رابط الدعوة لم يعد صالحًا — اطلب رابطًا جديدًا من مسؤول الخدمة'
+        : 'تعذر إرسال الطلب، حاول مرة أخرى',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -201,7 +265,10 @@ function SignupWizard() {
       setStep(2);
     } else if (step === 2) {
       if (!code.trim()) return setError('اكتب الكود أو امسحه بالكاميرا أو ولّد كودًا');
-      if (lookup?.has_account) return setError('هذا الكود مرتبط بحساب خادم بالفعل — سجّل الدخول به');
+      if (lookup?.family) return setError('هذا الكود كود عائلة — لا يمكن استخدامه لشخص، اختر كودًا آخر');
+      // a code with an account → ask «هل أنت نفس الشخص؟» (password · change code · sign in)
+      if ((lookup?.has_account || linkedAccount) && !claimedPassword) { setAskExisting(true); return; }
+      if (lookup?.has_account) return setError('هذا الكود مرتبط بحساب خادم بالفعل — اضغط «نعم أنا هو» لإضافة مكان الخدمة إلى حسابك');
       if (lookup && !prefilled) fillFromLookup(lookup);
       setStep(3);
     } else if (step === 3) {
@@ -220,6 +287,27 @@ function SignupWizard() {
 
     setLoading(true);
     const userId = codeToUserId(code);
+
+    // 0) 20261003120000: ONE password per person — a code that already has a
+    //    password (a child / priest account) must use THAT password here too
+    if (linkedAccount) {
+      let ok = false;
+      try { ok = await verifyPersonPassword(supabase, code, password); } catch { ok = false; }
+      if (!ok) {
+        setError(`هذا الكود له حساب ${kindsLabel(existingKinds(lookup as never))} بالفعل — اكتب كلمة المرور نفسها (لا يمكن أن يكون للشخص الواحد كلمتا مرور)`);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // 0.5) 20261004120000: the invite must still be valid — checked BEFORE the
+    //      auth user is created so an expired invite leaves no orphan account
+    const stillValid = await checkSignupInvite(supabase, inviteToken, 'servant');
+    if (!stillValid.valid) {
+      setError('رابط الدعوة لم يعد صالحًا — اطلب رابطًا جديدًا من مسؤول الخدمة');
+      setLoading(false);
+      return;
+    }
 
     // 1) auth account — the login name IS the code
     const { data, error: signErr } = await supabase.auth.signUp({
@@ -257,6 +345,8 @@ function SignupWizard() {
       p_image_url: imageUrl,
       // 0045: every place (the first = primary)
       p_scopes: scopes.length ? scopes : null,
+      // 20261004120000: the invite that opened this page
+      p_invite: inviteToken,
     });
 
     if (rpcErr) {
@@ -265,16 +355,50 @@ function SignupWizard() {
         m.includes('code_taken') ? 'هذا الكود مستخدم من خادم آخر'
         : m.includes('already_registered') ? 'هذا الحساب مسجّل بالفعل'
         : m.includes('phone_required') ? 'رقم الهاتف مطلوب'
+        : m.includes('invite_') ? 'رابط الدعوة لم يعد صالحًا — اطلب رابطًا جديدًا من مسؤول الخدمة'
         : 'تعذر حفظ البيانات، حاول مرة أخرى'
       );
       setLoading(false);
       return;
     }
     void (res as ServantSignupResult);
+    // 20261003120000: the typed password becomes the person's ONE password
+    // (no-op when he already had the same one)
+    await supabase.rpc('servant_mirror_own_password', { p_password: password }).then(() => undefined, () => undefined);
 
     // Hard navigation so AuthProvider re-initializes with the fresh enrollment
     window.location.href = '/';
   };
+
+  // 20261006120000: existing servant → new places requested, awaiting review
+  if (requested) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center px-4 py-8">
+        <section id="signup-requested" className="card w-full max-w-md text-center">
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+            <Check className="h-8 w-8" />
+          </div>
+          <h1 className="text-xl font-extrabold">
+            {requested.requested > 0 ? 'تم إرسال طلب إضافة مكان الخدمة' : 'لا جديد لإضافته'}
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            {requested.requested > 0
+              ? `${requested.requested === 1 ? 'مكان واحد' : `${requested.requested} أماكن`} بانتظار اعتماد مسؤول الخدمة — ستظهر في حسابك فور الاعتماد.`
+              : 'كل الأماكن المختارة موجودة في حسابك بالفعل أو مطلوبة من قبل.'}
+            {requested.skipped > 0 && requested.requested > 0 && ` (${requested.skipped} كانت لديك بالفعل)`}
+          </p>
+          {scopes.length > 0 && (
+            <ul className="mt-3 space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-right text-xs text-slate-600">
+              {scopes.map((s, i) => <li key={i} className="flex items-center gap-1"><MapPin className="h-3 w-3 text-primary-500" />{scopeLabel(s, lookups)}</li>)}
+            </ul>
+          )}
+          <button id="su-go-home" type="button" onClick={() => { window.location.href = '/'; }} className="btn-primary mt-5 w-full">
+            الدخول إلى حسابي
+          </button>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4 py-8">
@@ -384,19 +508,38 @@ function SignupWizard() {
                   <Loader2 className="h-3 w-3 animate-spin" /> جارٍ التحقق من الكود...
                 </p>
               )}
-              {lookupDone && lookup && !lookup.has_account && (
+              {lookupDone && lookup?.family && (
+                <div className="flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>هذا الكود كود عائلة — لا يمكن أن يكون كود شخص. استخدم كودًا آخر.</span>
+                </div>
+              )}
+              {lookupDone && lookup && !lookup.family && !lookup.has_account && (
                 <div className="rounded-xl bg-emerald-50 px-3 py-2">
                   <p className="flex items-center gap-1 text-xs font-extrabold text-emerald-700">
                     <UserCheck className="h-4 w-4" /> شخص مسجّل بالفعل: {lookup.name}
                   </p>
-                  <p className="mt-0.5 text-[11px] font-bold text-emerald-600">سيتم ربط حسابك بنفس الشخص وتعبئة بياناته في الخطوة التالية</p>
+                  <p className="mt-0.5 text-[11px] font-bold text-emerald-600">
+                    {linkedAccount
+                      ? `لديه حساب ${linkedKinds} — سيُضاف حساب الخادم لنفس الشخص بنفس كلمة المرور، وستتمكن من التنقل بين الحسابات من زر «تغيير الحساب»`
+                      : 'سيتم ربط حسابك بنفس الشخص وتعبئة بياناته في الخطوة التالية'}
+                  </p>
                 </div>
               )}
               {lookupDone && lookup?.has_account && (
-                <div className="flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
+                <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>هذا الكود مرتبط بحساب خادم بالفعل. <Link href="/login" className="underline">سجّل الدخول</Link> أو استخدم كودًا آخر.</span>
+                  <span>
+                    هذا الكود له حساب خادم بالفعل{lookup.name ? ` (${lookup.name})` : ''}. إن كنت أنت — اضغط «التالي» وأثبت كلمة مرورك ليُضاف
+                    {scopes.length ? ' مكان الخدمة الذي اخترته' : ' مكان الخدمة الذي دعاك إليه الرابط'} إلى حسابك بعد اعتماد المسؤول — أو{' '}
+                    <Link href={`/login?code=${encodeURIComponent(code.trim())}`} className="underline">سجّل الدخول</Link> أو استخدم كودًا آخر.
+                  </span>
                 </div>
+              )}
+              {claimedPassword && (
+                <p className="flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700">
+                  <Check className="h-3.5 w-3.5" /> تم التحقق — سيُضاف حساب الخادم لنفس الشخص بكلمة مروره الحالية
+                </p>
               )}
               {lookupDone && !lookup && code.trim() && (
                 <p className="text-[11px] font-bold text-slate-400">كود جديد — ستُدخل بياناتك في الخطوة التالية</p>
@@ -525,10 +668,15 @@ function SignupWizard() {
                   </div>
                 )}
               </div>
+              {linkedAccount && (
+                <p id="su-linked-hint" className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+                  هذا الكود له حساب {linkedKinds} بالفعل — للشخص الواحد كلمة مرور واحدة لكل حساباته. اكتب كلمة مرورك الحالية هنا.
+                </p>
+              )}
               <div>
-                <label htmlFor="su-password" className="mb-1 block text-xs font-bold text-slate-500">كلمة المرور *</label>
+                <label htmlFor="su-password" className="mb-1 block text-xs font-bold text-slate-500">{linkedAccount ? 'كلمة المرور الحالية *' : 'كلمة المرور *'}</label>
                 <input id="su-password" type="password" className="input-field" placeholder="••••••••" dir="ltr"
-                  value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" />
+                  value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={linkedAccount ? 'current-password' : 'new-password'} />
               </div>
               <div>
                 <label htmlFor="su-confirm" className="mb-1 block text-xs font-bold text-slate-500">تأكيد كلمة المرور *</label>
@@ -569,6 +717,28 @@ function SignupWizard() {
           <Link href="/login" className="font-bold text-primary-600 hover:underline">تسجيل الدخول</Link>
         </p>
       </section>
+
+      {askExisting && (
+        <ExistingCodeDialog
+          code={code.trim()}
+          name={lookup?.name}
+          kinds={lookup?.has_account ? ['servant', ...existingKinds(lookup as never).filter((k) => k !== 'servant')] : existingKinds(lookup as never)}
+          approverLabel="مسؤول الخدمة"
+          onVerified={(pw) => {
+            setAskExisting(false);
+            if (lookup?.has_account) {
+              // same servant account → request the new places (no second account)
+              void requestMorePlaces(pw);
+              return;
+            }
+            setClaimedPassword(pw); setPassword(pw); setConfirm(pw);
+            if (lookup && !prefilled) fillFromLookup(lookup);
+            setStep(3);
+          }}
+          onChangeCode={() => { setAskExisting(false); setCode(''); setLookup(null); setLookupDone(false); }}
+          onClose={() => setAskExisting(false)}
+        />
+      )}
 
       {rawImage && (
         <PhotoCropModal

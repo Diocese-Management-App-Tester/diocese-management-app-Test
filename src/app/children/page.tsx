@@ -23,10 +23,11 @@ import {
   childEventStatus, CHILD_STATUS_LABELS, type ChildEventStatus,
 } from '@/lib/time';
 import {
-  CallFeedbackBadge, CallFeedbackModal, CallFeedbackIcon, PersonAvatar, useCallFeedbackStates,
+  CallFeedbackBadge, CallFeedbackPickerModal, CallFeedbackHistoryModal, CallFeedbackIcon, OtherFeedbackIcon,
+  PersonAvatar, useCallFeedbackStates, useAfterCallPrompt, startCall,
 } from '@/components/CallFeedback';
 import {
-  matchesCallFilter, feedbackStyle, CALL_STATE_LABELS, type CallFeedbackFilter,
+  matchesCallFilter, feedbackStyle, CALL_STATE_LABELS, OTHER_FEEDBACK_COLOR, type CallFeedbackFilter,
 } from '@/lib/call-feedback';
 import { useAppDate } from '@/lib/app-date-context';
 import { useModules } from '@/lib/modules-context';
@@ -34,10 +35,10 @@ import NumPadModal from '@/components/NumPadModal';
 import { ViewPersonModal } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import AwardModal from '@/components/achievements/AwardModal';
-import { useDebouncedRealtime, scopeFilter } from '@/lib/realtime';
+import { useDebouncedRealtime, useBusIds } from '@/lib/realtime';
 import { sendMessage as sendChatMessage, chatErrorMessage } from '@/lib/chat';
 import {
-  fetchEnrollmentsPage, fetchMyGroupIds, fetchMyGroupEnrollments, cachedLookup, ALL, PAGE_SIZE, type EnrollmentKind,
+  fetchEnrollmentsPage, fetchEnrollmentsByIds, fetchMyGroupIds, fetchMyGroupEnrollments, cachedLookup, ALL, PAGE_SIZE, type EnrollmentKind,
 } from '@/lib/queries';
 import { useNavLabel } from '@/lib/customization-context';
 import { pickScopedDefault, effectiveScope } from '@/lib/defaults';
@@ -79,6 +80,7 @@ const MSG_VARS = [
   { token: '[الاسم الكامل]', label: 'الاسم الكامل' },
   { token: '[تاريخ الميلاد]', label: 'تاريخ الميلاد' },
   { token: '[رقم الهاتف]', label: 'رقم الهاتف' },
+  { token: '[الكود]', label: 'الكود (رمز QR)' },
   { token: '[اسم المناسبة]', label: 'اسم المناسبة' },
 ];
 
@@ -88,6 +90,8 @@ const fillTemplate = (template: string, e: EnrollmentWithPerson, ev?: AppEvent |
     .replaceAll('[الاسم الكامل]', e.person.name)
     .replaceAll('[تاريخ الميلاد]', e.person.birthdate ?? '')
     .replaceAll('[رقم الهاتف]', e.person.phone ?? '')
+    // the person's code = national_id = the QR / scanner code
+    .replaceAll('[الكود]', e.person.national_id ?? '')
     .replaceAll('[اسم المناسبة]', ev?.name ?? '');
 
 // WhatsApp brand icon (lucide has no official one)
@@ -101,7 +105,7 @@ function WhatsAppIcon({ className }: { className?: string }) {
 
 export default function ChildrenPage() {
   const pageName = useNavLabel('children');
-  const { profile, scopes } = useAuth();
+  const { profile } = useAuth();
   const supabase = createClient();
   const router = useRouter();
   const [enrollments, setEnrollments] = useState<EnrollmentWithPerson[]>([]);
@@ -347,14 +351,28 @@ export default function ChildrenPage() {
   // the tab is hidden. 0046: enrollments / persons arrive on the shared
   // broadcast bus (one message per statement for the whole church) and
   // reload ONLY the list; the lookup tables have their own subscription.
-  const rtFilter = scopeFilter(profile, scopes);
+  // 20261013120000: `enrollments` messages carry the affected ids (a scan =
+  // one enrollment's counters) → patch those rows in place with ONE small
+  // request instead of re-downloading every loaded page on every device.
+  // Rows not on screen are ignored (a NEW enrollment in scope arrives through
+  // the full reload: INSERT / DELETE / bulk messages / persons changes).
+  const enrollmentsRef = useRef(enrollments); enrollmentsRef.current = enrollments;
+  useBusIds('enrollments', async (ids, op) => {
+    if (!ids.length || op !== 'UPDATE') { await loadList(); return; }
+    const onScreen = new Set(enrollmentsRef.current.map((e) => e.id));
+    const mine = ids.filter((id) => onScreen.has(id));
+    if (!mine.length) return;
+    try {
+      const fresh = await fetchEnrollmentsByIds(supabase, mine);
+      if (!fresh.length) { await loadList(); return; } // moved out of scope / deleted meanwhile
+      const byId = new Map(fresh.map((e) => [e.id, e]));
+      setEnrollments((prev) => prev.map((e) => byId.get(e.id) ?? e));
+    } catch { await loadList(); }
+  }, { enabled: profile?.status === 'approved', delayMs: 1500, onVisible: () => { void loadList(); } });
   useDebouncedRealtime(
     supabase,
     'persons-list',
-    [
-      { table: 'enrollments', filter: rtFilter },
-      { table: 'persons' },
-    ],
+    [{ table: 'persons' }],
     loadList,
     { enabled: profile?.status === 'approved', delayMs: 1500 }
   );
@@ -454,23 +472,29 @@ export default function ChildrenPage() {
   // attendance_count across all events.
   const [attendedDays, setAttendedDays] = useState<Record<string, Set<string>>>({});
   const [eventCounts, setEventCounts] = useState<Record<string, number>>({});
+  // 20261016120000: keyed on the SET of ids on screen, not on the array
+  // identity — every in-place patch (a scan anywhere, via useBusIds) used to
+  // re-run this effect and re-download the whole event history of the list
+  // on every open device (14 k calls / 553 ms avg in production).
+  const screenIdsKey = useMemo(() => enrollments.map((e) => e.id).sort().join(','), [enrollments]);
+  const fetchEventAttendance = useCallback(async (eventIdArg: string, ids: string[]) => {
+    const rows: { enrollment_id: string; attended_on: string }[] = [];
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data } = await supabase
+        .from('attendance_log')
+        .select('enrollment_id, attended_on')
+        .eq('event_id', eventIdArg)
+        .in('enrollment_id', ids.slice(i, i + 100));
+      rows.push(...((data ?? []) as { enrollment_id: string; attended_on: string }[]));
+    }
+    return rows;
+  }, [supabase]);
   useEffect(() => {
-    if (!selectedEvent) { setAttendedDays({}); setEventCounts({}); return; }
+    if (!selectedEvent || !screenIdsKey) { setAttendedDays({}); setEventCounts({}); return; }
     let cancelled = false;
     (async () => {
-      // Only the enrollments ON SCREEN — not the event's whole history for
-      // the entire diocese. Chunked so the request URL stays small.
-      const ids = enrollments.map((e) => e.id);
-      const rows: { enrollment_id: string; attended_on: string }[] = [];
-      for (let i = 0; i < ids.length; i += 100) {
-        const { data } = await supabase
-          .from('attendance_log')
-          .select('enrollment_id, attended_on')
-          .eq('event_id', selectedEvent.id)
-          .in('enrollment_id', ids.slice(i, i + 100));
-        if (cancelled) return;
-        rows.push(...((data ?? []) as { enrollment_id: string; attended_on: string }[]));
-      }
+      const rows = await fetchEventAttendance(selectedEvent.id, screenIdsKey.split(','));
+      if (cancelled) return;
       const days: Record<string, Set<string>> = {};
       const counts: Record<string, number> = {};
       rows.forEach((r) => {
@@ -481,7 +505,31 @@ export default function ChildrenPage() {
       setEventCounts(counts);
     })();
     return () => { cancelled = true; };
-  }, [selectedEvent, supabase, enrollments]);
+  }, [selectedEvent, screenIdsKey, fetchEventAttendance]);
+  // Another device scanned → re-read ONLY the named enrollments (one tiny
+  // request); a bulk message (no ids) → whole list once.
+  const selectedEventIdRef = useRef<string | null>(null); selectedEventIdRef.current = selectedEvent?.id ?? null;
+  const screenIdsRef = useRef<string>(''); screenIdsRef.current = screenIdsKey;
+  useBusIds('attendance_log', async (ids) => {
+    const evId = selectedEventIdRef.current;
+    if (!evId || !screenIdsRef.current) return;
+    const onScreen = new Set(screenIdsRef.current.split(','));
+    const want = ids.length ? ids.filter((id) => onScreen.has(id)) : Array.from(onScreen);
+    if (!want.length) return;
+    const rows = await fetchEventAttendance(evId, want);
+    setAttendedDays((prev) => {
+      const next = { ...prev };
+      want.forEach((id) => { delete next[id]; });
+      rows.forEach((r) => { (next[r.enrollment_id] ??= new Set()).add(r.attended_on); });
+      return next;
+    });
+    setEventCounts((prev) => {
+      const next = { ...prev };
+      want.forEach((id) => { next[id] = 0; });
+      rows.forEach((r) => { next[r.enrollment_id] = (next[r.enrollment_id] ?? 0) + 1; });
+      return next;
+    });
+  }, { enabled: profile?.status === 'approved' && !!selectedEvent, delayMs: 1500 });
 
   // Attendance number shown on a person's badge
   const attendanceShown = (e: EnrollmentWithPerson): number =>
@@ -525,10 +573,32 @@ export default function ChildrenPage() {
   // Log modals opened from the badges (سجل الحضور / سجل النقاط)
   const [logTarget, setLogTarget] = useState<{ kind: 'attendance' | 'points'; e: EnrollmentWithPerson } | null>(null);
 
-  // ---------- Call feedback (0023) — badge state per child for the selected
-  // event's follow-up cycle at the working date-time; modal target ----------
+  // ---------- Call feedback (0023 + 20261012120000) — badge state per child
+  // for the selected event's follow-up cycle at the working date-time.
+  // TWO dialogs: the PICKER (opens automatically when the servant returns
+  // from the phone app after pressing the call button — or from the
+  // history) and the HISTORY (opens from the badge). ----------
   const callFb = useCallFeedbackStates(supabase, enrollments, selectedEvent, feedbacks, nowDate, realNow);
-  const [callTarget, setCallTarget] = useState<EnrollmentWithPerson | null>(null);
+  const [callDialog, setCallDialog] = useState<{ kind: 'picker' | 'history'; e: EnrollmentWithPerson } | null>(null);
+  const eventIdRef = useRef(eventId);
+  eventIdRef.current = eventId;
+  const { arm: armAfterCall, check: checkAfterCall } = useAfterCallPrompt((enrollmentId, evId) => {
+    // Back from the dialer → open the picker for the child just called.
+    // Another event selected meanwhile → drop the prompt; rows not loaded
+    // yet (PWA restarted by the OS) → keep it pending until they are.
+    if (!eventIdRef.current) return false; // event not restored yet
+    if (evId !== eventIdRef.current) return true;
+    const e = enrollmentsRef.current.find((x) => x.id === enrollmentId);
+    if (!e) return enrollmentsRef.current.length > 0;
+    setCallDialog({ kind: 'picker', e });
+    return true;
+  });
+  useEffect(() => { if (enrollments.length && eventId) checkAfterCall(); }, [enrollments, eventId, checkAfterCall]);
+  const dial = (e: EnrollmentWithPerson) => {
+    if (!selectedEvent) return;
+    setCallDialog(null);
+    startCall(supabase, e, selectedEvent, profile?.id, armAfterCall, now);
+  };
   // Feedbacks offered in the filter: those covering the current scope selectors + event
   const visibleFeedbacks = useMemo(
     () =>
@@ -543,13 +613,15 @@ export default function ChildrenPage() {
         .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'ar')),
     [feedbacks, churchFilter, serviceFilter, classFilter, eventId]
   );
-  // Realtime: feedbacks recorded by other servants → refresh badge states
-  useDebouncedRealtime(
-    supabase,
-    'call-feedback-log',
-    [{ table: 'contact_log' }],
-    callFb.reload,
-    { enabled: profile?.status === 'approved' && !!selectedEvent }
+  // Realtime: feedbacks recorded by other servants → refresh badge states.
+  // 20261013120000: patch ONLY the enrollments named in the message (one
+  // tiny request) instead of re-reading every child on the list on every
+  // device for every call — that fan-out was the «Logs Ingest» spike on
+  // follow-up evenings. A message without ids (bulk) → full reload.
+  useBusIds(
+    'contact_log',
+    (ids) => (ids.length ? callFb.reloadFor(ids) : callFb.reload()),
+    { enabled: profile?.status === 'approved' && !!selectedEvent, onVisible: () => { void callFb.reload(); } }
   );
   // keep the filter valid when the offered feedbacks change
   useEffect(() => {
@@ -752,10 +824,11 @@ export default function ChildrenPage() {
     } else if (job === 'call') {
       // A call is a FOLLOW-UP for the selected event (e.g. calling the
       // absent children of today's mass) — logged in contact_log
-      if (!eventId) { alert('اختر المناسبة أولاً — الاتصال متابعة لمناسبة'); return; }
+      if (!eventId || !selectedEvent) { alert('اختر المناسبة أولاً — الاتصال متابعة لمناسبة'); return; }
       if (!e.person.phone) return;
-      logContact(e, 'call', null);
-      window.location.href = `tel:${e.person.phone}`;
+      // Dial → when the servant comes back to the app the feedback PICKER
+      // opens automatically for this child (useAfterCallPrompt)
+      dial(e);
     } else if (job === 'message') {
       if (!eventId) { alert('اختر المناسبة أولاً — الرسالة متابعة لمناسبة'); return; }
       if (messageChannel === 'internal') {
@@ -905,12 +978,14 @@ export default function ChildrenPage() {
   // (every job, since calls / messages / points all happen inside it):
   // pale green = present; white = not registered (occurrence still open);
   // pale red = absent (occurrence over and he never attended) ----------
+  // Returns background + border classes (UI only). The border follows the
+  // same tone so every child card reads as its own tinted tile.
   const cardTone = (child: EnrollmentWithPerson): string => {
-    if (child.status === 'stopped') return 'bg-slate-100/80';
+    if (child.status === 'stopped') return 'bg-slate-100/80 border-slate-200';
     const s = statusOf(child);
-    if (s === 'present') return 'bg-emerald-50';
-    if (s === 'absent') return 'bg-red-50';
-    return 'bg-white';
+    if (s === 'present') return 'bg-emerald-50 border-emerald-200';
+    if (s === 'absent') return 'bg-red-50 border-red-200';
+    return 'bg-white border-slate-100';
   };
 
   // ---------- Per-person button appearance by job + activated mode ----------
@@ -1120,7 +1195,7 @@ export default function ChildrenPage() {
       <div
         id="control-zone"
         ref={setZoneEl}
-        className="sticky top-[71px] z-30 -mx-4 px-4 pb-2 bg-slate-50/95 backdrop-blur-md"
+        className="sticky top-[71px] z-30 -mx-4 px-4 pb-2 bg-slate-50/95 backdrop-blur-md border-b border-indigo-100 shadow-[0_10px_18px_-14px_rgba(79,70,229,0.35)]"
       >
       {/* ---------- Row 1: Search + collapse toggle button ---------- */}
       <div className="mb-2 flex items-center gap-2 pt-1">
@@ -1666,6 +1741,21 @@ export default function ChildrenPage() {
                     </button>
                   );
                 })}
+                {/* «أخرى» (!) — hand-written causes */}
+                <button
+                  id="call-filter-other"
+                  type="button"
+                  aria-pressed={callFilter === 'other'}
+                  disabled={!selectedEvent}
+                  onClick={() => setCallFilter('other')}
+                  style={callFilter === 'other' ? feedbackStyle(OTHER_FEEDBACK_COLOR) : undefined}
+                  className={`flex h-9 items-center justify-center gap-1 rounded-xl px-3 text-xs font-bold transition disabled:opacity-40 ${
+                    callFilter === 'other' ? 'shadow ring-2 ring-black/10' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <OtherFeedbackIcon />
+                  {CALL_STATE_LABELS.other}
+                </button>
               </div>
             </div>
             {activeFilterCount > 0 && (
@@ -1764,6 +1854,18 @@ export default function ChildrenPage() {
       {/* end frozen control zone */}
       </div>
 
+      {/* ---------- Visual split: options (above) | class cards (below) ---------- */}
+      {!loading && (
+        <div id="classes-divider" className="mt-3 mb-2 flex items-center gap-3 px-1" aria-hidden="true">
+          <span className="flex items-center gap-1.5 text-xs font-extrabold text-slate-500">
+            <School className="h-3.5 w-3.5 text-primary-500" />
+            الفصول
+            <span className="badge bg-white text-slate-600 ring-1 ring-slate-200">{groups.length}</span>
+          </span>
+          <span className="h-px flex-1 bg-gradient-to-l from-indigo-200 via-indigo-100 to-transparent" />
+        </div>
+      )}
+
       {/* ---------- Grouped-by-class expandable view ---------- */}
       {loading ? (
         <div className="flex justify-center py-16">
@@ -1809,6 +1911,9 @@ export default function ChildrenPage() {
         <div id="children-groups" className="space-y-3">
           {groups.map(({ classId, className, kids, offset }) => {
             const open = openGroups[classId] ?? false;
+            // UI-only summary for the header: how many of this class are
+            // present in the selected event right now (0 when no event).
+            const presentCount = selectedEvent ? kids.filter((k) => statusOf(k) === 'present').length : 0;
             return (
               <div key={classId}>
                 {/* Class-name header FREEZES below the control zone while its
@@ -1826,25 +1931,57 @@ export default function ChildrenPage() {
                   <button
                     id={`group-${classId}`}
                     onClick={() => toggleGroup(classId)}
-                    className={`flex w-full items-center justify-between border border-indigo-50 bg-white px-4 py-3 ${
-                      open ? 'rounded-t-2xl border-b-indigo-100' : 'rounded-2xl shadow-card'
+                    aria-expanded={open}
+                    className={`flex w-full items-center justify-between gap-2 border bg-white px-3 py-2.5 text-start transition-colors ${
+                      open
+                        ? 'rounded-t-2xl border-indigo-200 border-b-indigo-100 bg-gradient-to-l from-white to-indigo-50/60'
+                        : 'rounded-2xl border-indigo-100 shadow-card hover:border-indigo-200 active:bg-indigo-50/40'
                     }`}
                   >
-                    <span className="flex items-center gap-2 text-sm font-extrabold text-slate-700">
-                      <School className="h-4 w-4 text-primary-600" />
-                      {className}
-                      <span className="badge bg-primary-100 text-primary-700">{kids.length}</span>
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${
+                          open
+                            ? 'bg-gradient-to-br from-primary-500 to-accent-500 text-white shadow'
+                            : 'bg-primary-50 text-primary-600'
+                        }`}
+                      >
+                        <School className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-extrabold text-slate-800">{className}</span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-slate-500">
+                          <span className="inline-flex items-center gap-1">
+                            <Users className="h-3 w-3" />
+                            {kids.length} {kind === 'servant' ? 'خادم' : 'مخدوم'}
+                          </span>
+                          {presentCount > 0 && (
+                            <span className="badge bg-emerald-100 text-emerald-700 !px-1.5 !py-0 text-[10px]">
+                              <UserCheck className="h-3 w-3" /> {presentCount} حاضر
+                            </span>
+                          )}
+                        </span>
+                      </span>
                     </span>
-                    <ChevronDown
-                      className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-                    />
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ${
+                        open ? 'bg-primary-100 text-primary-700' : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+                      />
+                    </span>
                   </button>
                 </div>
 
                 {open && (
-                  <ul className="divide-y-[3px] divide-indigo-200 overflow-hidden rounded-b-2xl border border-t-0 border-indigo-200 bg-white">
+                  <ul className="space-y-2 rounded-b-2xl border border-t-0 border-indigo-200 bg-indigo-50/50 p-2">
                     {kids.map((child, i) => (
-                      <li key={child.id} className={`relative px-4 py-3 transition-colors duration-300 ${cardTone(child)}`}>
+                      <li
+                        key={child.id}
+                        className={`relative overflow-hidden rounded-xl border px-3 pb-3 pt-4 shadow-sm transition-colors duration-300 ${cardTone(child)}`}
+                      >
                         <span className="card-num" aria-label={`رقم ${offset + i + 1}`}>{offset + i + 1}</span>
                         {/* Card layout:
                             TOP    — running number (corner) · photo · name · job button
@@ -1892,7 +2029,7 @@ export default function ChildrenPage() {
                               <CallFeedbackBadge
                                 id={`call-badge-${child.id}`}
                                 state={cs}
-                                onClick={() => setCallTarget(child)}
+                                onClick={() => setCallDialog({ kind: 'history', e: child })}
                               />
                             );
                           })()}
@@ -1984,17 +2121,33 @@ export default function ChildrenPage() {
         />
       )}
 
-      {/* Call feedback modal (from the call-feedback badge) */}
-      {callTarget && selectedEvent && callFb.cycle && (
-        <CallFeedbackModal
-          enrollment={callTarget}
+      {/* Call feedback — PICKER (auto after a call) */}
+      {callDialog?.kind === 'picker' && selectedEvent && callFb.cycle && (
+        <CallFeedbackPickerModal
+          enrollment={callDialog.e}
           event={selectedEvent}
           cycle={callFb.cycle}
           feedbacks={feedbacks}
-          current={callFb.stateOf(callTarget) ?? { kind: 'not_called_yet' }}
+          current={callFb.stateOf(callDialog.e) ?? { kind: 'not_called_yet' }}
           now={now}
-          onRecorded={(day, fbId) => callFb.setRecorded(callTarget.id, day, fbId)}
-          onClose={() => setCallTarget(null)}
+          onRecorded={(day, rec) => callFb.setRecorded(callDialog.e.id, day, rec)}
+          onClose={() => setCallDialog(null)}
+          onOpenHistory={() => setCallDialog({ kind: 'history', e: callDialog.e })}
+        />
+      )}
+      {/* Call feedback — HISTORY (from the badge) */}
+      {callDialog?.kind === 'history' && selectedEvent && callFb.cycle && (
+        <CallFeedbackHistoryModal
+          enrollment={callDialog.e}
+          event={selectedEvent}
+          cycle={callFb.cycle}
+          feedbacks={feedbacks}
+          current={callFb.stateOf(callDialog.e) ?? { kind: 'not_called_yet' }}
+          now={now}
+          onRecorded={(day, rec) => callFb.setRecorded(callDialog.e.id, day, rec)}
+          onClose={() => setCallDialog(null)}
+          onCall={() => dial(callDialog.e)}
+          onPick={() => setCallDialog({ kind: 'picker', e: callDialog.e })}
         />
       )}
 

@@ -26,7 +26,7 @@ import LiveChat from '@/components/online/LiveChat';
 import ChildQuestionCard from '@/components/online/ChildQuestionCard';
 import { useChild } from '@/lib/child-context';
 import { createClient } from '@/lib/supabase/client';
-import { uniqueTopic } from '@/lib/realtime';
+import { LIVE_POLL_MS } from '@/lib/realtime';
 import {
   fetchChildOnlineClass, joinChildOnlineClass, heartbeatChildOnlineClass, leaveChildOnlineClass,
   respondChildCheck, answerChildLiveQuestion, fetchChildRoomMessages, sendChildRoomMessage, childErrorMessage,
@@ -35,7 +35,9 @@ import {
 import { fmtPercent, type RoomMessage } from '@/lib/online-classes';
 
 const HEARTBEAT_MS = 30_000;
-const POLL_MS = 10_000;
+// 20261011120000: the heartbeat (30 s) is what the attendance rule counts —
+// it stays. The data poll runs only while the class is LIVE and the tab is
+// visible (LIVE_POLL_MS.liveRoom); 2 RPCs per tick.
 
 export default function ChildOnlineRoomPage() {
   return (
@@ -174,29 +176,37 @@ function Room() {
 
   useEffect(() => { loadMessages(); }, [loadMessages]);
 
-  // ---------- realtime ----------
+  // ---------- keeping the room fresh ----------
+  // 20261016120000: the child portal has no auth session, so it cannot
+  // join the private broadcast topics, and the `postgres_changes`
+  // publication is now empty (it cost a continuously-polled subscription
+  // per open room). The room therefore refreshes itself:
+  //   • every LIVE_POLL_MS.liveRoom while the class is LIVE and the tab is
+  //     visible (checks · questions · chat) — the heartbeat (30 s) already
+  //     carries the class state as well,
+  //   • every LIVE_POLL_MS.signup while the class is SCHEDULED so the child
+  //     sees it start (the teacher's «ابدأ» flips status → live),
+  //   • once whenever the tab comes back to the foreground,
+  //   • nothing when the class has ended.
   useEffect(() => {
-    if (!id) return;
-    const channel = supabase
-      .channel(uniqueTopic(`child-room-${id}`))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'online_class_checks', filter: `class_id=eq.${id}` }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'online_class_questions', filter: `class_id=eq.${id}` }, () => load())
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'online_classes', filter: `id=eq.${id}` }, () => { load(); reloadOnline(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'online_class_messages', filter: `class_id=eq.${id}` }, () => loadMessages())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [supabase, id, load, loadMessages, reloadOnline]);
-
-  // 1 s clock (countdowns) + fallback poll while live
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(new Date()), 1000);
+    const t = window.setInterval(() => setNow(new Date()), 1000); // 1 s clock (countdowns)
     return () => window.clearInterval(t);
   }, []);
+  const status = cls?.status;
   useEffect(() => {
-    if (cls?.status !== 'live') return;
-    const t = window.setInterval(() => { load(); loadMessages(); }, POLL_MS);
-    return () => window.clearInterval(t);
-  }, [cls?.status, load, loadMessages]);
+    if (!id || !status || status === 'ended') return;
+    const live = status === 'live';
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      load();
+      if (live) loadMessages();
+    };
+    const every = live ? LIVE_POLL_MS.liveRoom : LIVE_POLL_MS.signup;
+    const t = window.setInterval(tick, every);
+    const onVis = () => { if (document.visibilityState === 'visible') { load(); if (live) loadMessages(); reloadOnline(); } };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, [id, status, load, loadMessages, reloadOnline]);
 
   // ---------- actions ----------
   const respond = useCallback(async (checkId: string) => {

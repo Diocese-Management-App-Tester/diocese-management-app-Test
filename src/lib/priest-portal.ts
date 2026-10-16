@@ -166,7 +166,9 @@ const ERRORS: Record<string, string> = {
   invalid_code: 'الكود غير صالح',
   wrong_password: 'كلمة المرور غير صحيحة',
   weak_password: 'كلمة المرور قصيرة — 6 أحرف على الأقل',
-  already_registered: 'هذا الكود له حساب كاهن بالفعل — سجّل الدخول به',
+  already_registered: 'هذا الكود له حساب كاهن بالفعل — سجّل الدخول به (لكل كاهن حساب كاهن واحد فقط)',
+  invite_required: 'التسجيل بالدعوة فقط — افتح رابط الدعوة الذي أرسله مالك التطبيق',
+  invite_invalid: 'رابط الدعوة غير صالح أو انتهت صلاحيته — اطلب رابطًا جديدًا',
   pending_exists: 'يوجد طلب قيد المراجعة بالفعل',
   code_required: 'الكود مطلوب',
   name_required: 'الاسم مطلوب',
@@ -175,6 +177,7 @@ const ERRORS: Record<string, string> = {
   person_not_found: 'لا يوجد شخص بهذا الكود',
   already_member: 'هذا الشخص من المعترفين لديك بالفعل',
   code_taken: 'هذا الكود مستخدم لعائلة — اختر كودًا آخر',
+  code_is_family: 'هذا الكود كود عائلة — لا يمكن استخدامه لشخص',
   future_date: 'لا يمكن تسجيل اعتراف بتاريخ مستقبلي',
   past_date: 'اختر تاريخًا من اليوم فصاعدًا',
   date_required: 'اختر التاريخ',
@@ -213,7 +216,11 @@ export async function priestChangePassword(supabase: SupabaseClient, token: stri
 }
 
 // ---------- Signup ----------
-export interface PriestSignupLookup { exists: boolean; is_priest: boolean; pending: boolean; name: string | null }
+export interface PriestSignupLookup {
+  exists: boolean; is_priest: boolean; pending: boolean; name: string | null;
+  /** 20261003120000: the other accounts of the person behind the code */
+  is_servant?: boolean; is_child?: boolean; has_password?: boolean; family?: boolean;
+}
 export async function priestSignupLookupCode(supabase: SupabaseClient, code: string): Promise<PriestSignupLookup> {
   const { data, error } = await supabase.rpc('priest_signup_lookup_code', { p_code: code.trim() });
   if (error) throw error;
@@ -223,10 +230,12 @@ export interface PriestSignupInput {
   code: string; name: string; password: string; church_id: string; title: string | null;
   gender: Gender | null; birthdate: string | null; phone: string | null; address: string | null; notes: string | null; image_url: string | null;
 }
-export async function priestSignup(supabase: SupabaseClient, i: PriestSignupInput) {
+/** 20261004120000: invite-only — the ?invite token that opened the wizard is consumed by the RPC */
+export async function priestSignup(supabase: SupabaseClient, i: PriestSignupInput & { invite: string }) {
   const { data, error } = await supabase.rpc('priest_signup', {
     p_code: i.code.trim(), p_name: i.name.trim(), p_password: i.password, p_church: i.church_id, p_title: i.title,
     p_gender: i.gender, p_birthdate: i.birthdate, p_phone: i.phone, p_address: i.address, p_notes: i.notes, p_image_url: i.image_url,
+    p_invite: i.invite,
   });
   if (error) throw error;
   return data as { request_id: string; code: string };
@@ -386,8 +395,12 @@ export async function fetchOwnerPriests(supabase: SupabaseClient): Promise<Owner
   if (error) throw error;
   return (data ?? []) as OwnerPriest[];
 }
+/** the columns the owner may read — `password_hash` is NOT granted, so a
+ *  `select('*')` fails with «permission denied» and the list looked empty */
+export const PRIEST_REQUEST_COLUMNS =
+  'id, code, name, title, gender, birthdate, phone, address, notes, image_url, church_id, status, decision_note, decided_by, decided_at, priest_id, created_at';
 export async function fetchPriestRequests(supabase: SupabaseClient): Promise<PriestRequest[]> {
-  const { data, error } = await supabase.from('priest_requests').select('*').order('created_at', { ascending: false });
+  const { data, error } = await supabase.from('priest_requests').select(PRIEST_REQUEST_COLUMNS).order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as PriestRequest[];
 }

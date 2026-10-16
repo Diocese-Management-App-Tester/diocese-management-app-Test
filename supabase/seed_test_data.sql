@@ -608,18 +608,47 @@ union all
 select 'a0000000-0000-4000-8000-000000000006'::uuid, e.id, now() - interval '30 days' from kids e where right(e.id::text, 2)::int in (24, 25);
 
 -- ---------------------------------------------------------------------
--- 15. المتجر — items · orders (completed + cancelled) with real points flow
+-- 15. المتجر — the SHOP is the container (20261002120000): every item, sale,
+--     request and bill belongs to a shop.
+--   shop 1 «كانتين مدارس الأحد» — ACTIVE, shown to the whole مدارس الأحد service
+--     AND the ثانوي class of the other service (multi-target)
+--   shop 2 «مكتبة الكنيسة» — INACTIVE (hidden from the child portal), إعدادي only
+--   shop 3 «كانتين إعدادي» — ACTIVE, one class (the class servant's own shop)
+--   shop 4 «كانتين مارجرجس» — ACTIVE, church 2
 -- ---------------------------------------------------------------------
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000002'); end $$;
+insert into public.store_shops (id, church_id, name, description, image_url, is_active, sort_order, created_by, edited_by, created_at) values
+  ('d9000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'كانتين مدارس الأحد', 'أدوات مدرسية وستيكرات — استبدل نقاطك من موبايلك', null, true,  1, 'a0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002', now() - interval '20 days'),
+  ('d9000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000001', 'مكتبة الكنيسة',      'كتب وقصص — قيد التجهيز (غير مفعّل)',                null, false, 2, 'a0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000002', now() - interval '5 days');
 do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000004'); end $$;
-insert into public.store_items (id, church_id, service_id, class_id, code, name, description, image_url, price, stock, is_active, sort_order, created_by) values
-  ('d5000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', null, null, 'PEN01',  'قلم ألوان',        'علبة 12 لون',            null, 15, 40, true, 1, 'a0000000-0000-4000-8000-000000000002'),
-  ('d5000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000001', null, null, 'NB01',   'كشكول رسم',        'كشكول A4 — 40 ورقة',     null, 20, 25, true, 2, 'a0000000-0000-4000-8000-000000000002'),
-  ('d5000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000001', null, null, 'STK01',  'ستيكرات قديسين',   'ورقة ستيكرات',           null, 5,  200, true, 3, 'a0000000-0000-4000-8000-000000000002'),
-  ('d5000000-0000-4000-8000-000000000004', 'a1000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', null, 'BOOK01', 'كتاب قصص الكتاب المقدس', 'قصص مصورة للأطفال', null, 60, 10, true, 4, 'a0000000-0000-4000-8000-000000000003'),
-  ('d5000000-0000-4000-8000-000000000005', 'a1000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', 'a3000000-0000-4000-8000-000000000002', 'CUP01', 'كوب إعدادي', 'كوب بشعار الفصل', null, 45, 8, true, 5, 'a0000000-0000-4000-8000-000000000004'),
-  ('d5000000-0000-4000-8000-000000000006', 'a1000000-0000-4000-8000-000000000001', null, null, 'BAG01',  'شنطة ظهر',         'الجائزة الكبرى',         null, 250, 2, true, 6, 'a0000000-0000-4000-8000-000000000002'),
-  ('d5000000-0000-4000-8000-000000000007', 'a1000000-0000-4000-8000-000000000001', null, null, 'OLD01',  'صنف قديم (موقوف)', 'مثال صنف غير مفعّل',     null, 10, 0,  false, 9, 'a0000000-0000-4000-8000-000000000002'),
-  ('d5000000-0000-4000-8000-000000000008', 'a1000000-0000-4000-8000-000000000002', null, null, 'PEN01',  'قلم ألوان',        'علبة 12 لون',            null, 15, 20, true, 1, 'a0000000-0000-4000-8000-000000000006');
+insert into public.store_shops (id, church_id, name, description, image_url, is_active, sort_order, created_by, edited_by, created_at) values
+  ('d9000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000001', 'كانتين إعدادي',      'أكواب وهدايا الفصل',                                null, true,  3, 'a0000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000004', now() - interval '12 days');
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000006'); end $$;
+insert into public.store_shops (id, church_id, name, description, image_url, is_active, sort_order, created_by, edited_by, created_at) values
+  ('d9000000-0000-4000-8000-000000000004', 'a1000000-0000-4000-8000-000000000002', 'كانتين مارجرجس',     'متجر الكنيسة',                                      null, true,  1, 'a0000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000006', now() - interval '15 days');
+
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000002'); end $$;
+insert into public.store_shop_targets (shop_id, church_id, service_id, class_id) values
+  ('d9000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', null),
+  ('d9000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000002', 'a3000000-0000-4000-8000-000000000004'),
+  ('d9000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', 'a3000000-0000-4000-8000-000000000002'),
+  ('d9000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000001', 'a2000000-0000-4000-8000-000000000001', 'a3000000-0000-4000-8000-000000000002');
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000006'); end $$;
+insert into public.store_shop_targets (shop_id, church_id, service_id, class_id) values
+  ('d9000000-0000-4000-8000-000000000004', 'a1000000-0000-4000-8000-000000000002', null, null);
+
+-- items — inside their shops (the trigger copies church_id from the shop)
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000002'); end $$;
+insert into public.store_items (id, church_id, shop_id, code, name, description, image_url, price, stock, is_active, sort_order, created_by) values
+  ('d5000000-0000-4000-8000-000000000001', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000001', 'PEN01',  'قلم ألوان',        'علبة 12 لون',            null, 15, 40, true, 1, 'a0000000-0000-4000-8000-000000000002'),
+  ('d5000000-0000-4000-8000-000000000002', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000001', 'NB01',   'كشكول رسم',        'كشكول A4 — 40 ورقة',     null, 20, 25, true, 2, 'a0000000-0000-4000-8000-000000000002'),
+  ('d5000000-0000-4000-8000-000000000003', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000001', 'STK01',  'ستيكرات قديسين',   'ورقة ستيكرات',           null, 5,  200, true, 3, 'a0000000-0000-4000-8000-000000000002'),
+  ('d5000000-0000-4000-8000-000000000004', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000002', 'BOOK01', 'كتاب قصص الكتاب المقدس', 'قصص مصورة للأطفال', null, 60, 10, true, 4, 'a0000000-0000-4000-8000-000000000003'),
+  ('d5000000-0000-4000-8000-000000000005', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000003', 'CUP01',  'كوب إعدادي',       'كوب بشعار الفصل',        null, 45, 8, true, 5, 'a0000000-0000-4000-8000-000000000004'),
+  ('d5000000-0000-4000-8000-000000000006', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000001', 'BAG01',  'شنطة ظهر',         'الجائزة الكبرى',         null, 250, 2, true, 6, 'a0000000-0000-4000-8000-000000000002'),
+  ('d5000000-0000-4000-8000-000000000007', 'a1000000-0000-4000-8000-000000000001', 'd9000000-0000-4000-8000-000000000001', 'OLD01',  'صنف قديم (موقوف)', 'مثال صنف غير مفعّل',     null, 10, 0,  false, 9, 'a0000000-0000-4000-8000-000000000002'),
+  ('d5000000-0000-4000-8000-000000000008', 'a1000000-0000-4000-8000-000000000002', 'd9000000-0000-4000-8000-000000000004', 'PEN01',  'قلم ألوان',        'علبة 12 لون',            null, 15, 20, true, 1, 'a0000000-0000-4000-8000-000000000006');
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000004'); end $$;
 
 -- helper: a completed order (redeem points → order + lines); p_lines = [[item_id, qty], ...]
 create or replace function pg_temp.seed_order(p_id uuid, p_enrollment uuid, p_lines jsonb, p_by uuid, p_when timestamptz, p_note text default null, p_cancel_by uuid default null)
@@ -628,8 +657,9 @@ declare e public.enrollments; it public.store_items; ln jsonb; v_total int := 0;
 begin
   select * into e from public.enrollments where id = p_enrollment;
   v_before := e.points;
-  insert into public.store_orders (id, enrollment_id, person_id, church_id, service_id, class_id, status, balance_before, balance_after, note, recorded_by, created_at)
-  values (p_id, e.id, e.person_id, e.church_id, e.service_id, e.class_id, 'completed', v_before, v_before, p_note, p_by, p_when);
+  insert into public.store_orders (id, enrollment_id, person_id, church_id, service_id, class_id, status, balance_before, balance_after, note, recorded_by, created_at, shop_id)
+  values (p_id, e.id, e.person_id, e.church_id, e.service_id, e.class_id, 'completed', v_before, v_before, p_note, p_by, p_when,
+          (select shop_id from public.store_items where id = (p_lines->0->>0)::uuid));
   for ln in select * from jsonb_array_elements(p_lines) loop
     select * into it from public.store_items where id = (ln->>0)::uuid;
     update public.store_items set stock = stock - (ln->>1)::int where id = it.id;
@@ -654,6 +684,59 @@ do $$ begin
   perform pg_temp.seed_order('d6000000-0000-4000-8000-000000000004', 'b2000000-0000-4000-8000-000000000014', '[["d5000000-0000-4000-8000-000000000005", 1], ["d5000000-0000-4000-8000-000000000003", 2]]', 'a0000000-0000-4000-8000-000000000004', now() - interval '2 hours');
   perform pg_temp.seed_order('d6000000-0000-4000-8000-000000000005', 'b2000000-0000-4000-8000-000000000024', '[["d5000000-0000-4000-8000-000000000008", 1]]', 'a0000000-0000-4000-8000-000000000006', now() - interval '3 days');
 end $$;
+
+-- ---------- child purchase requests (20261001120000) ----------
+-- helper: a child request (sent from the portal) — p_lines = [[item_id, qty], ...]
+--   p_status: pending | approved (→ real order via seed_order, source 'request') | rejected | cancelled
+create or replace function pg_temp.seed_request(p_id uuid, p_shop uuid, p_enrollment uuid, p_lines jsonb, p_when timestamptz,
+                                                p_status text default 'pending', p_by uuid default null, p_note text default null, p_decision text default null)
+returns void language plpgsql as $$
+declare e public.enrollments; it public.store_items; ln jsonb; v_total int := 0; v_count int := 0; v_order uuid; v_servant text;
+begin
+  select * into e from public.enrollments where id = p_enrollment;
+  v_servant := current_setting('request.jwt.claim.sub', true);
+  -- the child sends the request from the portal (no auth) → the activity log shows him as actor
+  perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config('app.child_actor', e.person_id::text, true);
+  insert into public.store_requests (id, shop_id, enrollment_id, person_id, church_id, service_id, class_id, status, balance_at_request, note, created_at)
+  values (p_id, p_shop, e.id, e.person_id, e.church_id, e.service_id, e.class_id, 'pending', e.points, p_note, p_when);
+  for ln in select * from jsonb_array_elements(p_lines) loop
+    select * into it from public.store_items where id = (ln->>0)::uuid;
+    insert into public.store_request_items (request_id, item_id, item_code, item_name, image_url, unit_price, qty, line_total)
+    values (p_id, it.id, it.code, it.name, it.image_url, it.price, (ln->>1)::int, it.price * (ln->>1)::int);
+    v_total := v_total + it.price * (ln->>1)::int; v_count := v_count + (ln->>1)::int;
+  end loop;
+  update public.store_requests set items_count = v_count, total_points = v_total where id = p_id;
+  perform set_config('app.child_actor', '', true);
+  perform set_config('request.jwt.claim.sub', v_servant, true);
+  if p_status = 'approved' then
+    v_order := replace(p_id::text, 'd9000000', 'd6000000')::uuid;
+    perform pg_temp.seed_order(v_order, p_enrollment, p_lines, p_by, p_when + interval '2 hours', p_note);
+    update public.store_orders set shop_id = p_shop, request_id = p_id, source = 'request' where id = v_order;
+    update public.store_requests set status = 'approved', order_id = v_order, decided_by = p_by, decided_at = p_when + interval '2 hours' where id = p_id;
+  elsif p_status = 'rejected' then
+    update public.store_requests set status = 'rejected', decision_note = p_decision, decided_by = p_by, decided_at = p_when + interval '1 hour' where id = p_id;
+  elsif p_status = 'cancelled' then
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('app.child_actor', e.person_id::text, true);
+    update public.store_requests set status = 'cancelled', decided_at = p_when + interval '30 minutes' where id = p_id;
+    perform set_config('app.child_actor', '', true);
+    perform set_config('request.jwt.claim.sub', v_servant, true);
+  end if;
+end $$;
+
+do $$ begin
+  -- waiting for the servant (الطلبات tab badge = 2)
+  perform pg_temp.seed_request('d9000000-0000-4000-8000-000000000011', 'd9000000-0000-4000-8000-000000000001', 'b2000000-0000-4000-8000-000000000001', '[["d5000000-0000-4000-8000-000000000001", 1], ["d5000000-0000-4000-8000-000000000003", 2]]', now() - interval '25 minutes', 'pending', null, 'ممكن أستلمها يوم الجمعة؟');
+  perform pg_temp.seed_request('d9000000-0000-4000-8000-000000000012', 'd9000000-0000-4000-8000-000000000001', 'b2000000-0000-4000-8000-000000000009', '[["d5000000-0000-4000-8000-000000000002", 1]]', now() - interval '3 hours');
+  -- approved after scanning the card → order d6…13 (source = request) + receipt in the child portal
+  perform pg_temp.seed_request('d9000000-0000-4000-8000-000000000013', 'd9000000-0000-4000-8000-000000000001', 'b2000000-0000-4000-8000-000000000003', '[["d5000000-0000-4000-8000-000000000003", 4]]', now() - interval '2 days', 'approved', 'a0000000-0000-4000-8000-000000000005');
+  -- rejected with a reason
+  perform pg_temp.seed_request('d9000000-0000-4000-8000-000000000014', 'd9000000-0000-4000-8000-000000000001', 'b2000000-0000-4000-8000-000000000010', '[["d5000000-0000-4000-8000-000000000006", 1]]', now() - interval '6 days', 'rejected', 'a0000000-0000-4000-8000-000000000004', null, 'الشنطة محجوزة لجائزة نهاية السنة');
+  -- cancelled by the child himself
+  perform pg_temp.seed_request('d9000000-0000-4000-8000-000000000015', 'd9000000-0000-4000-8000-000000000001', 'b2000000-0000-4000-8000-000000000021', '[["d5000000-0000-4000-8000-000000000001", 2]]', now() - interval '1 day', 'cancelled');
+end $$;
+do $$ begin perform pg_temp.act('a0000000-0000-4000-8000-000000000004'); end $$;
 
 -- ---------------------------------------------------------------------
 -- 16. الامتحانات الإلكترونية (exams) — published · draft · closed + attempts

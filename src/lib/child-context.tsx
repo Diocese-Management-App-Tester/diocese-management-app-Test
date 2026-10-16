@@ -8,28 +8,30 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode,
 } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { onAppResume } from '@/lib/realtime';
 import {
   clearChildToken, fetchChildProfile, getChildToken, setChildToken,
-  childLogin, childLogout, childSessionTouch,
+  childLogin, childLogout, fetchChildBootstrap,
   childErrorMessage, fetchChildExams, fetchChildOnlineClasses, type ChildProfile, type ChildExam, type ChildOnlineClass,
+  fetchChildShops, fetchChildStoreRequests, type ChildShop, type ChildStoreRequest,
 } from '@/lib/child-portal';
 import { fetchChildChatOverview, type ChildChatOverview } from '@/lib/chat';
 import { fetchChildAchievements, type ChildAchievements } from '@/lib/achievements';
 import { fetchChildOccasions, type ChildOccasion } from '@/lib/occasions';
 import { fetchChildNotifications, type InboxItem } from '@/lib/notifications';
 import { fetchChildLibrary, setChildFavorite, type ChildLibrary } from '@/lib/library';
-import { uniqueTopic } from '@/lib/realtime';
 
 /**
  * 0046 — the child portal has no auth session, so it cannot join the private
- * broadcast topics that replaced `postgres_changes` on the hot tables. A
- * light poll while the tab is visible (default 45 s) keeps those screens
- * current; every block still refreshes instantly on focus. Returns stop().
+ * broadcast topics that replaced `postgres_changes` on the hot tables.
+ *
+ * 20261011120000 — NO background polling any more. Every poll was one API
+ * request on the Supabase «Logs Ingest» meter (free plan ≈ 1 GB / month) and
+ * portal tabs left open were the single biggest consumer. Every block below
+ * refreshes on hidden→visible (and the pages have their own reload buttons);
+ * web push stays the instant path for notifications. The only timers in the
+ * portal are inside a LIVE screen (open chat thread / live class room).
  */
-function startChildPoll(fn: () => void, everyMs = 45_000): () => void {
-  const t = setInterval(() => { if (document.visibilityState === 'visible') fn(); }, everyMs);
-  return () => clearInterval(t);
-}
 
 interface ChildState {
   token: string | null;
@@ -67,6 +69,10 @@ interface ChildState {
   library: ChildLibrary | null;
   reloadLibrary: () => void;
   toggleLibraryFavorite: (kind: 'book' | 'lecture', id: string) => Promise<void>;
+  /** store shops (20261001120000): the ACTIVE shops connected to my places + my purchase requests — realtime on store_shops / targets, poll for requests */
+  shops: ChildShop[] | null;
+  storeRequests: ChildStoreRequest[] | null;
+  reloadShops: () => void;
 }
 
 const ChildContext = createContext<ChildState>({
@@ -92,6 +98,9 @@ const ChildContext = createContext<ChildState>({
   library: null,
   reloadLibrary: () => {},
   toggleLibraryFavorite: async () => {},
+  shops: null,
+  storeRequests: null,
+  reloadShops: () => {},
 });
 
 export function ChildProvider({ children }: { children: ReactNode }) {
@@ -101,68 +110,123 @@ export function ChildProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (t: string) => {
-      try {
-        const p = await fetchChildProfile(supabase, t);
-        setProfile(p);
-        setError(null);
-      } catch (e) {
-        const raw = ((e as { message?: string } | null)?.message ?? '');
-        const msg = childErrorMessage(e);
-        // an expired session / unknown or deleted code should log the child out
-        if (
-          raw.includes('session_expired') || raw.includes('unknown_code') || raw.includes('invalid_code') ||
-          msg.includes('غير مسجل') || msg.includes('غير صالح')
-        ) {
-          clearChildToken();
-          setToken(null);
-          setProfile(null);
-        }
-        setError(msg);
-      }
-    },
-    [supabase]
-  );
+  // ---- module blocks (shared by every portal page) ----
+  const [exams, setExams] = useState<ChildExam[] | null>(null);
+  const [conversations, setConversations] = useState<ChildChatOverview[] | null>(null);
+  const [onlineClasses, setOnlineClasses] = useState<ChildOnlineClass[] | null>(null);
+  const [achievements, setAchievements] = useState<ChildAchievements | null>(null);
+  const [occasions, setOccasions] = useState<ChildOccasion[] | null>(null);
+  const [notifications, setNotifications] = useState<InboxItem[] | null>(null);
+  const [library, setLibrary] = useState<ChildLibrary | null>(null);
+  const [shops, setShops] = useState<ChildShop[] | null>(null);
+  const [storeRequests, setStoreRequests] = useState<ChildStoreRequest[] | null>(null);
 
-  // boot: read token from storage, validate/extend the session, then load
+  const clearBlocks = () => {
+    setExams(null); setConversations(null); setOnlineClasses(null); setAchievements(null); setOccasions(null);
+    setNotifications(null); setLibrary(null); setShops(null); setStoreRequests(null);
+  };
+
+  /** session expired / code gone → log the child out */
+  const isFatal = (e: unknown) => {
+    const raw = ((e as { message?: string } | null)?.message ?? '');
+    const msg = childErrorMessage(e);
+    return raw.includes('session_expired') || raw.includes('unknown_code') || raw.includes('invalid_code') || raw.includes('account_stopped')
+      || msg.includes('غير مسجل') || msg.includes('غير صالح');
+  };
+  const dropSession = useCallback((e?: unknown) => {
+    clearChildToken();
+    setToken(null);
+    setProfile(null);
+    clearBlocks();
+    if (e !== undefined) setError(childErrorMessage(e));
+  }, []);
+
+  /**
+   * 20261015120000 — ONE request opens the portal. `child_portal_bootstrap`
+   * touches the session and returns the profile + every module block; a
+   * block that fails on the server (module not granted / migration missing)
+   * arrives as null and is shown empty. Before: 10 RPCs on open and 10 more
+   * on every tab focus — the «every open» cost of the «Logs Ingest» meter.
+   * When the RPC itself is missing we fall back to the separate fetches.
+   */
+  const loadAll = useCallback(async (t: string) => {
+    try {
+      const b = await fetchChildBootstrap(supabase, t);
+      if (b) {
+        setProfile(b.profile);
+        setExams(b.exams ?? []);
+        setConversations(b.conversations ?? []);
+        setOnlineClasses(b.online_classes ?? []);
+        setAchievements(b.achievements ?? { earned: [], progress: [] });
+        setOccasions(b.occasions ?? []);
+        setNotifications(b.notifications ?? []);
+        setLibrary(b.library ?? { subjects: [], books: [], lectures: [], favorites: [] });
+        setShops(b.shops ?? []);
+        setStoreRequests(b.store_requests ?? []);
+        setError(null);
+        return;
+      }
+      // fallback: RPC not deployed yet → the old separate calls
+      const p = await fetchChildProfile(supabase, t);
+      setProfile(p);
+      setError(null);
+      const settle = <T,>(pr: Promise<T>, empty: T) => pr.catch(() => empty);
+      const [ex, cv, oc, ac, occ, nt, lb, sh, sr] = await Promise.all([
+        settle(fetchChildExams(supabase, t), [] as ChildExam[]),
+        settle(fetchChildChatOverview(supabase, t), [] as ChildChatOverview[]),
+        settle(fetchChildOnlineClasses(supabase, t), [] as ChildOnlineClass[]),
+        settle(fetchChildAchievements(supabase, t), { earned: [], progress: [] } as ChildAchievements),
+        settle(fetchChildOccasions(supabase, t), [] as ChildOccasion[]),
+        settle(fetchChildNotifications(supabase, t, 80), [] as InboxItem[]),
+        settle(fetchChildLibrary(supabase, t), { subjects: [], books: [], lectures: [], favorites: [] } as ChildLibrary),
+        settle(fetchChildShops(supabase, t), [] as ChildShop[]),
+        settle(fetchChildStoreRequests(supabase, t), [] as ChildStoreRequest[]),
+      ]);
+      setExams(ex); setConversations(cv); setOnlineClasses(oc); setAchievements(ac); setOccasions(occ);
+      setNotifications(nt); setLibrary(lb); setShops(sh); setStoreRequests(sr);
+    } catch (e) {
+      if (isFatal(e)) dropSession(e); else setError(childErrorMessage(e));
+    }
+  }, [supabase, dropSession]);
+
+  // boot: read the token, then ONE bootstrap call (it also extends the session)
   useEffect(() => {
     const t = getChildToken();
     setToken(t);
     if (!t) { setLoading(false); return; }
     (async () => {
-      try {
-        await childSessionTouch(supabase, t);
-      } catch (e) {
-        const raw = ((e as { message?: string } | null)?.message ?? '');
-        if (raw.includes('session_expired') || raw.includes('invalid_code')) {
-          clearChildToken();
-          setToken(null);
-          setProfile(null);
-          setError(childErrorMessage(e));
-          setLoading(false);
-          return;
-        }
-        // network hiccup → still try the profile (offline cache friendly)
-      }
-      await load(t);
+      await loadAll(t);
       setLoading(false);
     })();
-  }, [load, supabase]);
+  }, [loadAll]);
 
-  // keep a «remember me» session alive when the tab comes back
+  // tab back → one bootstrap call (session touch + every block). No timers:
+  // the portal never polls in the background (20261011120000).
+  // 20261017120000: through the resume gate — only after ≥ 2 min hidden or
+  // on «تحديث»; a glance at another app and back costs nothing.
   useEffect(() => {
     if (!token) return;
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') childSessionTouch(supabase, token).catch(() => {});
+    return onAppResume(() => { void loadAll(token); });
+  }, [token, loadAll]);
+
+  // service worker «push arrived» → refresh the inbox only
+  useEffect(() => {
+    if (!token) return;
+    const hasSw = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
+    if (!hasSw) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onSw = (e: MessageEvent) => {
+      if (e.data?.type !== 'push') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { fetchChildNotifications(supabase, token, 80).then(setNotifications).catch(() => {}); }, 700);
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    navigator.serviceWorker.addEventListener('message', onSw);
+    return () => { if (timer) clearTimeout(timer); navigator.serviceWorker.removeEventListener('message', onSw); };
   }, [token, supabase]);
 
   const refresh = useCallback(async () => {
-    if (token) await load(token);
-  }, [token, load]);
+    if (token) await loadAll(token);
+  }, [token, loadAll]);
 
   const login = useCallback(
     async (code: string, password: string, remember = false): Promise<string | null> => {
@@ -171,242 +235,38 @@ export function ChildProvider({ children }: { children: ReactNode }) {
       if (!password) return 'أدخل كلمة المرور';
       try {
         const r = await childLogin(supabase, clean, password, remember);
-        const p = await fetchChildProfile(supabase, r.token);
         setChildToken(r.token, remember);
         setToken(r.token);
-        setProfile(p);
-        setError(null);
+        await loadAll(r.token);
         return null;
       } catch (e) {
         return childErrorMessage(e);
       }
     },
-    [supabase]
+    [supabase, loadAll]
   );
 
   const logout = useCallback(() => {
     const t = getChildToken();
     if (t) childLogout(supabase, t).catch(() => {});
-    clearChildToken();
-    setToken(null);
-    setProfile(null);
+    dropSession();
     setError(null);
-  }, [supabase]);
+  }, [supabase, dropSession]);
 
-  // Realtime: counters / photo / data change for this person's enrollments
-  // (anon can subscribe; RLS on realtime may hide payloads — we only use it
-  // as a trigger to refetch via the RPC, so an empty payload is fine).
-  useEffect(() => {
-    if (!token || !profile) return;
-    const ids = profile.enrollments.map((e) => e.id);
-    if (ids.length === 0) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const schedule = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => load(token), 1200);
-    };
-    // 0046: enrollments / persons left the postgres_changes publication (per
-    // subscriber RLS work was saturating the DB on scan days). The portal
-    // has no auth session so it cannot join the private broadcast topics →
-    // a light poll while visible + refresh on focus keeps it current.
-    const poll = startChildPoll(schedule);
-    // also refresh when the tab becomes visible again
-    const onVis = () => { if (document.visibilityState === 'visible') schedule(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      if (timer) clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVis);
-      poll();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, profile?.person.id, supabase, load]);
-
-  // ---- modules: exams (0027) — one fetch for the whole portal, refetch on focus
-  const [exams, setExams] = useState<ChildExam[] | null>(null);
-  useEffect(() => {
-    if (!token) { setExams(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildExams(supabase, token)
-      .then((r) => { if (!cancelled) setExams(r); })
-      .catch(() => { if (!cancelled) setExams([]); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); };
-  }, [token, supabase]);
-
-  // ---- modules: messages (0029) — one fetch + ONE realtime subscription.
-  // Before, header + side menu + home page each opened `child-msgs-<token>`;
-  // the shared browser client returned the same (already subscribed) channel
-  // and `.on()` threw → the portal crashed on open.
-  const [conversations, setConversations] = useState<ChildChatOverview[] | null>(null);
-  const [msgTick, setMsgTick] = useState(0);
-  const reloadMessages = useCallback(() => setMsgTick((t) => t + 1), []);
-  useEffect(() => {
-    if (!token) { setConversations(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildChatOverview(supabase, token)
-      .then((r) => { if (!cancelled) setConversations(r); })
-      .catch(() => { if (!cancelled) setConversations([]); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    // 0046: chat_messages is broadcast-only now → poll while visible
-    const poll = startChildPoll(run, 30_000);
-    return () => {
-      cancelled = true;
-      document.removeEventListener('visibilitychange', onVis);
-      poll();
-    };
-  }, [token, supabase, msgTick]);
-
-  // ---- modules: online classes (0030) — one fetch + one realtime subscription
-  // on online_classes (status flips scheduled → live → ended), refetch on focus.
-  const [onlineClasses, setOnlineClasses] = useState<ChildOnlineClass[] | null>(null);
-  const [onlineTick, setOnlineTick] = useState(0);
-  const reloadOnline = useCallback(() => setOnlineTick((t) => t + 1), []);
-  useEffect(() => {
-    if (!token) { setOnlineClasses(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildOnlineClasses(supabase, token)
-      .then((r) => { if (!cancelled) setOnlineClasses(r); })
-      .catch(() => { if (!cancelled) setOnlineClasses([]); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const channel = supabase.channel(uniqueTopic('child-online'));
-    try {
-      channel
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'online_classes' }, () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(run, 600);
-        })
-        .subscribe();
-    } catch { /* realtime unavailable → polling on focus only */ }
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVis);
-      supabase.removeChannel(channel);
-    };
-  }, [token, supabase, onlineTick]);
-
-  // ---- modules: achievements (0031) — one fetch + realtime on user_achievements
-  const [achievements, setAchievements] = useState<ChildAchievements | null>(null);
-  const [achTick, setAchTick] = useState(0);
-  const reloadAchievements = useCallback(() => setAchTick((t) => t + 1), []);
-  useEffect(() => {
-    if (!token) { setAchievements(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildAchievements(supabase, token)
-      .then((r) => { if (!cancelled) setAchievements(r); })
-      .catch(() => { if (!cancelled) setAchievements({ earned: [], progress: [] }); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    // 0046: user_achievements / attendance_log are broadcast-only → poll
-    const poll = startChildPoll(run);
-    return () => {
-      cancelled = true;
-      document.removeEventListener('visibilitychange', onVis);
-      poll();
-    };
-  }, [token, supabase, achTick]);
-
-  // ---- modules: occasions (0032) — one fetch + realtime on occasions / registrations / notifications
-  const [occasions, setOccasions] = useState<ChildOccasion[] | null>(null);
-  const [occTick, setOccTick] = useState(0);
-  const reloadOccasions = useCallback(() => setOccTick((t) => t + 1), []);
-  useEffect(() => {
-    if (!token) { setOccasions(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildOccasions(supabase, token)
-      .then((r) => { if (!cancelled) setOccasions(r); })
-      .catch(() => { if (!cancelled) setOccasions([]); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const bump = () => { if (timer) clearTimeout(timer); timer = setTimeout(run, 800); };
-    const channel = supabase.channel(uniqueTopic('child-occasions'));
-    try {
-      channel
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'occasions' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'occasion_registrations' }, bump)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'occasion_notifications' }, bump)
-        .subscribe();
-    } catch { /* realtime unavailable → polling on focus only */ }
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVis);
-      supabase.removeChannel(channel);
-    };
-  }, [token, supabase, occTick]);
-
-  // ---- modules: notifications (0034) — one fetch + realtime on notification_recipients
-  // + the service worker's «push arrived» message; refetch on focus.
-  const [notifications, setNotifications] = useState<InboxItem[] | null>(null);
-  const [notifTick, setNotifTick] = useState(0);
-  const reloadNotifications = useCallback(() => setNotifTick((t) => t + 1), []);
+  // ---- per-block reloads (after an action on that screen) — one small RPC each ----
+  const reloadMessages = useCallback(() => { if (token) fetchChildChatOverview(supabase, token).then(setConversations).catch(() => {}); }, [supabase, token]);
+  const reloadOnline = useCallback(() => { if (token) fetchChildOnlineClasses(supabase, token).then(setOnlineClasses).catch(() => {}); }, [supabase, token]);
+  const reloadAchievements = useCallback(() => { if (token) fetchChildAchievements(supabase, token).then(setAchievements).catch(() => {}); }, [supabase, token]);
+  const reloadOccasions = useCallback(() => { if (token) fetchChildOccasions(supabase, token).then(setOccasions).catch(() => {}); }, [supabase, token]);
+  const reloadNotifications = useCallback(() => { if (token) fetchChildNotifications(supabase, token, 80).then(setNotifications).catch(() => {}); }, [supabase, token]);
   const patchNotifications = useCallback((fn: (l: InboxItem[]) => InboxItem[]) => setNotifications((l) => (l ? fn(l) : l)), []);
-  useEffect(() => {
-    if (!token) { setNotifications(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildNotifications(supabase, token, 80)
-      .then((r) => { if (!cancelled) setNotifications(r); })
-      .catch(() => { if (!cancelled) setNotifications([]); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const bump = () => { if (timer) clearTimeout(timer); timer = setTimeout(run, 700); };
-    const onSw = (e: MessageEvent) => { if (e.data?.type === 'push') bump(); };
-    const hasSw = typeof navigator !== 'undefined' && 'serviceWorker' in navigator;
-    if (hasSw) navigator.serviceWorker.addEventListener('message', onSw);
-    // 0046: notification_recipients is broadcast-only → web push (service
-    // worker message above) is the instant path; poll as the safety net.
-    const poll = startChildPoll(bump, 60_000);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVis);
-      if (hasSw) navigator.serviceWorker.removeEventListener('message', onSw);
-      poll();
-    };
-  }, [token, supabase, notifTick]);
+  const reloadLibrary = useCallback(() => { if (token) fetchChildLibrary(supabase, token).then(setLibrary).catch(() => {}); }, [supabase, token]);
+  const reloadShops = useCallback(() => {
+    if (!token) return;
+    Promise.all([fetchChildShops(supabase, token), fetchChildStoreRequests(supabase, token)])
+      .then(([s, r]) => { setShops(s); setStoreRequests(r); }).catch(() => {});
+  }, [supabase, token]);
 
-  // ---- modules: library (0039) — one fetch + realtime on library_* ; ⭐ optimistic
-  const [library, setLibrary] = useState<ChildLibrary | null>(null);
-  const [libTick, setLibTick] = useState(0);
-  const reloadLibrary = useCallback(() => setLibTick((t) => t + 1), []);
-  useEffect(() => {
-    if (!token) { setLibrary(null); return; }
-    let cancelled = false;
-    const run = () => fetchChildLibrary(supabase, token)
-      .then((r) => { if (!cancelled) setLibrary(r); })
-      .catch(() => { if (!cancelled) setLibrary({ subjects: [], books: [], lectures: [], favorites: [] }); });
-    run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const bump = () => { if (timer) clearTimeout(timer); timer = setTimeout(run, 800); };
-    const channel = supabase.channel(uniqueTopic('child-library'));
-    try {
-      channel
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'library_subjects' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'library_books' }, bump)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'library_lectures' }, bump)
-        .subscribe();
-    } catch { /* realtime unavailable → polling on focus only */ }
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      document.removeEventListener('visibilitychange', onVis);
-      supabase.removeChannel(channel);
-    };
-  }, [token, supabase, libTick]);
   const toggleLibraryFavorite = useCallback(async (kind: 'book' | 'lecture', id: string) => {
     if (!token || !library) return;
     const on = !library.favorites.some((f) => (kind === 'book' ? f.book_id === id : f.lecture_id === id));
@@ -417,12 +277,12 @@ export function ChildProvider({ children }: { children: ReactNode }) {
         : l.favorites.filter((f) => !(kind === 'book' ? f.book_id === id : f.lecture_id === id)),
     }));
     try { await setChildFavorite(supabase, token, kind === 'book' ? { book_id: id } : { lecture_id: id }, on); }
-    catch { setLibTick((t) => t + 1); }
-  }, [token, library, supabase]);
+    catch { reloadLibrary(); }
+  }, [token, library, supabase, reloadLibrary]);
 
   const value = useMemo(
-    () => ({ token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications, library, reloadLibrary, toggleLibraryFavorite }),
-    [token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications, library, reloadLibrary, toggleLibraryFavorite]
+    () => ({ token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications, library, reloadLibrary, toggleLibraryFavorite, shops, storeRequests, reloadShops }),
+    [token, profile, loading, error, refresh, login, logout, exams, conversations, reloadMessages, onlineClasses, reloadOnline, achievements, reloadAchievements, occasions, reloadOccasions, notifications, reloadNotifications, patchNotifications, library, reloadLibrary, toggleLibraryFavorite, shops, storeRequests, reloadShops]
   );
 
   return <ChildContext.Provider value={value}>{children}</ChildContext.Provider>;

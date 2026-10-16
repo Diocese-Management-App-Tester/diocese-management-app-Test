@@ -16,7 +16,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { useAppDate } from '@/lib/app-date-context';
 import { useCustomization } from '@/lib/customization-context';
-import { useDebouncedRealtime, scopeFilter } from '@/lib/realtime';
+import { useDebouncedRealtime, useBusIds } from '@/lib/realtime';
 import type { AppEvent } from '@/lib/types';
 import { cairoToday, currentOccurrence, previousOccurrenceDate, WEEKDAY_SHORT } from '@/lib/time';
 import { cachedLookup } from '@/lib/queries';
@@ -24,24 +24,67 @@ import { fetchAttendanceTimeline, fetchLeaderboard, shiftDay, type LeaderRow } f
 import { WidgetCard, WidgetEmpty, WidgetSkeleton, Avatar, fmtNum, fmtYmdLong } from './WidgetBits';
 import type { WidgetProps } from './CoreWidgets';
 
-/** Attendance per day for the last `n` days ending today (RLS-scoped). */
+/**
+ * Attendance per day for the last 14 days — ONE shared fetch for every
+ * widget that needs it (trend = 14 bars, streak = last 7).
+ *
+ * 20261016120000: the trend and streak widgets each called the
+ * `stats_attendance_timeline` RPC (6 767 calls / 1.28 s avg in production)
+ * on mount and on every attendance burst → two identical aggregate RPCs
+ * per dashboard open on every device. Now the 14-day result lives in a
+ * module-level store: the first widget to mount loads it, every other one
+ * subscribes; a bus burst reloads it once (60 s rate limit) for all.
+ */
+const DAILY_N = 14;
+type DailyState = { today: string; vals: number[] | null };
+let dailyState: DailyState = { today: '', vals: null };
+let dailyInflight: Promise<void> | null = null;
+let dailyLoadedAt = 0;
+const DAILY_MIN_RELOAD_MS = 30_000; // two widgets × one burst → still ONE RPC
+const dailyListeners = new Set<() => void>();
+function dailyNotify() { dailyListeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } }); }
+async function loadDaily(supabase: ReturnType<typeof createClient>, today: string, force = false): Promise<void> {
+  if (dailyInflight) return dailyInflight;
+  const fresh = dailyState.today === today && dailyState.vals;
+  if (!force && fresh) return;
+  if (force && fresh && Date.now() - dailyLoadedAt < DAILY_MIN_RELOAD_MS) return;
+  const days = Array.from({ length: DAILY_N }, (_, i) => shiftDay(today, i - (DAILY_N - 1)));
+  dailyInflight = (async () => {
+    try {
+      const rows = await fetchAttendanceTimeline(supabase, { from: days[0], to: today, bucket: 'day' }, {});
+      const map = new Map<string, number>();
+      rows.forEach((r) => map.set(r.bucket, (map.get(r.bucket) ?? 0) + r.attendance));
+      dailyState = { today, vals: days.map((d) => map.get(d) ?? 0) };
+    } catch {
+      dailyState = { today, vals: days.map(() => 0) };
+    } finally {
+      dailyInflight = null;
+      dailyLoadedAt = Date.now();
+      dailyNotify();
+    }
+  })();
+  return dailyInflight;
+}
+
+/** The last `n` (≤ 14) days ending today, from the shared store. */
 function useDailyAttendance(n: number) {
   const { now } = useAppDate();
   const [supabase] = useState(() => createClient());
   const today = cairoToday(now());
   const days = useMemo(() => Array.from({ length: n }, (_, i) => shiftDay(today, i - (n - 1))), [today, n]);
-  const [vals, setVals] = useState<number[] | null>(null);
+  const [, bump] = useState(0);
 
-  const load = useCallback(async () => {
-    try {
-      const rows = await fetchAttendanceTimeline(supabase, { from: days[0], to: today, bucket: 'day' }, {});
-      const map = new Map<string, number>();
-      rows.forEach((r) => map.set(r.bucket, (map.get(r.bucket) ?? 0) + r.attendance));
-      setVals(days.map((d) => map.get(d) ?? 0));
-    } catch { setVals(days.map(() => 0)); }
-  }, [supabase, days, today]);
-  useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, `w-daily-${n}`, [{ table: 'attendance_log' }], load, { delayMs: 3000 });
+  useEffect(() => {
+    const fn = () => bump((x) => x + 1);
+    dailyListeners.add(fn);
+    void loadDaily(supabase, today);
+    return () => { dailyListeners.delete(fn); };
+  }, [supabase, today]);
+  const reload = useCallback(() => loadDaily(supabase, today, true), [supabase, today]);
+  // a scan burst → one reload shared by the widgets, at most once a minute
+  useDebouncedRealtime(supabase, 'w-daily', [{ table: 'attendance_log' }], reload, { delayMs: 3000, minIntervalMs: 60_000 });
+
+  const vals = dailyState.today === today && dailyState.vals ? dailyState.vals.slice(DAILY_N - n) : null;
   return { days, vals };
 }
 
@@ -124,7 +167,7 @@ export function WeeklyStreakWidget({ title, size }: WidgetProps) {
 const MEDALS = ['🥇', '🥈', '🥉'];
 
 export function LeaderboardWidget({ title, size }: WidgetProps) {
-  const { profile, scopes } = useAuth();
+  const { profile } = useAuth();
   const [supabase] = useState(() => createClient());
   const [rows, setRows] = useState<LeaderRow[] | null>(null);
   const limit = size === 'half' ? 5 : 6;
@@ -133,7 +176,9 @@ export function LeaderboardWidget({ title, size }: WidgetProps) {
     try { setRows(await fetchLeaderboard(supabase, 'points', limit, {})); } catch { setRows([]); }
   }, [supabase, limit]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments', filter: scopeFilter(profile, scopes) }], load, { delayMs: 2500 });
+  // 20261014120000: every scan bumps an enrollment's points → the top-6 RPC
+  // re-ran once per scan on every device. At most once per minute now.
+  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments' }], load, { enabled: !!profile, delayMs: 2500, minIntervalMs: 60_000 });
 
   return (
     <WidgetCard id="w-leaderboard" icon={Trophy} title={title} tone="amber" href="/stats" flush>
@@ -162,10 +207,12 @@ export function LeaderboardWidget({ title, size }: WidgetProps) {
 // Follow-up — absentees of the last finished occurrence, not yet called
 // =====================================================================
 interface AbsentRow { enrollment_id: string; name: string; phone: string | null; image_url: string | null }
-type FollowState = { ev: AppEvent; date: string; total: number; called: number; rows: AbsentRow[] } | 'none' | null;
+/** `absent` = every absentee (kept so a contact_log broadcast can be applied in memory); `contacted` = who was called */
+type FollowState =
+  | { ev: AppEvent; date: string; absent: AbsentRow[]; contacted: Set<string> }
+  | 'none' | null;
 
 export function FollowUpWidget({ title, size }: WidgetProps) {
-  const { profile, scopes } = useAuth();
   const { now } = useAppDate();
   const { label } = useCustomization();
   const [supabase] = useState(() => createClient());
@@ -197,32 +244,49 @@ export function FollowUpWidget({ title, size }: WidgetProps) {
     const attended = new Set(((att ?? []) as { enrollment_id: string }[]).map((r) => r.enrollment_id));
     const contacted = new Set(((calls ?? []) as { enrollment_id: string }[]).map((r) => r.enrollment_id));
     type Row = { id: string; person: { name: string; phone: string | null; image_url: string | null } | null };
-    const absent = ((enr ?? []) as unknown as Row[]).filter((e) => e.person && !attended.has(e.id));
-    const notCalled = absent.filter((e) => !contacted.has(e.id));
-    setState({
-      ev: best.ev, date: best.date, total: absent.length, called: absent.length - notCalled.length,
-      rows: notCalled.slice(0, shown).map((e) => ({ enrollment_id: e.id, name: e.person!.name, phone: e.person!.phone, image_url: e.person!.image_url })),
-    });
-  }, [supabase, now, shown]);
+    const absent = ((enr ?? []) as unknown as Row[])
+      .filter((e) => e.person && !attended.has(e.id))
+      .map((e) => ({ enrollment_id: e.id, name: e.person!.name, phone: e.person!.phone, image_url: e.person!.image_url }));
+    setState({ ev: best.ev, date: best.date, absent, contacted });
+  }, [supabase, now]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }, { table: 'contact_log' }, { table: 'enrollments', filter: scopeFilter(profile, scopes) }], load, { delayMs: 2500 });
+  // attendance / enrollment changes: full reload (3 queries), but on a scan
+  // day at most once per minute per device (20261014120000). Enrollment
+  // UPDATEs (a scan bumping counters) do not change who is absent → ignored.
+  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }], load, { delayMs: 2500, minIntervalMs: 60_000 });
+  useBusIds('enrollments', (ids, op) => { if (op !== 'UPDATE') void load(); }, { delayMs: 2500 });
+  // 20261013120000: a call / feedback by any servant → mark those enrollments
+  // as contacted IN MEMORY. Zero requests. (This widget used to re-run its
+  // 3 queries on every device for every single phone call in the church.)
+  useBusIds('contact_log', (ids, op) => {
+    if (!ids.length || op === 'DELETE') { void load(); return; }
+    setState((prev) => {
+      if (!prev || prev === 'none') return prev;
+      const contacted = new Set(prev.contacted);
+      ids.forEach((id) => contacted.add(id));
+      return { ...prev, contacted };
+    });
+  }, { delayMs: 1500, onVisible: () => { void load(); } });
 
   const s = state && state !== 'none' ? state : null;
-  const pending = s ? s.total - s.called : 0;
+  const notCalled = s ? s.absent.filter((e) => !s.contacted.has(e.enrollment_id)) : [];
+  const pending = notCalled.length;
+  const total = s ? s.absent.length : 0;
+  const rows = notCalled.slice(0, shown);
   return (
     <WidgetCard id="w-follow-up" icon={PhoneCall} title={title} tone="teal" href="/children" flush
       subtitle={s ? `غائبو «${s.ev.name}» · ${fmtYmdLong(s.date)}` : undefined}
       badge={s ? <span className={`badge tabular-nums ${pending > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{fmtNum(pending)} لم يُفتقد</span> : undefined}>
       {state === null ? <WidgetSkeleton /> : state === 'none' ? (
         <WidgetEmpty icon={PhoneCall} text="لا توجد مناسبة منتهية بعد" hint="سيظهر هنا غائبو آخر مناسبة" />
-      ) : s!.total === 0 ? (
+      ) : total === 0 ? (
         <WidgetEmpty icon={UserCheck} text="حضر الجميع 🎉" />
       ) : pending === 0 ? (
-        <WidgetEmpty icon={PhoneCall} text={`تم افتقاد كل الغائبين (${fmtNum(s!.total)}) ✓`} />
+        <WidgetEmpty icon={PhoneCall} text={`تم افتقاد كل الغائبين (${fmtNum(total)}) ✓`} />
       ) : (
         <>
           <ul className="divide-y divide-teal-50">
-            {s!.rows.map((r) => (
+            {rows.map((r) => (
               <li key={r.enrollment_id} className="flex items-center gap-2.5 px-3 py-2">
                 <Avatar url={r.image_url} name={r.name} size={32} />
                 <span className="min-w-0 flex-1 truncate text-xs font-extrabold text-slate-800">{r.name}</span>
@@ -233,7 +297,7 @@ export function FollowUpWidget({ title, size }: WidgetProps) {
             ))}
           </ul>
           <Link href="/children" className="flex items-center justify-center gap-1 bg-teal-50/60 py-2 text-[11px] font-extrabold text-teal-700 hover:bg-teal-50">
-            {pending > s!.rows.length ? `و${fmtNum(pending - s!.rows.length)} آخرون · ` : ''}{label('children')} <ChevronLeft className="h-3.5 w-3.5" />
+            {pending > rows.length ? `و${fmtNum(pending - rows.length)} آخرون · ` : ''}{label('children')} <ChevronLeft className="h-3.5 w-3.5" />
           </Link>
         </>
       )}
@@ -257,7 +321,7 @@ export function PendingApprovalsWidget({ title, size }: WidgetProps) {
     setN({ servants: count ?? 0, requests: typeof data === 'number' ? data : 0 });
   }, [supabase]);
   useEffect(() => { if (profile) load(); }, [load, profile]);
-  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'servant_enrollments' }, { table: 'data_change_requests' }], load, { delayMs: 1500 });
+  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'servant_enrollments' }, { table: 'data_change_requests' }], load, { delayMs: 1500, minIntervalMs: 30_000 });
 
   const total = (n?.servants ?? 0) + (n?.requests ?? 0);
   return (

@@ -7,6 +7,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { onAppResume } from '@/lib/realtime';
 import {
   clearPriestToken, fetchPriestProfile, getPriestToken, priestLogout, priestSessionTouch, priestErrorMessage,
   fetchConfessors, fetchAppointments, type PriestProfile, type Confessor, type Appointment,
@@ -46,10 +47,9 @@ const Ctx = createContext<PriestState>({
   reloadAll: () => {},
 });
 
-function startPoll(fn: () => void, everyMs = 45_000): () => void {
-  const t = setInterval(() => { if (document.visibilityState === 'visible') fn(); }, everyMs);
-  return () => clearInterval(t);
-}
+// 20261011120000: NO background polling — every poll was a logged API
+// request on the Supabase «Logs Ingest» meter. Each block refreshes on
+// hidden→visible; the pages keep their reload buttons.
 
 export function PriestProvider({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => createClient(), []);
@@ -93,12 +93,12 @@ export function PriestProvider({ children }: { children: ReactNode }) {
     })();
   }, [load, supabase, dropSession]);
 
+  // 20261017120000: every block below refreshes through the resume gate
+  // (≥ 2 min hidden · «تحديث») — not on every glance away. Six blocks ×
+  // every pick-up used to be the priest portal's whole API footprint.
   useEffect(() => {
     if (!token) return;
-    const onVisible = () => { if (document.visibilityState === 'visible') { priestSessionTouch(supabase, token).catch(() => {}); load(token); } };
-    document.addEventListener('visibilitychange', onVisible);
-    const stop = startPoll(() => load(token), 60_000);
-    return () => { document.removeEventListener('visibilitychange', onVisible); stop(); };
+    return onAppResume(() => { priestSessionTouch(supabase, token).catch(() => {}); load(token); });
   }, [token, supabase, load]);
 
   const refresh = useCallback(async () => { if (token) await load(token); }, [token, load]);
@@ -119,10 +119,8 @@ export function PriestProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const run = () => fetchConfessors(supabase, token).then((r) => { if (!cancelled) setConfessors(r); }).catch(() => {});
     run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    const stop = startPoll(run, 60_000);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); stop(); };
+    const off = onAppResume(run);
+    return () => { cancelled = true; off(); };
   }, [token, supabase, cTick]);
 
   // ---- appointments (pending + upcoming)
@@ -134,10 +132,8 @@ export function PriestProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const run = () => fetchAppointments(supabase, token).then((r) => { if (!cancelled) setAppointments(r); }).catch(() => {});
     run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    const stop = startPoll(run, 30_000);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); stop(); };
+    const off = onAppResume(run);
+    return () => { cancelled = true; off(); };
   }, [token, supabase, aTick]);
 
   // ---- areas tree (church → areas → streets → buildings)
@@ -149,10 +145,8 @@ export function PriestProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const run = () => fetchAreasTree(supabase, token).then((r) => { if (!cancelled) setAreas(r); }).catch(() => {});
     run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    const stop = startPoll(run, 120_000);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); stop(); };
+    const off = onAppResume(run);
+    return () => { cancelled = true; off(); };
   }, [token, supabase, arTick]);
 
   // ---- families (with their members · last visit · next visit)
@@ -164,10 +158,8 @@ export function PriestProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const run = () => fetchPriestFamilies(supabase, token).then((r) => { if (!cancelled) setFamilies(r); }).catch(() => {});
     run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    const stop = startPoll(run, 60_000);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); stop(); };
+    const off = onAppResume(run);
+    return () => { cancelled = true; off(); };
   }, [token, supabase, fTick]);
 
   // ---- visits (pending requests + upcoming)
@@ -179,10 +171,8 @@ export function PriestProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const run = () => fetchVisits(supabase, token).then((r) => { if (!cancelled) setVisits(r); }).catch(() => {});
     run();
-    const onVis = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', onVis);
-    const stop = startPoll(run, 30_000);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); stop(); };
+    const off = onAppResume(run);
+    return () => { cancelled = true; off(); };
   }, [token, supabase, vTick]);
 
   const reloadAll = useCallback(() => { refresh(); reloadConfessors(); reloadAppointments(); reloadAreas(); reloadFamilies(); reloadVisits(); },

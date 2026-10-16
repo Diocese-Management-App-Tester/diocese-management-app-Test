@@ -19,12 +19,12 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import { useAppDate } from '@/lib/app-date-context';
 import { useCustomization } from '@/lib/customization-context';
-import { useDebouncedRealtime, scopeFilter } from '@/lib/realtime';
+import { useDebouncedRealtime, useBusIds } from '@/lib/realtime';
 import { ROLE_LABELS, type AppEvent } from '@/lib/types';
 import { cairoToday, cairoDayStartISO, formatCairoDate, currentOccurrence, formatTimeHM, describeEventSchedule, type EventOccurrence } from '@/lib/time';
 import { copticOf, formatCoptic } from '@/lib/coptic';
 import { verseOfDay } from '@/lib/verses';
-import { cachedLookup } from '@/lib/queries';
+import { cachedLookup, invalidateLookup } from '@/lib/queries';
 import { fetchDaySummary, shiftDay } from '@/lib/stats';
 import { DEST_BY_KEY } from '@/lib/navigation';
 import { WidgetCard, WidgetEmpty, WidgetSkeleton, fmtNum, fmtDur, fmtYmdLong } from './WidgetBits';
@@ -88,7 +88,7 @@ export function VerseWidget({ title }: WidgetProps) {
 // Today pulse — attendance ring
 // =====================================================================
 export function TodayPulseWidget({ title, size }: WidgetProps) {
-  const { profile, scopes } = useAuth();
+  const { profile } = useAuth();
   const { now } = useAppDate();
   const [supabase] = useState(() => createClient());
   const today = cairoToday(now());
@@ -101,7 +101,10 @@ export function TodayPulseWidget({ title, size }: WidgetProps) {
     } catch { setD({ attendees: 0, persons: 0, points: 0 }); }
   }, [supabase, today]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-pulse', [{ table: 'attendance_log' }, { table: 'points_log' }, { table: 'enrollments', filter: scopeFilter(profile, scopes) }], load, { delayMs: 1500 });
+  // 20261014120000: an aggregate RPC per message on every device was one
+  // request per scan per phone. Rate-limited to one reload per 30 s during
+  // a burst (trailing run keeps the ring exact once the burst ends).
+  useDebouncedRealtime(supabase, 'w-pulse', [{ table: 'attendance_log' }, { table: 'points_log' }, { table: 'enrollments' }], load, { enabled: !!profile, delayMs: 1500, minIntervalMs: 30_000 });
 
   const pct = d && d.persons > 0 ? Math.min(100, Math.round((d.attendees / d.persons) * 100)) : 0;
   const r = 40, c = 2 * Math.PI * r;
@@ -148,7 +151,7 @@ function Pill({ label, value, tone, signed }: { label: string; value: number; to
 interface Counts { persons: number; enrollments: number; todayAttendance: number; pendingServants: number; churches: number; services: number; classes: number }
 
 export function CountersWidget() {
-  const { profile, scopes } = useAuth();
+  const { profile } = useAuth();
   const { now } = useAppDate();
   const [supabase] = useState(() => createClient());
   const [counts, setCounts] = useState<Counts | null>(null);
@@ -161,7 +164,13 @@ export function CountersWidget() {
     setCounts({ persons: n('persons'), enrollments: n('enrollments'), todayAttendance: n('today_attendance'), pendingServants: n('pending_servants'), churches: n('churches'), services: n('services'), classes: n('classes') });
   }, [supabase, now]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'enrollments', filter: scopeFilter(profile, scopes) }, { table: 'attendance_log' }, { table: 'servant_enrollments' }], load, { delayMs: 2000 });
+  // 20261014120000: the bus message says «n attendance rows in this church»
+  // but not which class / event, and dashboard_counts is RLS-scoped — so the
+  // count cannot be patched in memory for a class servant. Instead: an
+  // enrollment UPDATE (a scan bumping counters) changes nothing here →
+  // ignored; the rest reloads the RPC at most once per 30 s during a burst.
+  useBusIds('enrollments', (ids, op) => { if (op !== 'UPDATE') void load(); }, { delayMs: 2000 });
+  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'attendance_log' }, { table: 'servant_enrollments' }], load, { delayMs: 2000, minIntervalMs: 30_000 });
 
   const c = counts;
   return (
@@ -255,11 +264,15 @@ export function NextEventWidget({ title, size }: WidgetProps) {
   const [tick, setTick] = useState(0);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 30_000); return () => clearInterval(t); }, []);
 
-  const load = useCallback(async () => {
-    setEvents(await cachedLookup<AppEvent>(supabase, 'events', { column: 'event_date', ascending: false, nullsFirst: false }, true));
+  // 20261016120000: use the shared lookup cache (was `force = true` →
+  // one `events` request per dashboard open on every device, 5.9 k / month);
+  // the bus message for `events` invalidates it and reloads.
+  const load = useCallback(async (force = false) => {
+    if (force) invalidateLookup('events');
+    setEvents(await cachedLookup<AppEvent>(supabase, 'events', { column: 'event_date', ascending: false, nullsFirst: false }));
   }, [supabase]);
   useEffect(() => { load(); }, [load]);
-  useDebouncedRealtime(supabase, 'w-events', [{ table: 'events', filter: profile?.church_id && profile.role !== 'owner' ? `church_id=eq.${profile.church_id}` : undefined }], load);
+  useDebouncedRealtime(supabase, 'w-events', [{ table: 'events' }], () => load(true), { enabled: !!profile });
 
   // pick: happening now → soonest upcoming (incl. next weekly occurrence) → latest past
   const pick = useMemo<EventPick | null>(() => {
@@ -296,7 +309,10 @@ export function NextEventWidget({ title, size }: WidgetProps) {
     setAttended(count ?? 0);
   }, [supabase, pick]);
   useEffect(() => { loadAttended(); }, [loadAttended]);
-  useDebouncedRealtime(supabase, 'w-event-att', [{ table: 'attendance_log' }], loadAttended, { delayMs: 1500, enabled: !!pick });
+  // 20261014120000: the message does not say which event the scan was for,
+  // so the count is re-read (a tiny HEAD count) at most once per 20 s during
+  // a burst instead of once per scan on every device.
+  useDebouncedRealtime(supabase, 'w-event-att', [{ table: 'attendance_log' }], loadAttended, { delayMs: 1500, minIntervalMs: 20_000, enabled: !!pick });
 
   const at = now();
   let state: ReactNode = null;

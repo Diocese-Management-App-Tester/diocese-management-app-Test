@@ -15,7 +15,10 @@ import {
   type EnrollmentWithPerson, type Person, type ClassRoom, type Church, type Service,
   type AppEvent, type Cause, type CallFeedback,
 } from '@/lib/types';
-import { CallFeedbackBadge, CallFeedbackModal, PersonAvatar, useCallFeedbackStates } from '@/components/CallFeedback';
+import {
+  CallFeedbackBadge, CallFeedbackPickerModal, CallFeedbackHistoryModal, PersonAvatar,
+  useCallFeedbackStates, useAfterCallPrompt, startCall,
+} from '@/components/CallFeedback';
 import {
   eventAvailability, describeEventSchedule, cairoToday, formatCairoTime,
   childEventStatus, CHILD_STATUS_LABELS, type ChildEventStatus,
@@ -26,7 +29,7 @@ import { ViewPersonModal, ModalFrame } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
 import { pickScopedDefault, effectiveScope } from '@/lib/defaults';
-import { onBusTable } from '@/lib/realtime';
+import { onBusTable, useBusIds } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
 import { nativeDetector, decodeVideoFrame } from '@/lib/qr-decode';
 import { useModuleVisible } from '@/lib/modules-context';
@@ -151,7 +154,9 @@ export default function ScannerPage() {
   const [manualTarget, setManualTarget] = useState<EnrollmentWithPerson | null>(null);
   const [dataTarget, setDataTarget] = useState<EnrollmentWithPerson | null>(null);
   const [logTarget, setLogTarget] = useState<{ kind: 'attendance' | 'points'; e: EnrollmentWithPerson } | null>(null);
-  const [callTarget, setCallTarget] = useState<EnrollmentWithPerson | null>(null);
+  // Call feedback: the HISTORY opens from the badge, the PICKER opens
+  // automatically after a call started from the history (20261012120000)
+  const [callDialog, setCallDialog] = useState<{ kind: 'picker' | 'history'; e: EnrollmentWithPerson } | null>(null);
 
   // ---------- Load lookups (cached 60s) ----------
   const loadLookups = useCallback(async (force = false) => {
@@ -334,19 +339,23 @@ export default function ScannerPage() {
   const [attendedDays, setAttendedDays] = useState<Record<string, Set<string>>>({});
   const [eventCounts, setEventCounts] = useState<Record<string, number>>({});
   const visibleIdsKey = visibleRows.map((e) => e.id).join(',');
+  const fetchEventAttendance = useCallback(async (eventIdArg: string, ids: string[]) => {
+    const { data } = await supabase
+      .from('attendance_log')
+      .select('enrollment_id, attended_on')
+      .eq('event_id', eventIdArg)
+      .in('enrollment_id', ids);
+    return (data ?? []) as { enrollment_id: string; attended_on: string }[];
+  }, [supabase]);
   useEffect(() => {
     if (!selectedEvent || !visibleIdsKey) { setAttendedDays({}); setEventCounts({}); return; }
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from('attendance_log')
-        .select('enrollment_id, attended_on')
-        .eq('event_id', selectedEvent.id)
-        .in('enrollment_id', visibleIdsKey.split(','));
+      const rows = await fetchEventAttendance(selectedEvent.id, visibleIdsKey.split(','));
       if (cancelled) return;
       const days: Record<string, Set<string>> = {};
       const counts: Record<string, number> = {};
-      ((data ?? []) as { enrollment_id: string; attended_on: string }[]).forEach((r) => {
+      rows.forEach((r) => {
         counts[r.enrollment_id] = (counts[r.enrollment_id] ?? 0) + 1;
         (days[r.enrollment_id] ??= new Set()).add(r.attended_on);
       });
@@ -354,13 +363,56 @@ export default function ScannerPage() {
       setEventCounts(counts);
     })();
     return () => { cancelled = true; };
-  }, [selectedEvent, supabase, visibleIdsKey]);
+  }, [selectedEvent, visibleIdsKey, fetchEventAttendance]);
+  // 20261016120000: another device scanned one of the rows on screen →
+  // re-read only those (the message carries the enrollment ids).
+  const selEvRef = useRef<string | null>(null); selEvRef.current = selectedEvent?.id ?? null;
+  const visIdsRef = useRef(''); visIdsRef.current = visibleIdsKey;
+  useBusIds('attendance_log', async (ids) => {
+    const evId = selEvRef.current;
+    if (!evId || !visIdsRef.current) return;
+    const onScreen = new Set(visIdsRef.current.split(','));
+    const want = ids.length ? ids.filter((id) => onScreen.has(id)) : Array.from(onScreen);
+    if (!want.length) return;
+    const rows = await fetchEventAttendance(evId, want);
+    setAttendedDays((prev) => {
+      const next = { ...prev };
+      want.forEach((id) => { delete next[id]; });
+      rows.forEach((r) => { (next[r.enrollment_id] ??= new Set()).add(r.attended_on); });
+      return next;
+    });
+    setEventCounts((prev) => {
+      const next = { ...prev };
+      want.forEach((id) => { next[id] = 0; });
+      rows.forEach((r) => { next[r.enrollment_id] = (next[r.enrollment_id] ?? 0) + 1; });
+      return next;
+    });
+  }, { enabled: !!selectedEvent, delayMs: 1500 });
 
   const attendanceShown = (e: EnrollmentWithPerson): number =>
     selectedEvent ? (eventCounts[e.id] ?? 0) : e.attendance_count;
 
   // Call-feedback badge state (0023) for the rows on screen
   const callFb = useCallFeedbackStates(supabase, visibleRows, selectedEvent, feedbacks, nowDate, realNow);
+  // Back from the phone app after «اتصال» in the history → open the picker
+  const visibleRowsRef = useRef(visibleRows);
+  visibleRowsRef.current = visibleRows;
+  const selectedEventRef = useRef(selectedEvent);
+  selectedEventRef.current = selectedEvent;
+  const { arm: armAfterCall, check: checkAfterCall } = useAfterCallPrompt((enrollmentId, evId) => {
+    if (!selectedEventRef.current) return false; // lookups not restored yet
+    if (evId !== selectedEventRef.current.id) return true;
+    const e = visibleRowsRef.current.find((x) => x.id === enrollmentId);
+    if (!e) return visibleRowsRef.current.length > 0;
+    setCallDialog({ kind: 'picker', e });
+    return true;
+  });
+  useEffect(() => { if (visibleRows.length && selectedEvent) checkAfterCall(); }, [visibleRows, selectedEvent, checkAfterCall]);
+  const dial = (e: EnrollmentWithPerson) => {
+    if (!selectedEvent) return;
+    setCallDialog(null);
+    startCall(supabase, e, selectedEvent, profile?.id, armAfterCall, now);
+  };
 
   // Status of a person in the selected event at the working date-time
   // (present / not registered / absent). null when no event is selected
@@ -628,7 +680,7 @@ export default function ScannerPage() {
   // change while the camera is running). While a modal is open the camera
   // keeps running but scans are ignored, so a second QR in frame can never
   // hijack the open modal.
-  const modalOpen = !!manualTarget || !!dataTarget || !!picker || !!logTarget || !!callTarget || numpadFor !== null || !!familyPick;
+  const modalOpen = !!manualTarget || !!dataTarget || !!picker || !!logTarget || !!callDialog || numpadFor !== null || !!familyPick;
   const handleQrRef = useRef<(v: string) => Promise<void>>(handleQr);
   handleQrRef.current = modalOpen ? async () => {} : handleQr;
 
@@ -850,7 +902,7 @@ export default function ScannerPage() {
         {(() => {
           const cs = callFb.stateOf(e);
           if (!cs) return null;
-          return <CallFeedbackBadge id={`call-badge-${e.id}`} state={cs} onClick={() => setCallTarget(e)} />;
+          return <CallFeedbackBadge id={`call-badge-${e.id}`} state={cs} onClick={() => setCallDialog({ kind: 'history', e })} />;
         })()}
         <button
           id={`att-badge-${e.id}`}
@@ -1345,16 +1397,31 @@ export default function ScannerPage() {
       {logTarget?.kind === 'points' && (
         <PointsLogModal enrollment={logTarget.e} causes={causes} events={events} onClose={() => setLogTarget(null)} />
       )}
-      {callTarget && selectedEvent && callFb.cycle && (
-        <CallFeedbackModal
-          enrollment={callTarget}
+      {callDialog?.kind === 'picker' && selectedEvent && callFb.cycle && (
+        <CallFeedbackPickerModal
+          enrollment={callDialog.e}
           event={selectedEvent}
           cycle={callFb.cycle}
           feedbacks={feedbacks}
-          current={callFb.stateOf(callTarget) ?? { kind: 'not_called_yet' }}
+          current={callFb.stateOf(callDialog.e) ?? { kind: 'not_called_yet' }}
           now={now}
-          onRecorded={(day, fbId) => callFb.setRecorded(callTarget.id, day, fbId)}
-          onClose={() => setCallTarget(null)}
+          onRecorded={(day, rec) => callFb.setRecorded(callDialog.e.id, day, rec)}
+          onClose={() => setCallDialog(null)}
+          onOpenHistory={() => setCallDialog({ kind: 'history', e: callDialog.e })}
+        />
+      )}
+      {callDialog?.kind === 'history' && selectedEvent && callFb.cycle && (
+        <CallFeedbackHistoryModal
+          enrollment={callDialog.e}
+          event={selectedEvent}
+          cycle={callFb.cycle}
+          feedbacks={feedbacks}
+          current={callFb.stateOf(callDialog.e) ?? { kind: 'not_called_yet' }}
+          now={now}
+          onRecorded={(day, rec) => callFb.setRecorded(callDialog.e.id, day, rec)}
+          onClose={() => setCallDialog(null)}
+          onCall={() => dial(callDialog.e)}
+          onPick={() => setCallDialog({ kind: 'picker', e: callDialog.e })}
         />
       )}
 

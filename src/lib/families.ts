@@ -14,6 +14,8 @@ export interface Family {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  /** 20260928120000: the church of the family (filled from the manager's scope / the area chain) */
+  church_id?: string | null;
   created_at: string;
   created_by: string | null;
   edited_at: string;
@@ -189,6 +191,18 @@ export async function fetchFamilyPermissions(supabase: SupabaseClient): Promise<
   return { view: !!r.view, manage: !!r.manage };
 }
 
+/**
+ * 20260930130000: the churches the caller may create a family in from the
+ * servants' app — owner: all · church manager: his church(es) · others: none.
+ */
+export async function fetchFamilyManageChurches(supabase: SupabaseClient): Promise<string[]> {
+  const { data, error } = await supabase.rpc('family_manage_churches');
+  if (error) return [];
+  return ((data ?? []) as unknown[])
+    .map((x) => (typeof x === 'string' ? x : ((x as { family_manage_churches?: string }).family_manage_churches ?? '')))
+    .filter(Boolean);
+}
+
 /** All families visible to the caller with their members (persons joined). */
 export async function fetchFamilies(supabase: SupabaseClient): Promise<{ families: Family[]; members: FamilyMemberWithPerson[] }> {
   const [{ data: fam, error: e1 }, { data: mem, error: e2 }] = await Promise.all([
@@ -278,13 +292,14 @@ export interface NewMemberInput {
   relation: FamilyRelation | null;
 }
 
-export type NewMemberError = FamilyAddError | 'name_required' | 'code_required' | 'code_taken' | 'invalid_scope' | 'invalid_gender';
+export type NewMemberError = FamilyAddError | 'name_required' | 'code_required' | 'code_taken' | 'code_is_family' | 'invalid_scope' | 'invalid_gender';
 
 export const NEW_MEMBER_ERROR_LABELS: Record<NewMemberError, string> = {
   ...FAMILY_ADD_ERROR_LABELS,
   name_required: 'اكتب الاسم',
   code_required: 'الكود مطلوب عندما لا يُسجَّل الشخص في فصل',
   code_taken: 'هذا الكود كود عائلة — لا يمكن استخدامه لشخص',
+  code_is_family: 'هذا الكود كود عائلة — لا يمكن استخدامه لشخص',
   invalid_scope: 'اختر الكنيسة والخدمة والفصل معاً',
   invalid_gender: 'النوع غير صالح',
 };

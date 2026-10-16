@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
 /**
@@ -25,13 +25,45 @@ import type { SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
  * The browser opens ONE channel per topic (2–4 per device, whatever the
  * number of screens/widgets) and fans each message out to every listener
  * that registered for that table. `useDebouncedRealtime` keeps its API,
- * so the 84 call sites in the app did not change: the hook decides per
- * table whether to listen on the bus or on classic `postgres_changes`.
+ * so the 85 call sites in the app did not change.
  *
- * SAFETY NET. If the bus is not connected (migration not applied yet,
- * realtime down, token trouble) every bus listener falls back to a slow
- * poll (45 s while visible) and a refresh when the tab becomes visible —
- * the screen stays correct, only less instant.
+ * 20261016120000 — EVERYTHING rides the bus. Until now 60 "cold" tables
+ * stayed on classic `postgres_changes`; 58 hook sites each opened a
+ * channel that the Realtime server polls continuously
+ * (`realtime.list_changes`: 3 M calls / month in pg_stat_statements —
+ * the single largest consumer) and re-created it on every navigation
+ * (`realtime.subscription`: 81 k inserts). The migration gives every
+ * table a statement-level bus trigger and empties the publication, so
+ * the hook now listens on the bus for ANY table and never opens a
+ * `postgres_changes` channel. Server-side `filter`s are not needed: a bus
+ * message only says "table X changed (ids…)" and each screen reloads its
+ * own, already-scoped query. Per device: 2–4 channels, total, forever.
+ *
+ * SAFETY NET. If the bus is not connected (realtime down, token trouble)
+ * there is no poll (see below) — the header shows «غير متصل» and every
+ * screen refetches when the bus returns or the tab regains focus.
+ *
+ * 20261017120000 — THE WAKE-UP STORM (fifth Logs Ingest round).
+ * After the four earlier rounds the meter still climbed in a shape that
+ * matched no user activity: the lines came in bursts, per device, every
+ * time a phone was picked up. Cause: every listener (10–20 on the home
+ * screen, 6–8 on the children page) refetched on EVERY hidden→visible
+ * transition, unconditionally — a 2-second glance at WhatsApp and back
+ * = 10–20 logged API requests, on every phone, dozens of times a day. On
+ * top of that the bus went through CLOSED → rejoin on every socket drop
+ * (phones kill the socket when the screen locks), and each rejoin fired
+ * `onBusConnection(true)` → every listener refetched AGAIN. Two bursts
+ * per pick-up, ~30 requests, × 80 phones × 30–50 pick-ups a day ≈ the
+ * whole monthly quota, with nobody doing anything in the app.
+ *
+ * Now there is ONE resume gate (`onAppResume`): a hidden→visible is a
+ * «resume» only when the tab was hidden ≥ RESUME_STALE_MS (2 min) or the
+ * bus was down while hidden — short glances refresh nothing (the bus
+ * delivered every change meanwhile; a message that arrived while hidden
+ * is still applied on return as before). The bus reconnect refetch runs
+ * only when the bus was actually DOWN (not on the first join) and at most
+ * once per resume, and a channel that closes with the socket is left to
+ * phoenix's own rejoin instead of being torn down and re-created.
  */
 
 // ---------- Topics ----------
@@ -50,13 +82,27 @@ export function uniqueTopic(base: string): string {
   return `${base}-${Date.now().toString(36)}-${topicSeq}`;
 }
 
-/** Tables whose changes travel on the broadcast bus (mirror of 0046 §2). */
+/**
+ * Tables whose bus messages carry row ids (`BusMessage.ids`) — the
+ * per-enrollment log tables (0046 §2) and every church-scoped table
+ * (20261016120000, `rt_trg_scoped_nullable`). Informational: since
+ * 20261016120000 EVERY public table is on the bus, so the hook no longer
+ * consults this set to decide between bus and `postgres_changes`.
+ */
 export const BUS_TABLES: ReadonlySet<string> = new Set([
   'attendance_log', 'points_log', 'contact_log', 'enrollments', 'persons',
   'notification_recipients', 'chat_messages', 'chat_read_state', 'store_orders',
   'card_print_requests', 'user_achievements', 'servant_enrollments', 'servant_scopes',
   'activity_log',
+  'app_settings', 'module_access', 'permission_profiles', 'permissions',
 ]);
+
+/**
+ * 20261016120000: the `supabase_realtime` publication is empty — nothing
+ * is delivered through `postgres_changes` any more. Kept as a switch so a
+ * table can be moved back if ever needed (add it here).
+ */
+const PG_CHANGES_TABLES: ReadonlySet<string> = new Set([]);
 
 export interface BusMessage {
   /** table */
@@ -91,9 +137,65 @@ const bus: BusState = {
   connListeners: new Set(),
 };
 
+// ---------- Resume gate (20261017120000) ----------
+/**
+ * A hidden→visible transition is a «resume» worth refetching for only when
+ * the tab was hidden at least this long (the bus delivered every change
+ * meanwhile for shorter gaps; the socket survives a short background on
+ * every platform) or the bus dropped while hidden.
+ */
+export const RESUME_STALE_MS = 2 * 60_000;
+
+type ResumeListener = () => void;
+const resumeListeners = new Set<ResumeListener>();
+let hiddenAt = 0;              // when the tab went hidden (0 = visible)
+let busDroppedWhileHidden = false;
+let lastResumeAt = 0;
+let resumeWired = false;
+
+function fireResume() {
+  lastResumeAt = Date.now();
+  busDroppedWhileHidden = false;
+  resumeListeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+}
+
+function wireResume() {
+  if (resumeWired || typeof document === 'undefined') return;
+  resumeWired = true;
+  document.addEventListener('visibilitychange', (ev) => {
+    // RefreshButton dispatches a synthetic event (`isTrusted === false`) for
+    // the few raw listeners left; it calls `triggerAppResume()` itself, so
+    // the gate ignores synthetic events (no double refresh).
+    if (ev && ev.isTrusted === false) return;
+    if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+    const away = hiddenAt ? Date.now() - hiddenAt : 0;
+    hiddenAt = 0;
+    if (away >= RESUME_STALE_MS || busDroppedWhileHidden) fireResume();
+  });
+}
+
+/**
+ * Subscribe to «the app resumed and may have missed something»: fired on
+ * hidden→visible after ≥ RESUME_STALE_MS hidden, after a bus drop while
+ * hidden, and on every manual «تحديث» (RefreshButton). NOT fired for a
+ * short glance away. Returns the unsubscribe fn.
+ */
+export function onAppResume(fn: ResumeListener): () => void {
+  wireResume();
+  resumeListeners.add(fn);
+  return () => { resumeListeners.delete(fn); };
+}
+
+/** Programmatic resume (the «تحديث» button) — refreshes every mounted listener. */
+export function triggerAppResume(): void { fireResume(); }
+
+/** True when the tab is hidden (used by the listeners to defer work). */
+const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
 function setConnected(ok: boolean) {
   if (bus.connected === ok) return;
   bus.connected = ok;
+  if (!ok && isHidden()) busDroppedWhileHidden = true;
   bus.connListeners.forEach((fn) => { try { fn(ok); } catch { /* ignore */ } });
 }
 
@@ -112,15 +214,20 @@ function openTopic(supabase: SupabaseClient, topic: string, attempt = 0) {
   });
   bus.channels.set(topic, ch);
   ch.subscribe((status) => {
-    if (status === 'SUBSCRIBED') { setConnected(true); return; }
+    if (status === 'SUBSCRIBED') { attempt = 0; setConnected(true); return; }
     if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
       // any other topic still up? keep "connected"
       const anyUp = Array.from(bus.channels.values()).some((c) => c !== ch && c.state === 'joined');
       if (!anyUp) setConnected(false);
-      // A private topic is refused when the socket had no JWT yet (race at
-      // login) or the migration isn't applied (topic policy missing). Retry
-      // with back-off a few times, then leave the pollers in charge.
-      if (status !== 'CLOSED' && attempt < 4 && bus.channels.get(topic) === ch) {
+      // 20261017120000: a socket drop (screen lock, network switch) reports
+      // CHANNEL_ERROR / CLOSED on every channel; phoenix rejoins them by
+      // itself when the socket is back (the SUBSCRIBED above fires again).
+      // Tearing the channel down and re-creating it here doubled the joins
+      // and the RLS checks on every pick-up. Only a REFUSED join (private
+      // topic without JWT yet — race at login — or the policy missing)
+      // needs our own retry, and only while the socket itself is up.
+      const socketUp = supabase.realtime.isConnected();
+      if (status !== 'CLOSED' && socketUp && attempt < 4 && bus.channels.get(topic) === ch) {
         bus.channels.delete(topic);
         supabase.removeChannel(ch).catch(() => {});
         const delay = 2_000 * Math.pow(2, attempt) + Math.random() * 1_000;
@@ -152,6 +259,7 @@ export function configureRealtimeBus(
   me: { uid: string; role: string; churchIds: string[] } | null,
 ) {
   bus.supabase = supabase;
+  wireResume(); // the gate must be tracking hidden/visible before the first drop
   const want: string[] = [];
   if (me) {
     want.push(`user:${me.uid}`);
@@ -161,6 +269,8 @@ export function configureRealtimeBus(
   const wantSet = new Set(want);
   Array.from(bus.channels.keys()).forEach((t) => { if (!wantSet.has(t)) closeTopic(t); });
   bus.topics = want;
+  // let the «غير متصل» chip re-evaluate (it ignores the bus until someone wants it)
+  bus.connListeners.forEach((fn) => { try { fn(bus.connected); } catch { /* ignore */ } });
   if (want.length === 0) return;
   // Make sure the socket carries the session JWT BEFORE joining private
   // topics (RLS on realtime.messages needs auth.uid()).
@@ -188,13 +298,114 @@ export function busConnected(): boolean { return bus.connected; }
 // ---------- The hook ----------
 export interface RealtimeTableSpec {
   table: string;
-  /** PostgREST-style filter, e.g. `church_id=eq.<uuid>` (postgres_changes only; ignored on the bus) */
+  /**
+   * PostgREST-style filter, e.g. `church_id=eq.<uuid>`. Only meaningful for
+   * `postgres_changes` (none since 20261016120000) — the bus ignores it.
+   * Kept in the type so the 20 call sites that pass one still compile; it
+   * is stripped from `specKey` so a filter that changes when the profile
+   * finishes loading does NOT tear the listener down and re-register it.
+   */
   filter?: string;
   event?: 'INSERT' | 'UPDATE' | 'DELETE' | '*';
 }
 
-/** Poll period used when a bus table has no live connection. */
-const FALLBACK_POLL_MS = 45_000;
+/**
+ * ===================================================================
+ * NO BACKGROUND POLLING (20261011120000)
+ * ===================================================================
+ * Every poll is one PostgREST request = one API-gateway line on the
+ * Supabase «Logs Ingest» meter (which cannot be switched off). The free
+ * plan is ~1 GB a month ≈ 20–30 k requests a day; a few dozen portal tabs
+ * left open used to burn that on their own. So:
+ *
+ *   • The staff app has NO fallback poll any more. When the broadcast bus
+ *     is down the screens simply keep what they have, the header shows an
+ *     «غير متصل» chip (useBusState) and everything refetches the moment
+ *     the bus reconnects or the tab regains focus.
+ *   • The child / priest portals (no auth session → no bus) refresh ONLY on
+ *     focus (useFocusRefresh) — never on a timer. Web push remains the
+ *     instant path for notifications.
+ *   • The only timers left are for screens where something is LIVE right
+ *     now and the user is looking at it: the open online-class room and
+ *     an open chat thread (useLivePoll — see LIVE_POLL_MS). They stop as
+ *     soon as the screen is hidden or the live thing ends.
+ */
+export const LIVE_POLL_MS = {
+  /** an OPEN chat thread the child is reading right now */
+  thread: 20_000,
+  /** the online-class room while the class is live */
+  liveRoom: 15_000,
+  /** a pending signup request the applicant is staring at */
+  signup: 45_000,
+} as const;
+
+/**
+ * Refresh-on-focus helper for the portals: runs `fn` when the tab becomes
+ * visible again (and, optionally, once on mount). No timer. Returns stop().
+ * The pages keep their own «reload» buttons / pull-to-refresh for the
+ * «I am looking at it and want the latest» case.
+ */
+export function startFocusRefresh(fn: () => void): () => void {
+  // 20261017120000: through the resume gate — a short glance away refetches
+  // nothing; ≥ 2 min hidden, a bus drop while hidden or «تحديث» do.
+  return onAppResume(fn);
+}
+
+/**
+ * React form of `onAppResume` for the portals' data blocks (they have no
+ * bus, so «resume» is their only live path besides push). `fn` is read
+ * through a ref, so the effect never re-registers when the callback
+ * identity changes.
+ */
+export function useAppResume(fn: () => void, enabled = true): void {
+  const ref = useRef(fn); ref.current = fn;
+  useEffect(() => {
+    if (!enabled) return;
+    return onAppResume(() => { ref.current(); });
+  }, [enabled]);
+}
+
+/**
+ * Poll ONLY while `active` is true and the tab is visible — for the few
+ * screens that show something live. Pauses while hidden, refreshes once on
+ * return. Returns stop().
+ */
+export function startLivePoll(fn: () => void, everyMs: number, active: () => boolean = () => true): () => void {
+  let t: ReturnType<typeof setInterval> | null = null;
+  // the caller has just loaded the screen → the first poll is due in `everyMs`
+  let lastRun = Date.now();
+  const run = () => { lastRun = Date.now(); fn(); };
+  const start = () => { if (t === null) t = setInterval(() => { if (active() && document.visibilityState === 'visible') run(); }, everyMs); };
+  const stop = () => { if (t !== null) { clearInterval(t); t = null; } };
+  const onVis = () => {
+    if (document.visibilityState === 'visible') {
+      // 20261017120000: on return run at once only if a poll is actually due
+      // (hidden longer than the interval) — a 3 s glance away costs nothing.
+      if (active() && Date.now() - lastRun >= everyMs) run();
+      start();
+    } else stop();
+  };
+  document.addEventListener('visibilitychange', onVis);
+  if (document.visibilityState === 'visible') start();
+  return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
+}
+
+/**
+ * React view of the bus — drives the «غير متصل» chip in the header.
+ * `wanted` = the signed-in user needs a bus at all (owner / approved
+ * servant); `connected` = at least one topic is joined.
+ */
+export function useBusState(): { connected: boolean; wanted: boolean } {
+  const [st, setSt] = useState(() => ({ connected: bus.connected, wanted: bus.topics.length > 0 }));
+  useEffect(() => {
+    const update = () => setSt({ connected: bus.connected, wanted: bus.topics.length > 0 });
+    update();
+    return onBusConnection(update);
+  }, []);
+  return st;
+}
+
+
 
 /**
  * Debounced realtime subscription.
@@ -206,21 +417,38 @@ const FALLBACK_POLL_MS = 45_000;
  *   • HOT tables (BUS_TABLES) listen on the shared broadcast bus — no
  *     per-subscriber RLS work on the server; the others keep classic
  *     `postgres_changes` with optional server-side `filter`,
- *   • if the bus is down the hot tables fall back to a slow poll.
+ *   • if the bus is down there is NO poll (20261011120000) — the screen
+ *     refetches when the bus comes back and on every hidden→visible.
  */
 export function useDebouncedRealtime(
   supabase: SupabaseClient,
   channelName: string,
   tables: RealtimeTableSpec[],
   reload: () => Promise<unknown> | void,
-  opts: { enabled?: boolean; delayMs?: number } = {}
+  opts: {
+    enabled?: boolean;
+    delayMs?: number;
+    /**
+     * 20261014120000: rate limit for AGGREGATE reloads (stats RPCs, counts)
+     * that cannot be patched from the message ids. During a scan burst the
+     * trailing debounce alone fires once per quiet gap — i.e. once per scan
+     * when scans are 3–10 s apart — on every open device. With a
+     * minIntervalMs the reload runs at most once per interval; the last
+     * message of the burst is still honoured (trailing run) so the screen
+     * ends up exact.
+     */
+    minIntervalMs?: number;
+  } = {}
 ) {
-  const { enabled = true, delayMs = 1200 } = opts;
+  const { enabled = true, delayMs = 1200, minIntervalMs = 0 } = opts;
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
+  const tablesRef = useRef(tables); tablesRef.current = tables;
 
-  // Stable key for the table spec so effect deps don't churn on re-render
-  const specKey = JSON.stringify(tables);
+  // Stable key for the table spec so effect deps don't churn on re-render.
+  // `filter` is irrelevant on the bus → excluded, so a filter derived from
+  // the (late-arriving) profile does not re-run the effect.
+  const specKey = JSON.stringify(tables.map((t) => ({ table: t.table, event: t.event ?? '*' })));
 
   useEffect(() => {
     if (!enabled) return;
@@ -230,10 +458,12 @@ export function useDebouncedRealtime(
     let pending = false;
     let disposed = false;
 
+    let lastRunAt = 0;
     const run = async () => {
       if (disposed) return;
       if (inFlight) { pending = true; return; }
       inFlight = true;
+      lastRunAt = Date.now();
       try {
         await reloadRef.current();
       } finally {
@@ -248,9 +478,13 @@ export function useDebouncedRealtime(
     const schedule = () => {
       if (document.visibilityState === 'hidden') { pending = true; return; }
       if (timer) clearTimeout(timer);
-      timer = setTimeout(run, delayMs);
+      // not before delayMs (debounce) and not before the rate-limit window closes
+      const wait = Math.max(delayMs, minIntervalMs > 0 ? lastRunAt + minIntervalMs - Date.now() : 0);
+      timer = setTimeout(run, wait);
     };
 
+    // a message that arrived while hidden → ONE reload on return (as before:
+    // the bus did its job, we only deferred the fetch)
     const onVisible = () => {
       if (document.visibilityState === 'visible' && pending) {
         pending = false;
@@ -260,17 +494,11 @@ export function useDebouncedRealtime(
     document.addEventListener('visibilitychange', onVisible);
 
     const specs = JSON.parse(specKey) as RealtimeTableSpec[];
-    const busSpecs = specs.filter((t) => BUS_TABLES.has(t.table));
-    const pgSpecs = specs.filter((t) => !BUS_TABLES.has(t.table));
+    const busSpecs = specs.filter((t) => !PG_CHANGES_TABLES.has(t.table));
+    const pgSpecs = specs.filter((t) => PG_CHANGES_TABLES.has(t.table));
 
     // ---- hot tables → shared bus ----
     const unsubs: (() => void)[] = [];
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    const startPoll = () => {
-      if (pollTimer) return;
-      pollTimer = setInterval(() => { if (document.visibilityState === 'visible') schedule(); }, FALLBACK_POLL_MS);
-    };
-    const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
     if (busSpecs.length > 0) {
       busSpecs.forEach((t) => {
         unsubs.push(onBusTable(t.table, (m) => {
@@ -278,16 +506,21 @@ export function useDebouncedRealtime(
           schedule();
         }));
       });
-      // fallback: poll while the bus is not connected; refresh when it (re)connects
-      if (!busConnected()) startPoll();
+      // 20261017120000: the bus coming BACK after being down → one refetch
+      // to catch what happened meanwhile — but not on the very first join
+      // (the screen is loading its data right now anyway) and not again
+      // within the same resume (the resume listener below already did it).
+      let wasDown = !busConnected();
       unsubs.push(onBusConnection((ok) => {
-        if (ok) { stopPoll(); schedule(); } else startPoll();
+        if (!ok) { wasDown = true; return; }
+        if (!wasDown) return;
+        wasDown = false;
+        if (Date.now() - lastResumeAt < 5_000) return;
+        schedule();
       }));
-      // a hidden→visible transition always refreshes bus-backed screens
-      // (cheap, and covers messages missed while the socket was asleep)
-      const onVisBus = () => { if (document.visibilityState === 'visible') schedule(); };
-      document.addEventListener('visibilitychange', onVisBus);
-      unsubs.push(() => document.removeEventListener('visibilitychange', onVisBus));
+      // a REAL resume (hidden ≥ 2 min · bus dropped while hidden · «تحديث»)
+      // refreshes bus-backed screens; a short glance away does not.
+      unsubs.push(onAppResume(() => schedule()));
     }
 
     // ---- cold tables → classic postgres_changes ----
@@ -295,9 +528,10 @@ export function useDebouncedRealtime(
     if (pgSpecs.length > 0) {
       channel = supabase.channel(uniqueTopic(channelName));
       pgSpecs.forEach((t) => {
+        const filter = tablesRef.current.find((x) => x.table === t.table)?.filter;
         channel = channel!.on(
           'postgres_changes',
-          { event: t.event ?? '*', schema: 'public', table: t.table, ...(t.filter ? { filter: t.filter } : {}) },
+          { event: t.event ?? '*', schema: 'public', table: t.table, ...(filter ? { filter } : {}) },
           schedule
         );
       });
@@ -307,13 +541,86 @@ export function useDebouncedRealtime(
     return () => {
       disposed = true;
       if (timer) clearTimeout(timer);
-      stopPoll();
       unsubs.forEach((u) => u());
       document.removeEventListener('visibilitychange', onVisible);
       if (channel) supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, channelName, specKey, enabled, delayMs]);
+}
+
+/**
+ * ===================================================================
+ * useBusIds — react to WHICH rows changed, not just THAT something changed
+ * ===================================================================
+ * 20261013120000. Every bus message carries the first 50 affected
+ * enrollment / row ids (`BusMessage.ids`). `useDebouncedRealtime` ignores
+ * them and lets the screen refetch EVERYTHING, which is right for small
+ * lists but was the amplifier behind the «Logs Ingest» spike on follow-up
+ * evenings: one servant records a call feedback → every open device
+ * re-reads the feedback rows of all 300 children (3 batched requests) plus
+ * the home widget's 3 queries → ~240 logged API requests per phone call.
+ *
+ * This hook collects the ids of every message that arrives within the
+ * debounce window and calls `onIds(ids, op)` once — the screen patches
+ * only those rows (one tiny request, or none at all). Messages WITHOUT ids
+ * (n > 50, or a table that does not carry them) call `onIds([], op)` so
+ * the caller can fall back to a full reload. Paused while hidden; a
+ * hidden→visible transition hands the collected ids over (or, when nothing
+ * is pending, triggers `onVisible` so the caller can do its usual refresh).
+ */
+export function useBusIds(
+  table: string,
+  /** `n` = total affected rows of the collected messages (ids are capped at 50 per message, n is not) */
+  onIds: (ids: string[], op: string, n: number) => Promise<unknown> | void,
+  opts: { enabled?: boolean; delayMs?: number; onVisible?: () => void } = {},
+) {
+  const { enabled = true, delayMs = 800 } = opts;
+  const cbRef = useRef(onIds); cbRef.current = onIds;
+  const visRef = useRef(opts.onVisible); visRef.current = opts.onVisible;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let pendingIds = new Set<string>();
+    let pendingOp = '';
+    let pendingAll = false; // a message without ids arrived → the caller must reload everything
+    let pendingN = 0;
+    let hasPending = false;
+
+    const flush = () => {
+      timer = null;
+      if (!hasPending) return;
+      const ids = pendingAll ? [] : Array.from(pendingIds);
+      const op = pendingOp; const n = pendingN;
+      pendingIds = new Set(); pendingOp = ''; pendingAll = false; pendingN = 0; hasPending = false;
+      try { void cbRef.current(ids, op, n); } catch { /* ignore */ }
+    };
+    const schedule = () => {
+      if (document.visibilityState === 'hidden') return; // flushed on return
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, delayMs);
+    };
+    const off = onBusTable(table, (m) => {
+      hasPending = true;
+      // mixed ops in one window → treat as the heavier one (not a pure INSERT)
+      pendingOp = pendingOp && pendingOp !== m.op ? 'MIXED' : m.op;
+      pendingN += m.n ?? (m.ids?.length ?? 1);
+      if (m.ids && m.ids.length) m.ids.forEach((id) => pendingIds.add(id)); else pendingAll = true;
+      schedule();
+    });
+    // ids collected while hidden → hand them over on return (cheap, exact).
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (hasPending) schedule();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    // 20261017120000: the caller's full refresh (`onVisible`) runs only on a
+    // REAL resume (≥ 2 min hidden · bus dropped · «تحديث») — not on every
+    // glance away — and not when pending ids already cover the gap.
+    const offResume = onAppResume(() => { if (!hasPending) visRef.current?.(); });
+    return () => { off(); offResume(); if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+  }, [table, enabled, delayMs]);
 }
 
 /**

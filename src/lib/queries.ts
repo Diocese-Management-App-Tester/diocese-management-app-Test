@@ -201,11 +201,33 @@ export async function fetchAllRows<T extends { id: string }>(
 }
 
 /**
+ * 20261013120000: re-read ONLY the enrollments named by a realtime message
+ * (same select as the list) so the children page can patch rows in place
+ * instead of re-downloading every page on every device for every scan /
+ * counter update. One request per 100 ids.
+ */
+export async function fetchEnrollmentsByIds(supabase: SupabaseClient, ids: string[]): Promise<EnrollmentWithPerson[]> {
+  const out: EnrollmentWithPerson[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabase.from('enrollments').select(ENROLLMENT_LIST_SELECT).in('id', ids.slice(i, i + 100));
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as EnrollmentWithPerson[]).filter((e) => e.person));
+  }
+  return out;
+}
+
+/**
  * Tiny lookup tables (churches / services / classes) rarely change; cache
  * them per session so navigating between tabs doesn't re-request them.
+ *
+ * 20261010120000: 10 minutes (was 1). Every page mount asked for 3 tables
+ * once the minute was over — three API-gateway log lines per navigation per
+ * user. Every edit screen already calls invalidateLookup() after a write,
+ * and the realtime bus / postgres_changes refresh the lists live, so a
+ * longer TTL changes nothing visible.
  */
 const lookupCache = new Map<string, { at: number; data: unknown[] }>();
-const LOOKUP_TTL_MS = 60_000;
+const LOOKUP_TTL_MS = 10 * 60_000;
 
 /** churches · services · classes carry a MANUAL order (20260928130000) — every list follows it */
 const MANUAL_ORDER_TABLES = new Set(['churches', 'services', 'classes']);

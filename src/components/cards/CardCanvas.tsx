@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useId, useMemo, type CSSProperties } from 'react';
 import QRCode from 'qrcode';
 import { User, Landmark } from 'lucide-react';
 import type {
@@ -8,9 +8,12 @@ import type {
   CardElement,
   CardPrintSettings,
   CardSide,
+  CardQrFrame,
   ImageFit,
 } from '@/lib/card-types';
-import { ageFromBirthdate, ARABIC_MONTHS, isImageElement, faceDesign } from '@/lib/card-types';
+import {
+  ageFromBirthdate, ARABIC_MONTHS, isImageElement, faceDesign, normalizeQr, qrFrameStops, qrFrameColor, qrEffectivePadding,
+} from '@/lib/card-types';
 import { unitDims, unitFaces } from '@/lib/card-layout';
 
 // ---------- data fed into a card ----------
@@ -151,19 +154,90 @@ const resolveText = (
   return label ? `${label} ${value}` : value;
 };
 
-// QR image as data-url (rendered async once per national_id)
-function QrImage({ value, className }: { value: string; className?: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    QRCode.toDataURL(value || '—', { margin: 0, width: 256 })
-      .then((u) => alive && setUrl(u))
-      .catch(() => {});
-    return () => { alive = false; };
+// QR as an inline VECTOR (SVG path built from the module matrix). A raster
+// data-url (toDataURL) rounds the module size to whole pixels and leaves an
+// uneven blank strip on the right / bottom, which shows as the code sitting
+// slightly off-centre inside its background / frame. The SVG viewBox is
+// exactly N×N modules, so the symbol is mathematically centred (xMidYMid)
+// and stays crisp at any zoom / print resolution. The light modules are
+// TRANSPARENT so the element's own background (colour, expanded pad, or
+// nothing at all) shows through.
+function QrImage({ value, color = '#000000', className }: { value: string; color?: string; className?: string }) {
+  const { size, path } = useMemo(() => {
+    try {
+      const qr = QRCode.create(value || '—', { errorCorrectionLevel: 'M' });
+      const n = qr.modules.size;
+      const parts: string[] = [];
+      for (let y = 0; y < n; y++) {
+        // merge horizontal runs of dark modules into one rect per run
+        let x = 0;
+        while (x < n) {
+          if (!qr.modules.get(y, x)) { x++; continue; }
+          const start = x;
+          while (x < n && qr.modules.get(y, x)) x++;
+          parts.push(`M${start} ${y}h${x - start}v1h${start - x}z`);
+        }
+      }
+      return { size: n, path: parts.join('') };
+    } catch {
+      return { size: 0, path: '' };
+    }
   }, [value]);
-  if (!url) return null;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="QR" className={className} style={{ width: '100%', height: '100%' }} />;
+  if (!size) return null;
+  return (
+    <svg
+      viewBox={`0 0 ${size} ${size}`}
+      preserveAspectRatio="xMidYMid meet"
+      className={className}
+      style={{ display: 'block', width: '100%', height: '100%' }}
+      shapeRendering="crispEdges"
+      aria-label="QR"
+      role="img"
+    >
+      <path d={path} fill={color} />
+    </svg>
+  );
+}
+
+// Rounded-rect path (clockwise) — r is clamped to half the smaller side
+const roundedRectPath = (x: number, y: number, w: number, h: number, r: number): string => {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  if (rr === 0) return `M${x} ${y}h${w}v${h}h${-w}z`;
+  return (
+    `M${x + rr} ${y}h${w - 2 * rr}a${rr} ${rr} 0 0 1 ${rr} ${rr}v${h - 2 * rr}a${rr} ${rr} 0 0 1 ${-rr} ${rr}` +
+    `h${-(w - 2 * rr)}a${rr} ${rr} 0 0 1 ${-rr} ${-rr}v${-(h - 2 * rr)}a${rr} ${rr} 0 0 1 ${rr} ${-rr}z`
+  );
+};
+
+// The QR frame: a ring between the element box and the background pad,
+// metallic gradient or flat colour. Pure SVG → prints exactly like the screen
+// and leaves the inside fully transparent.
+function QrFrameRing({
+  w, h, outerR, thickness, frame,
+}: { w: number; h: number; outerR: number; thickness: number; frame: CardQrFrame }) {
+  const gradId = useId().replace(/:/g, '');
+  const stops = qrFrameStops(frame);
+  const innerR = Math.max(0, outerR - thickness);
+  const d = roundedRectPath(0, 0, w, h, outerR) + roundedRectPath(thickness, thickness, w - 2 * thickness, h - 2 * thickness, innerR);
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ position: 'absolute', inset: 0, display: 'block', pointerEvents: 'none' }}
+      aria-hidden
+    >
+      {stops && (
+        <defs>
+          {/* 135° like the CSS swatch: top-left → bottom-right */}
+          <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+            {stops.map((st, i) => <stop key={i} offset={st.offset} stopColor={st.color} />)}
+          </linearGradient>
+        </defs>
+      )}
+      <path d={d} fillRule="evenodd" fill={stops ? `url(#${gradId})` : qrFrameColor(frame)} />
+    </svg>
+  );
 }
 
 // ---------- single element ----------
@@ -226,11 +300,52 @@ function ElementView({
   }
 
   if (el.type === 'qr') {
+    // layers: element box = [frame] → [background pad (rounded)] → [QR]
+    const q = normalizeQr(el);
+    const frameOn = q.frame.enabled && q.frame.width > 0;
+    const framePx = frameOn ? Math.max(q.frame.width * scale, 0.5) : 0;
+    const outerR = el.borderRadius * scale;
+    const innerR = Math.max(0, outerR - framePx);
+    // quiet zone: the user's padding, never below what the rounded corners
+    // need so the finder patterns are not clipped (qrCornerSafePadding)
+    const padPx = qrEffectivePadding(el.borderRadius, q) * scale;
+    // The frame is a RING drawn as an SVG even-odd path (outer rounded rect
+    // minus inner rounded rect) filled with a flat colour or an SVG linear
+    // gradient. It is NOT a CSS mask: print / PDF engines ignore
+    // mask-composite and would paint the whole box in the frame colour, which
+    // showed up as "the transparent background became the frame colour" on
+    // paper. SVG paints identically on screen and in print.
+    const W = el.w * scale;
+    const H = el.h * scale;
     return (
-      <div style={{ ...base, background: el.bgEnabled ? undefined : '#fff' }}>
-        {bgLayer}
-        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-          <QrImage value={person.national_id} />
+      <div
+        style={{
+          ...base,
+          // the generic stroke is replaced by the QR frame
+          border: undefined,
+        }}
+      >
+        {frameOn && (
+          <QrFrameRing w={W} h={H} outerR={outerR} thickness={framePx} frame={q.frame} />
+        )}
+        <div
+          style={{
+            position: 'absolute',
+            inset: framePx,
+            borderRadius: innerR,
+            backgroundColor: q.bgTransparent ? 'transparent' : q.bgColor,
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+            padding: padPx,
+            // centre the symbol exactly inside the pad (also for non-square boxes)
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0 }}>
+            <QrImage value={person.national_id} color={q.color} />
+          </div>
         </div>
       </div>
     );

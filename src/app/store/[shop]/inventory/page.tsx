@@ -1,36 +1,36 @@
 'use client';
 
-// ---------- POINTS STORE — INVENTORY (المخزون) ----------
-// Manage the items children can buy with points:
-//   • list (scoped church → service → class, search by name / code)
-//   • add / edit (code, name, picture, price in points, stock, active, scope)
-//   • quick +/− stock, toggle active, delete
+// ---------- POINTS STORE — INVENTORY of ONE shop (المخزون) ----------
+// 20261002120000: the shop is the container — this page lists the items of
+// /store/[shop] only:
+//   • list (search by name / code), add / edit (code, name, picture, price
+//     in points, stock, active), quick +/− stock, toggle active, delete
 //   • select items → print QR labels (LabelsPrintModal)
 // Realtime on store_items so several servants can restock together.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 import {
   Plus, Search, Loader2, Pencil, Trash2, Tag, Package, CheckSquare, Square, Minus,
   EyeOff, Eye, Star, Boxes, AlertTriangle,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
-import {
-  StoreHeader, ItemThumb, ScopeSelectors, useScopeState, useStoreLookups, scopeLabel, Toast,
-} from '@/components/store/StoreBits';
+import { StoreHeader, ItemThumb, ShopMissing, useStoreShop, useStoreLookups, Toast } from '@/components/store/StoreBits';
 import ItemFormModal from '@/components/store/ItemFormModal';
 import LabelsPrintModal from '@/components/store/LabelsPrintModal';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
-import { fetchStoreItems, isMigrationMissing, MIGRATION_HINT, storeErrorMessage } from '@/lib/store';
+import { fetchStoreItems, isMigrationMissing, MIGRATION_HINT, storeErrorMessage, isShopsMigrationMissing, SHOPS_MIGRATION_HINT } from '@/lib/store';
 import type { StoreItem } from '@/lib/types';
 
 export default function InventoryPage() {
+  const { shop: shopId } = useParams<{ shop: string }>();
   const { profile } = useAuth();
   const [supabase] = useState(() => createClient());
   const approved = profile?.status === 'approved';
   const { churches, services, classes } = useStoreLookups(supabase, approved);
-  const scope = useScopeState();
+  const { shop, loading: shopLoading, missing, error: shopError } = useStoreShop(supabase, shopId ?? null, approved);
 
   const [items, setItems] = useState<StoreItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,8 +45,9 @@ export default function InventoryPage() {
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const load = useCallback(async () => {
+    if (!shopId) return;
     try {
-      const rows = await fetchStoreItems(supabase, { church: scope.church, service: scope.service, class: scope.class });
+      const rows = await fetchStoreItems(supabase, {}, { shopId });
       setItems(rows);
       setMigrationMissing(false);
     } catch (err) {
@@ -54,9 +55,9 @@ export default function InventoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [supabase, scope.church, scope.service, scope.class]);
+  }, [supabase, shopId]);
 
-  useEffect(() => { if (approved) load(); }, [approved, load]);
+  useEffect(() => { if (approved && shop) load(); }, [approved, shop, load]);
   useDebouncedRealtime(supabase, 'store-inventory', [{ table: 'store_items' }], load, { enabled: approved, delayMs: 600 });
 
   const visible = useMemo(() => {
@@ -110,9 +111,16 @@ export default function InventoryPage() {
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visible.map((it) => it.id)));
   const selectedItems = items.filter((it) => selected.has(it.id));
 
+  if (shopLoading) {
+    return <AppShell><StoreHeader /><div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-orange-500" /></div></AppShell>;
+  }
+  if (missing || !shop) {
+    return <AppShell><StoreHeader /><ShopMissing migrationHint={isShopsMigrationMissing(shopError) ? SHOPS_MIGRATION_HINT : null} /></AppShell>;
+  }
+
   return (
     <AppShell>
-      <StoreHeader title="المخزون" badge={<span className="badge bg-orange-100 text-orange-700 tabular-nums">{items.length}</span>} />
+      <StoreHeader shop={shop} title="المخزون" badge={<span className="badge bg-orange-100 text-orange-700 tabular-nums">{items.length}</span>} />
 
       {migrationMissing && (
         <p className="mb-3 rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">⚠️ {MIGRATION_HINT}</p>
@@ -125,12 +133,11 @@ export default function InventoryPage() {
         <div className="card !p-2 text-center"><p className={`text-lg font-extrabold tabular-nums ${totals.out ? 'text-red-500' : 'text-slate-400'}`}>{totals.out}</p><p className="text-[10px] font-bold text-slate-400">نفذت كميته</p></div>
       </section>
 
-      {/* search + scope */}
-      <div className="relative mb-2">
+      {/* search */}
+      <div className="relative mb-3">
         <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input id="inv-search" className="input-field pr-9" placeholder="ابحث بالاسم أو الكود..." value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
-      <ScopeSelectors idPrefix="inv" scope={scope} churches={churches} services={services} classes={classes} />
 
       {/* toolbar */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -155,7 +162,7 @@ export default function InventoryPage() {
       ) : visible.length === 0 ? (
         <div className="card py-12 text-center text-slate-400">
           <Package className="mx-auto mb-3 h-10 w-10 text-orange-200" />
-          <p className="font-bold">{items.length === 0 ? 'المخزون فارغ — أضف أول صنف' : 'لا نتائج'}</p>
+          <p className="font-bold">{items.length === 0 ? 'مخزون هذا المتجر فارغ — أضف أول صنف' : 'لا نتائج'}</p>
         </div>
       ) : (
         <div id="inv-list" className="card !p-0 overflow-hidden divide-y divide-orange-50">
@@ -178,7 +185,7 @@ export default function InventoryPage() {
                   <p className="truncate font-extrabold">{it.name}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] font-bold text-slate-400">
                     <span dir="ltr" className="font-mono">{it.code}</span>
-                    <span className="truncate">{scopeLabel(it, churches, services, classes)}</span>
+                    {it.description && <span className="truncate">{it.description}</span>}
                   </p>
                   <div className="mt-1.5 flex items-center gap-1.5">
                     <span className="badge bg-gold-100 text-gold-700"><Star className="h-3 w-3" /> {it.price}</span>
@@ -210,7 +217,7 @@ export default function InventoryPage() {
 
       {form.open && (
         <ItemFormModal
-          item={form.item} churches={churches} services={services} classes={classes}
+          item={form.item} shop={shop} churches={churches} services={services} classes={classes}
           onClose={() => setForm({ open: false, item: null })}
           onSaved={(saved) => {
             setForm({ open: false, item: null });

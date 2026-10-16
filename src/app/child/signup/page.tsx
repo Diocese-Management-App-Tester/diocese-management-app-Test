@@ -12,6 +12,11 @@
 // Submit → RPC child_signup → a PENDING join request the class servant
 // reviews in «إدارة المخدومين → الطلبات». The page then polls
 // child_signup_status and offers the login button once approved.
+//
+// 20261004120000: opens ONLY through ?invite=<token> (دعوة مخدوم) — the
+// invite's scope is locked and the token is consumed by child_signup. A code
+// that already has a child account may enroll in ANOTHER class (same
+// password); only the same class is refused (already_registered).
 
 import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
@@ -23,6 +28,10 @@ import {
   ScanLine, Wand2, Camera, Trash2, UserCheck, Check, AlertTriangle, Clock, CheckCircle2, XCircle, LogIn,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { LIVE_POLL_MS } from '@/lib/realtime';
+import { kindsLabel, type AccountKind, type InviteCheck } from '@/lib/accounts';
+import InviteGate, { useSignupInvite } from '@/components/InviteGate';
+import ExistingCodeDialog from '@/components/ExistingCodeDialog';
 import QrScanner from '@/components/store/QrScanner';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { generateCode as renderCode, normalizeCodes, type CodesConfig } from '@/lib/code-templates';
@@ -71,11 +80,23 @@ export default function ChildSignupPage() {
 function ChildSignupWizard() {
   const params = useSearchParams();
   const supabase = createClient();
+  const inviteToken = params.get('invite');
+  const invite = useSignupInvite(supabase, inviteToken, 'child');
+  return (
+    <InviteGate invite={invite} kind="child" token={inviteToken}>
+      {invite?.valid && <ChildSignupForm invite={invite} inviteToken={inviteToken ?? ''} />}
+    </InviteGate>
+  );
+}
 
-  // ---- Invite-link scope (locked when present) ----
-  const inviteChurch = params.get('church') ?? '';
-  const inviteService = params.get('service') ?? '';
-  const inviteClass = params.get('class') ?? '';
+function ChildSignupForm({ invite, inviteToken }: { invite: InviteCheck; inviteToken: string }) {
+  const params = useSearchParams();
+  const supabase = createClient();
+
+  // ---- Invite scope (locked when present) ----
+  const inviteChurch = invite.church_id ?? '';
+  const inviteService = invite.service_id ?? '';
+  const inviteClass = invite.class_id ?? '';
   const churchLocked = !!inviteChurch;
   const serviceLocked = !!inviteService;
   const classLocked = !!inviteClass;
@@ -120,7 +141,8 @@ function ChildSignupWizard() {
   const className = classes.find((c) => c.id === classId)?.name;
 
   // ---- Step 2: code ----
-  const [code, setCode] = useState('');
+  // 20261003120000: «تغيير الحساب → إضافة حساب» arrives with ?code=<the person's code>
+  const [code, setCode] = useState(params.get('code') ?? '');
   const [showScan, setShowScan] = useState(false);
   const [lookup, setLookup] = useState<ChildSignupLookup | null>(null);
   const [checking, setChecking] = useState(false);
@@ -180,6 +202,24 @@ function ChildSignupWizard() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // 20261003120000: a code that already has a password AND a child enrollment =
+  // an existing child account (log in). A code with a password but NO child
+  // enrollment (servant / priest) → same person, same password, a child
+  // account is added after the servant approves.
+  // 20261004120000: an existing child account is NOT a blocker any more — the
+  // same person may be enrolled in another class (same password); the RPC
+  // refuses only the same class.
+  const isChildAccount = !!lookup?.has_password && !!lookup?.is_child;
+  const linkedAccount = !!lookup?.has_password && !lookup?.family;
+  const existingKindList = ([lookup?.is_servant && 'servant', lookup?.is_child && 'child', lookup?.is_priest && 'priest'].filter(Boolean)) as AccountKind[];
+  const linkedKinds = kindsLabel(existingKindList);
+
+  // 20261005120000: «الكود مسجّل بالفعل — هل أنت نفس الشخص؟» on step 2; the verified
+  // password is reused on step 4
+  const [askExisting, setAskExisting] = useState(false);
+  const [claimedPassword, setClaimedPassword] = useState('');
+  useEffect(() => { setClaimedPassword(''); }, [code]);
+
   const next = () => {
     setError('');
     if (step === 1) {
@@ -187,8 +227,9 @@ function ChildSignupWizard() {
       setStep(2);
     } else if (step === 2) {
       if (!code.trim()) return setError('اكتب الكود أو امسحه بالكاميرا أو ولّد كودًا');
-      if (lookup?.has_password) return setError('هذا الكود له حساب بالفعل — سجّل الدخول به');
+      if (lookup?.family) return setError('هذا الكود كود عائلة — لا يمكن استخدامه لشخص، اختر كودًا آخر');
       if (lookup?.pending) return setError('يوجد طلب تسجيل قيد المراجعة لهذا الكود');
+      if (linkedAccount && !claimedPassword) { setAskExisting(true); return; }
       setStep(3);
     } else if (step === 3) {
       if (!name.trim()) return setError('اكتب الاسم الكامل');
@@ -224,6 +265,7 @@ function ChildSignupWizard() {
         church_id: churchId,
         service_id: serviceId,
         class_id: classId,
+        invite: inviteToken,
       });
       setChildSignupRequest(r.request_id);
       setRequestId(r.request_id);
@@ -363,18 +405,24 @@ function ChildSignupWizard() {
                   <Loader2 className="h-3 w-3 animate-spin" /> جارٍ التحقق من الكود...
                 </p>
               )}
-              {lookupDone && lookup?.exists && !lookup.has_password && !lookup.pending && (
+              {lookupDone && lookup?.exists && !lookup.family && !lookup.pending && (
                 <div className="rounded-xl bg-emerald-50 px-3 py-2">
                   <p className="flex items-center gap-1 text-xs font-extrabold text-emerald-700">
-                    <UserCheck className="h-4 w-4" /> مخدوم مسجّل بالفعل: {lookup.name}
+                    <UserCheck className="h-4 w-4" /> {linkedAccount ? 'شخص' : 'مخدوم'} مسجّل بالفعل: {lookup.name}
                   </p>
-                  <p className="mt-0.5 text-[11px] font-bold text-emerald-600">سيُربط حسابك بنفس المخدوم بعد موافقة الخادم</p>
+                  <p className="mt-0.5 text-[11px] font-bold text-emerald-600">
+                    {isChildAccount
+                      ? 'لديه حساب مخدوم — سيُضاف تسجيل في هذا الفصل لنفس الشخص بنفس كلمة المرور بعد موافقة الخادم (لا يمكن التسجيل في فصله الحالي مرة أخرى)'
+                      : linkedAccount
+                      ? `لديه حساب ${linkedKinds} — سيُضاف حساب المخدوم لنفس الشخص بنفس كلمة المرور بعد موافقة الخادم`
+                      : 'سيُربط حسابك بنفس المخدوم بعد موافقة الخادم'}
+                  </p>
                 </div>
               )}
-              {lookupDone && lookup?.has_password && (
+              {lookupDone && lookup?.family && (
                 <div className="flex items-start gap-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-600">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>هذا الكود له حساب بالفعل. <Link href="/login?as=child" className="underline">سجّل الدخول</Link> أو استخدم كودًا آخر.</span>
+                  <span>هذا الكود كود عائلة — لا يمكن أن يكون كود شخص. استخدم كودًا آخر.</span>
                 </div>
               )}
               {lookupDone && lookup?.pending && (
@@ -383,8 +431,13 @@ function ChildSignupWizard() {
                   <span>يوجد طلب تسجيل قيد المراجعة لهذا الكود — انتظر رد الخادم.</span>
                 </div>
               )}
-              {lookupDone && lookup && !lookup.exists && code.trim() && (
+              {lookupDone && lookup && !lookup.exists && !lookup.family && code.trim() && (
                 <p className="text-[11px] font-bold text-slate-400">كود جديد — ستُدخل بياناتك في الخطوة التالية</p>
+              )}
+              {claimedPassword && (
+                <p className="flex items-center gap-1 rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700">
+                  <Check className="h-3.5 w-3.5" /> تم التحقق — سيُضاف التسجيل لنفس الشخص بكلمة مروره الحالية بعد موافقة الخادم
+                </p>
               )}
             </section>
           )}
@@ -489,10 +542,15 @@ function ChildSignupWizard() {
                 <p dir="ltr" className="text-right">الكود: <b className="text-slate-700">{code.trim()}</b></p>
                 <p>الفصل: <b className="text-slate-700">{[churchName, serviceName, className].filter(Boolean).join(' ← ')}</b></p>
               </div>
+              {linkedAccount && (
+                <p id="cs-linked-hint" className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-700">
+                  هذا الكود له حساب {linkedKinds} بالفعل — للشخص الواحد كلمة مرور واحدة لكل حساباته. اكتب كلمة مرورك الحالية هنا.
+                </p>
+              )}
               <div>
-                <label htmlFor="cs-password" className="mb-1 block text-xs font-bold text-slate-500">كلمة المرور *</label>
+                <label htmlFor="cs-password" className="mb-1 block text-xs font-bold text-slate-500">{linkedAccount ? 'كلمة المرور الحالية *' : 'كلمة المرور *'}</label>
                 <input id="cs-password" type="password" className="input-field" placeholder="••••••••" dir="ltr"
-                  value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" minLength={6} />
+                  value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete={linkedAccount ? 'current-password' : 'new-password'} minLength={6} />
               </div>
               <div>
                 <label htmlFor="cs-confirm" className="mb-1 block text-xs font-bold text-slate-500">تأكيد كلمة المرور *</label>
@@ -532,6 +590,18 @@ function ChildSignupWizard() {
           <Link href="/login?as=child" className="font-bold text-gold-700 hover:underline">تسجيل الدخول</Link>
         </p>
       </section>
+
+      {askExisting && (
+        <ExistingCodeDialog
+          code={code.trim()}
+          name={lookup?.name}
+          kinds={existingKindList}
+          approverLabel="خادم الفصل"
+          onVerified={(pw) => { setClaimedPassword(pw); setPassword(pw); setConfirm(pw); setAskExisting(false); setStep(3); }}
+          onChangeCode={() => { setAskExisting(false); setCode(''); setLookup(null); setLookupDone(false); }}
+          onClose={() => setAskExisting(false)}
+        />
+      )}
 
       {rawImage && (
         <PhotoCropModal
@@ -576,7 +646,7 @@ function PendingScreen({ requestId, onReset }: { requestId: string; onReset: () 
       }
     };
     check();
-    const t = setInterval(check, 15000);
+    const t = setInterval(() => { if (document.visibilityState === 'visible') check(); }, LIVE_POLL_MS.signup); // live wait screen: 45 s, visible only
     const onVis = () => { if (document.visibilityState === 'visible') check(); };
     document.addEventListener('visibilitychange', onVis);
     return () => { alive = false; clearInterval(t); document.removeEventListener('visibilitychange', onVis); };

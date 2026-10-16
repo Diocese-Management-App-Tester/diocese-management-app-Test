@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Home, CalendarCheck, Star, Database, SlidersHorizontal, Menu, X, LogOut,
-  CalendarDays, Clock, User, GraduationCap, MessageCircle, Video, Trophy, Tent, Bell, Library, Cross, UsersRound, type LucideIcon,
+  CalendarDays, Clock, User, GraduationCap, MessageCircle, Video, Trophy, Tent, Bell, Library, Cross, UsersRound, ShoppingBag, type LucideIcon,
 } from 'lucide-react';
 import { useChild } from '@/lib/child-context';
 import { createClient } from '@/lib/supabase/client';
@@ -26,6 +26,8 @@ import { syncPushRegistration, kickDispatcher } from '@/lib/push';
 import { useChildConfession } from '@/components/child/ConfessionBits';
 import { useChildFamily } from '@/components/child/FamilyBits';
 import { Loader2 } from 'lucide-react';
+import RefreshButton from '@/components/RefreshButton';
+import { SwitchAccountButton } from '@/components/SwitchAccountModal';
 
 export const CHILD_NAV: { href: string; label: string; icon: LucideIcon; id: string }[] = [
   { href: '/child', label: 'الرئيسية', icon: Home, id: 'child-nav-home' },
@@ -139,6 +141,29 @@ export function useChildLibrary() {
   };
 }
 
+/**
+ * The store shops open to the child (module إستبدال النقاط, migration
+ * 20261001120000) + his purchase requests — from the shared ChildProvider.
+ * `hasAny` = at least one ACTIVE shop is connected to one of his places
+ * (menu entry + home card stay hidden otherwise). `pending` = requests
+ * waiting for a servant; `approvedUnseen` is not tracked (receipts live in
+ * the points page).
+ */
+export function useChildShops() {
+  const { shops, storeRequests, reloadShops } = useChild();
+  const list = shops ?? [];
+  const reqs = storeRequests ?? [];
+  return {
+    shops,
+    requests: storeRequests,
+    reload: reloadShops,
+    hasAny: list.length > 0 || reqs.length > 0,
+    shopCount: list.length,
+    pending: reqs.filter((r) => r.status === 'pending').length,
+    approved: reqs.filter((r) => r.status === 'approved').length,
+  };
+}
+
 // ---------- Header ----------
 function ChildHeader({ onMenu }: { onMenu: () => void }) {
   const { profile, token } = useChild();
@@ -186,6 +211,7 @@ function ChildHeader({ onMenu }: { onMenu: () => void }) {
             )}
           </Link>
         )}
+        <RefreshButton id="child-refresh-btn" />
         <Link
           id="child-notifications-bell"
           href="/child/notifications"
@@ -229,6 +255,7 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
   const { hasAny: hasLibrary, favorites: libFavs } = useChildLibrary();
   const { hasAny: hasConfession, pending: confPending, upcoming: confUpcoming } = useChildConfession();
   const { hasFamily, hasPriests: hasFamilyPriests, pending: famPending, upcoming: famUpcoming } = useChildFamily();
+  const { hasAny: hasShops, pending: shopPending } = useChildShops();
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -358,6 +385,22 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
               )}
             </Link>
           )}
+          {hasShops && (
+            <Link
+              id="child-nav-store"
+              href="/child/store"
+              onClick={onClose}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                isActive(pathname, '/child/store') ? 'bg-orange-100 text-orange-700' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <ShoppingBag className="h-5 w-5 text-orange-600" />
+              المتجر
+              {shopPending > 0 && (
+                <span className="mr-auto rounded-full bg-orange-600 px-2 py-0.5 text-[10px] font-extrabold text-white tabular-nums">{shopPending}</span>
+              )}
+            </Link>
+          )}
           {hasOccasions && (
             <Link
               id="child-nav-occasions"
@@ -458,7 +501,8 @@ function ChildSideMenu({ open, onClose }: { open: boolean; onClose: () => void }
           )}
         </nav>
 
-        <div className="border-t border-indigo-100 p-3">
+        <div className="space-y-2 border-t border-indigo-100 p-3">
+          <SwitchAccountButton current="child" compact />
           <button
             id="child-logout-btn"
             onClick={() => { logout(); onClose(); router.replace('/login?as=child'); }}

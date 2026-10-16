@@ -140,21 +140,20 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'reports.build', group: 'reports', label: 'إنشاء وتصدير التقارير', desc: 'اختيار البيانات والحقول وتصميم التقرير وتصديره PDF / Excel / طباعة (افتراضي لكل خادم يرى الوحدة)' },
   { key: 'reports.templates', group: 'reports', label: 'إدارة القوالب', desc: 'حفظ وتعديل وحذف قوالب التقارير في نطاقه' },
 
-  // ---- العائلات — managers hold them all; class servants view by default
-  // and need a profile to build / edit families ----
+  // ---- العائلات — everybody who sees the module views; since 20260930130000
+  // ONLY the owner and the church manager (and the priest from his portal)
+  // manage families — the key is kept for the label, a profile can't grant it ----
   { key: 'family.view', group: 'family', label: 'عرض العائلات', desc: 'رؤية العائلات التي لها فرد في نطاقه، وظهور العائلة عند المسح (افتراضي لكل خادم يرى الوحدة)' },
-  { key: 'family.manage', group: 'family', label: 'إدارة العائلات', desc: 'إنشاء عائلة وإضافة أفرادها بمسح الكود (QR) وتعديلها وحذفها' },
+  { key: 'family.manage', group: 'family', label: 'إدارة العائلات', desc: 'إنشاء عائلة وإضافة أفرادها وتعديلها وحذفها — لمالك التطبيق ومدير الكنيسة (في كنيسته) فقط، والكاهن من بوابته — لا يُمنح عبر ملف صلاحيات' },
 
   // ---- التحكم في الدخول — managers hold them all; class servants stand at
   // the door by default and need a profile to configure events / rules ----
   { key: 'access.check', group: 'access', label: 'التحقق عند البوابة', desc: 'مسح الكود أو البحث عن الشخص ورؤية مسموح / مرفوض وحالة كل قاعدة (افتراضي لكل خادم يرى الوحدة)' },
   { key: 'access.manage', group: 'access', label: 'إدارة بوابات الدخول', desc: 'إنشاء وتعديل وحذف بوابات الدخول وقواعدها ومجموعاتها وقائمة المسموح لهم في نطاقه' },
 
-  // ---- الخزينة — managers hold them all; class servants view by default
-  // and need a profile to record or manage money ----
-  { key: 'finance.view', group: 'finance', label: 'عرض الخزينة', desc: 'رؤية الرصيد والإيرادات والمصروفات والقيود في نطاقه (افتراضي لكل خادم يرى الوحدة)' },
-  { key: 'finance.add', group: 'finance', label: 'تسجيل إيراد / مصروف', desc: 'إضافة قيد جديد بمبلغ وسبب في نطاقه' },
-  { key: 'finance.manage', group: 'finance', label: 'إدارة الخزينة', desc: 'تعديل وحذف القيود وإنشاء وتعديل الأسباب الثابتة في نطاقه' },
+  // ---- الخزينة (الميزانيات) — visibility is per BUDGET (its members);
+  // this key only decides who may CREATE a budget (managers by role) ----
+  { key: 'finance.create', group: 'finance', label: 'إنشاء ميزانية', desc: 'إنشاء ميزانية جديدة لكنيسته أو خدمته أو فصله ويصبح مديرها — مسؤولو الخدمة والكنيسة يملكونها تلقائياً' },
 ];
 
 export const PERMISSION_BY_KEY: Record<string, PermissionDef> = Object.fromEntries(

@@ -13,6 +13,8 @@ import {
   Home, Users, CalendarClock, PhoneCall, SlidersHorizontal, Menu, X, LogOut, CalendarDays, Clock, User, Loader2, Cross, UsersRound, MapPinned, Footprints, type LucideIcon,
 } from 'lucide-react';
 import { BRANDING, dioceseLogo } from '@/lib/branding';
+import RefreshButton from '@/components/RefreshButton';
+import { SwitchAccountButton } from '@/components/SwitchAccountModal';
 import { usePriest } from '@/lib/priest-context';
 import { formatCairoDate, formatCairoTime } from '@/lib/time';
 
@@ -59,6 +61,7 @@ function PriestHeader({ onMenu }: { onMenu: () => void }) {
             {profile ? `${profile.priest.title ? `${profile.priest.title} ` : ''}${profile.person.name}` : 'بوابة الكاهن'}
           </p>
         </div>
+        <RefreshButton id="priest-refresh-btn" />
         <button id="priest-menu-btn" aria-label="فتح القائمة" onClick={onMenu} className="-ml-2 rounded-full p-2 transition hover:bg-white/15"><Menu className="h-6 w-6" /></button>
       </div>
     </header>
@@ -117,6 +120,7 @@ function PriestSideMenu({ open, onClose }: { open: boolean; onClose: () => void 
           })}
         </nav>
         <div className="border-t border-indigo-100 p-3">
+          <SwitchAccountButton current="priest" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-extrabold text-primary-700 transition hover:bg-primary-50" />
           <button id="priest-logout-btn" onClick={() => { logout(); onClose(); router.replace('/login?as=priest'); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-extrabold text-red-600 transition hover:bg-red-50"><LogOut className="h-5 w-5" /> خروج من البوابة</button>
         </div>
       </aside>

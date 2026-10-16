@@ -6,10 +6,11 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   Settings, Church, Layers, School, LogOut, ChevronLeft, User, Phone, ShieldCheck,
-  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown, GraduationCap, DatabaseBackup,
+  Pencil, Users, CalendarDays, Award, Inbox, PhoneCall, Crown, GraduationCap,
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import EditProfileModal from '@/components/EditProfileModal';
+import { SwitchAccountButton } from '@/components/SwitchAccountModal';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
@@ -184,15 +185,7 @@ export default function SettingsPage() {
               label="إدارة نتائج الافتقاد"
               desc="نتائج افتقاد المخدومين (سيأتي، مريض، لم يرد...) — اسم ولون وأيقونة"
             />
-            {/* Backup & restore (0044) — owner only, right under the activity links */}
-            {isOwner && (
-              <SettingsLink
-                href="/settings/backup"
-                icon={<DatabaseBackup className="h-5 w-5 text-primary-600" />}
-                label="النسخ الاحتياطي والاسترجاع"
-                desc="نسخة كاملة أو جداول محددة تُحمَّل على الجهاز · استرجاع دمجًا أو استبدالاً · نسخ مجدولة"
-              />
-            )}
+            {/* Backup & restore (0044) moved into the owner module — /owner/backup (20261009120000) */}
           </div>
         </section>
       )}
@@ -234,14 +227,18 @@ export default function SettingsPage() {
         </section>
       )}
 
-      <button
-        id="logout-btn"
-        onClick={signOut}
-        className="w-full card flex items-center justify-center gap-2 !py-3.5 font-extrabold text-red-600 hover:bg-red-50 transition"
-      >
-        <LogOut className="h-5 w-5" />
-        تسجيل الخروج
-      </button>
+      {/* 20261003120000: one person · many accounts — switch without signing out */}
+      <div id="settings-session-actions" className="grid grid-cols-2 gap-2">
+        <SwitchAccountButton current="servant" />
+        <button
+          id="logout-btn"
+          onClick={signOut}
+          className="w-full card flex items-center justify-center gap-2 !py-3.5 font-extrabold text-red-600 hover:bg-red-50 transition"
+        >
+          <LogOut className="h-5 w-5" />
+          تسجيل الخروج
+        </button>
+      </div>
 
       <p className="mt-6 text-center text-xs text-slate-400">
         {BRANDING.shortName} — الإصدار 0.2.0
