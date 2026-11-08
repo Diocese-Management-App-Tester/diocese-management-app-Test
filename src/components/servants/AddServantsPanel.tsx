@@ -10,6 +10,7 @@
 // admin_add_servant). The servant is APPROVED immediately and logs in with
 // code + password.
 
+import { cachedLookup } from '@/lib/queries';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
@@ -50,10 +51,10 @@ export default function AddServantsPanel({ onAdded }: { onAdded?: () => void }) 
   useEffect(() => {
     if (profile?.status !== 'approved') return;
     (async () => {
-      const [{ data: ch }, { data: sv }, { data: cl }] = await Promise.all([
-        supabase.from('churches').select('*').order('sort_order').order('name'),
-        supabase.from('services').select('*').order('sort_order').order('name'),
-        supabase.from('classes').select('*').order('sort_order').order('name'),
+      const [ch, sv, cl] = await Promise.all([
+        cachedLookup<Church>(supabase, 'churches'),
+        cachedLookup<Service>(supabase, 'services'),
+        cachedLookup<ClassRoom>(supabase, 'classes'),
       ]);
       setChurches(ch ?? []); setServices(sv ?? []); setClasses(cl ?? []);
       setLoading(false);

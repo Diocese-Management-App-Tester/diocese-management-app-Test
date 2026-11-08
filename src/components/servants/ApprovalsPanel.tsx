@@ -9,6 +9,7 @@
 // invite link files a `servant_scope_requests` row (new place) — listed here
 // too and approved / rejected through review_servant_scope_request.
 
+import { cachedLookup } from '@/lib/queries';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import {
@@ -71,11 +72,11 @@ export default function ApprovalsPanel() {
   );
 
   const load = useCallback(async () => {
-    const [{ data: p }, { data: ch }, { data: sv }, { data: cl }, { data: sr }] = await Promise.all([
+    const [{ data: p }, ch, sv, cl, { data: sr }] = await Promise.all([
       supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').eq('status', 'pending').order('created_at'),
-      supabase.from('churches').select('*').order('sort_order').order('name'),
-      supabase.from('services').select('*').order('sort_order').order('name'),
-      supabase.from('classes').select('*').order('sort_order').order('name'),
+      cachedLookup<Church>(supabase, 'churches'),
+      cachedLookup<Service>(supabase, 'services'),
+      cachedLookup<ClassRoom>(supabase, 'classes'),
       // 20261006120000: new-place requests from existing servants (RLS = my grantable area)
       supabase.from(SCOPE_REQUESTS_TABLE)
         .select('id, servant_id, church_id, service_id, class_id, status, created_at, servant:servant_enrollments!servant_scope_requests_servant_id_fkey(id, full_name, user_id, role, phone)')

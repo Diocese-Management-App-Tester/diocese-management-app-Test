@@ -7,6 +7,7 @@
 // Bulk:   paste / spreadsheet import with column mapping; an optional default
 //         password can be applied to every imported child.
 
+import { cachedLookup } from '@/lib/queries';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import QRCode from 'qrcode';
 import {
@@ -64,10 +65,10 @@ export default function AddChildrenPanel() {
   useEffect(() => {
     if (profile?.status !== 'approved') return;
     (async () => {
-      const [{ data: chs }, { data: svs }, { data: cls }] = await Promise.all([
-        supabase.from('churches').select('*').order('sort_order').order('name'),
-        supabase.from('services').select('*').order('sort_order').order('name'),
-        supabase.from('classes').select('*').order('sort_order').order('name'),
+      const [chs, svs, cls] = await Promise.all([
+        cachedLookup<Church>(supabase, 'churches'),
+        cachedLookup<Service>(supabase, 'services'),
+        cachedLookup<ClassRoom>(supabase, 'classes'),
       ]);
       setChurches(chs ?? []);
       setServices(svs ?? []);

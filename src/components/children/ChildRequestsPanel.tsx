@@ -5,6 +5,7 @@
 // The reviewer may correct the class before approving; approval upserts the
 // person by code, enrolls him and stores the chosen password.
 
+import { cachedLookup } from '@/lib/queries';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import {
@@ -45,11 +46,11 @@ export default function ChildRequestsPanel() {
     q = view === 'pending'
       ? q.eq('status', 'pending').order('created_at')
       : q.neq('status', 'pending').order('decided_at', { ascending: false }).limit(100);
-    const [{ data: p }, { data: ch }, { data: sv }, { data: cl }] = await Promise.all([
+    const [{ data: p }, ch, sv, cl] = await Promise.all([
       q,
-      supabase.from('churches').select('*').order('sort_order').order('name'),
-      supabase.from('services').select('*').order('sort_order').order('name'),
-      supabase.from('classes').select('*').order('sort_order').order('name'),
+      cachedLookup<Church>(supabase, 'churches'),
+      cachedLookup<Service>(supabase, 'services'),
+      cachedLookup<ClassRoom>(supabase, 'classes'),
     ]);
     setRows((p ?? []) as unknown as ChildJoinRequest[]);
     setChurches(ch ?? []);

@@ -18,6 +18,7 @@ import { OwnerGate } from '@/components/ModuleGate';
 import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
+import { invalidateLookup } from '@/lib/queries';
 import BackupModal from '@/components/backup/BackupModal';
 import RestoreModal from '@/components/backup/RestoreModal';
 import ScheduleFormModal from '@/components/backup/ScheduleFormModal';
@@ -275,7 +276,12 @@ export default function BackupPage() {
       {showRestore && (
         <RestoreModal
           supabase={supabase} catalogue={catalogue} actorId={profile?.id ?? null}
-          onClose={() => setShowRestore(false)} onDone={() => { loadLists(); loadCatalogue(); }}
+          onClose={() => setShowRestore(false)} onDone={() => {
+            // Restore disables the realtime bus triggers, so no bus message will
+            // tell the cache the lookup tables changed: drop them explicitly.
+            invalidateLookup();
+            loadLists(); loadCatalogue();
+          }}
         />
       )}
       {scheduleForm.open && (
