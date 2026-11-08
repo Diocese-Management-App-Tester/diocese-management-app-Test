@@ -9,6 +9,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCustomization } from '@/lib/customization-context';
+import { scannerIntentProps } from '@/lib/scanner-data';
 
 export default function BottomNav() {
   const pathname = usePathname();
@@ -28,6 +29,7 @@ export default function BottomNav() {
               key={key}
               id={`nav-${key}`}
               href={href}
+              {...scannerIntentProps(href)}
               className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-bold transition ${
                 active
                   ? owner ? 'text-gold-600' : 'text-primary-600'

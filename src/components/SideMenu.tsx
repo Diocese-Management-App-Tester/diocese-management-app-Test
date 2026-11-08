@@ -12,6 +12,7 @@ import { ROLE_LABELS } from '@/lib/types';
 import { formatCairoDate, formatCairoTime } from '@/lib/time';
 import { useAppDate } from '@/lib/app-date-context';
 import { useCustomization } from '@/lib/customization-context';
+import { scannerIntentProps } from '@/lib/scanner-data';
 
 // ---------- Sections ----------
 // 1. the SAME 5 items as the bottom bar (decided by the owner in تخصيص
@@ -140,6 +141,7 @@ export default function SideMenu({ open, onClose }: SideMenuProps) {
                   <Link
                     id={`menu-${key}`}
                     href={href}
+                    {...scannerIntentProps(href)}
                     onClick={onClose}
                     className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
                       isActive(href)
@@ -177,6 +179,7 @@ export default function SideMenu({ open, onClose }: SideMenuProps) {
                     <Link
                       id={`menu-${key}`}
                       href={href}
+                      {...scannerIntentProps(href)}
                       onClick={onClose}
                       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
                         isActive(href)

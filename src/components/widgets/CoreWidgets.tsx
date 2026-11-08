@@ -28,6 +28,7 @@ import { cachedLookup, invalidateLookup } from '@/lib/queries';
 import { fetchDaySummary, shiftDay } from '@/lib/stats';
 import { reads } from '@/lib/cached-reads';
 import { DEST_BY_KEY } from '@/lib/navigation';
+import { scannerIntentProps } from '@/lib/scanner-data';
 import { WidgetCard, WidgetEmpty, WidgetSkeleton, fmtNum, fmtDur, fmtYmdLong } from './WidgetBits';
 
 export interface WidgetProps {
@@ -231,7 +232,7 @@ export function QuickActionsWidget({ title }: WidgetProps) {
         {actions.map((a) => {
           const Icon = a.icon;
           return (
-            <Link key={a.href} href={a.href} className="card flex flex-col items-center gap-1.5 !px-1 !py-3 transition hover:-translate-y-0.5 hover:shadow-md">
+            <Link key={a.href} href={a.href} {...scannerIntentProps(a.href)} className="card flex flex-col items-center gap-1.5 !px-1 !py-3 transition hover:-translate-y-0.5 hover:shadow-md">
               <span className={`rounded-xl p-2 ${a.tone}`}><Icon className="h-5 w-5" /></span>
               <span className="max-w-full truncate text-[11px] font-bold text-slate-600">{a.label}</span>
             </Link>
@@ -354,7 +355,7 @@ export function NextEventWidget({ title, size }: WidgetProps) {
               <span className="badge bg-emerald-50 text-emerald-700 tabular-nums"><UserCheck className="h-3 w-3" /> {attended === null ? '…' : fmtNum(attended)} حضروا</span>
             </div>
           </div>
-          <Link href="/scanner" className="btn-primary flex shrink-0 items-center justify-center gap-1.5 !px-3 !py-2 text-xs">
+          <Link href="/scanner" {...scannerIntentProps('/scanner')} className="btn-primary flex shrink-0 items-center justify-center gap-1.5 !px-3 !py-2 text-xs">
             <ScanLine className="h-4 w-4" /> {label('scanner')}
           </Link>
         </div>

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import AppShell from '@/components/AppShell';
 import { useAuth } from '@/lib/auth-context';
+import { scannerIntentProps } from '@/lib/scanner-data';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
@@ -152,7 +153,7 @@ function FamilyModule() {
               : 'عائلات نطاقك وأفرادها — وعند مسح كود أي فرد في الماسح تظهر العائلة كلها لاختيار الشخص والخدمة'}
           </p>
         </div>
-        <Link href="/scanner" className="btn-secondary flex items-center gap-1.5 !py-2 !px-3 text-xs" title="الماسح">
+        <Link href="/scanner" {...scannerIntentProps('/scanner')} className="btn-secondary flex items-center gap-1.5 !py-2 !px-3 text-xs" title="الماسح">
           <ScanLine className="h-4 w-4" /> الماسح
         </Link>
       </section>
