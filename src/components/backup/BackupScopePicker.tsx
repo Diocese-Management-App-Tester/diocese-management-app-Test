@@ -9,22 +9,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { Database, Church as ChurchIcon, Layers, School, Loader2 } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Church, Service, ClassRoom } from '@/lib/types';
+import { cachedLookup } from '@/lib/queries';
 import { SCOPE_LEVEL_LABELS, scopeLevelOf, type BackupScope, type BackupScopeLevel } from '@/lib/backup';
 
 export interface ScopeLookups { churches: Church[]; services: Service[]; classes: ClassRoom[] }
 
 /** Load churches → services → classes once (the owner sees everything). */
 export async function fetchScopeLookups(supabase: SupabaseClient): Promise<ScopeLookups> {
-  const [c, s, k] = await Promise.all([
-    supabase.from('churches').select('*').order('sort_order').order('name'),
-    supabase.from('services').select('*').order('sort_order').order('name'),
-    supabase.from('classes').select('*').order('sort_order').order('name'),
+  const [churches, services, classes] = await Promise.all([
+    cachedLookup<Church>(supabase, 'churches'),
+    cachedLookup<Service>(supabase, 'services'),
+    cachedLookup<ClassRoom>(supabase, 'classes'),
   ]);
-  return {
-    churches: (c.data as Church[]) ?? [],
-    services: (s.data as Service[]) ?? [],
-    classes: (k.data as ClassRoom[]) ?? [],
-  };
+  return { churches, services, classes };
 }
 
 type Choice = 'all' | BackupScopeLevel;

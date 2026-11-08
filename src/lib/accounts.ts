@@ -15,6 +15,7 @@ import { setChildToken, clearChildToken, getChildToken, childLogout } from '@/li
 import { setPriestToken, clearPriestToken, getPriestToken, priestLogout } from '@/lib/priest-portal';
 import { SERVANT_NO_REMEMBER_KEY, SERVANT_TAB_ALIVE_KEY, clearServantRememberFlags } from '@/lib/session';
 import { throwIfThrottled, withLoginRetry, singleFlight, throttleMessage } from '@/lib/login-throttle';
+import { suspendQueryCache } from '@/lib/cached-query';
 
 export type AccountKind = 'servant' | 'child' | 'priest';
 
@@ -150,6 +151,10 @@ export async function switchAccount(
   // servant → another of HIS places: same Auth session, only the active place changes
   if (from === 'servant' && t.kind === 'servant') {
     await setServantActivePlace(supabase, t.church_id ? { church_id: t.church_id, service_id: t.service_id ?? null, class_id: t.class_id ?? null } : null);
+    // the active place is part of what RLS filters on → nothing cached for the
+    // previous place may be read again (AuthProvider re-enables the cache with
+    // the new place's identity once it has reloaded the profile)
+    suspendQueryCache();
     return ACCOUNT_HOME.servant;
   }
   const fromToken = currentSessionToken(from);
@@ -165,6 +170,9 @@ export async function switchAccount(
   });
   if (error) throw error;
   const r = data as SwitchResult;
+  // the switch is granted: the cache of the account being left must not be
+  // readable any more, whatever happens next (no reliance on the page reload)
+  suspendQueryCache();
 
   // the old session of THIS tab is closed (server + storage) — the person
   // stays signed in only as the account he switched to
@@ -229,6 +237,7 @@ export async function closeCurrentSession(
     if (t) await priestLogout(supabase, t).catch(() => {});
     clearPriestToken();
   } else if (!opts.keepServantIfTarget) {
+    suspendQueryCache();
     clearServantRememberFlags();
     await supabase.auth.signOut().catch(() => {});
   }

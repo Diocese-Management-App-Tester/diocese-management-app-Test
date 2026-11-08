@@ -2,6 +2,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EnrollmentWithPerson } from '@/lib/types';
+import { cachedLookupRows, invalidateLookupTables } from '@/lib/cached-query';
+import type { LookupTable } from '@/lib/cache/service';
 
 export const ALL = 'all';
 
@@ -217,41 +219,34 @@ export async function fetchEnrollmentsByIds(supabase: SupabaseClient, ids: strin
 }
 
 /**
- * Tiny lookup tables (churches / services / classes) rarely change; cache
- * them per session so navigating between tabs doesn't re-request them.
- *
- * 20261010120000: 10 minutes (was 1). Every page mount asked for 3 tables
- * once the minute was over — three API-gateway log lines per navigation per
- * user. Every edit screen already calls invalidateLookup() after a write,
- * and the realtime bus / postgres_changes refresh the lists live, so a
- * longer TTL changes nothing visible.
+ * Tiny lookup tables (churches / services / classes / events / causes /
+ * call_feedbacks) rarely change, so they are cached — now by the shared
+ * `cachedQuery` layer (src/lib/cached-query.ts, Phase 1 of the performance
+ * plan) instead of a table-name-keyed Map. What that changes, without
+ * changing this function's signature or result:
+ *   • the cache belongs to the signed-in identity (uid · role · active place
+ *     · scopes) and is emptied on sign-out / account / place switch;
+ *   • concurrent callers share ONE request;
+ *   • the realtime bus drops an entry the moment its table changes, so it can
+ *     live for minutes without ever being stale (fallback: 60 s while the bus
+ *     is down);
+ *   • each ordering has its own entry (it used to be one entry per table, so
+ *     the first page to load decided the order for all the others);
+ *   • a failed read is NOT cached (it used to cache `[]` for 10 minutes);
+ *   • church / service / class lists survive a reload (sessionStorage);
+ *     events / causes / call_feedbacks are permission-gated by RLS and stay
+ *     in memory only.
+ * Every edit screen still calls invalidateLookup() after a write.
  */
-const lookupCache = new Map<string, { at: number; data: unknown[] }>();
-const LOOKUP_TTL_MS = 10 * 60_000;
-
-/** churches · services · classes carry a MANUAL order (20260928130000) — every list follows it */
-const MANUAL_ORDER_TABLES = new Set(['churches', 'services', 'classes']);
-
 export async function cachedLookup<T>(
   supabase: SupabaseClient,
-  table: 'churches' | 'services' | 'classes' | 'events' | 'causes' | 'call_feedbacks',
+  table: LookupTable,
   orderBy: { column: string; ascending?: boolean; nullsFirst?: boolean } = { column: 'name' },
   force = false
 ): Promise<T[]> {
-  const key = table;
-  const hit = lookupCache.get(key);
-  if (!force && hit && Date.now() - hit.at < LOOKUP_TTL_MS) return hit.data as T[];
-  // structural tables: the manager's order first, the name only breaks ties
-  const manual = MANUAL_ORDER_TABLES.has(table) && orderBy.column === 'name';
-  let q = supabase.from(table).select('*');
-  if (manual) q = q.order('sort_order');
-  const { data } = await q.order(orderBy.column, { ascending: orderBy.ascending ?? true, nullsFirst: orderBy.nullsFirst });
-  const rows = (data ?? []) as T[];
-  lookupCache.set(key, { at: Date.now(), data: rows });
-  return rows;
+  return cachedLookupRows<T>(supabase, table, orderBy, force);
 }
 
 export function invalidateLookup(table?: string) {
-  if (table) lookupCache.delete(table);
-  else lookupCache.clear();
+  invalidateLookupTables(table);
 }

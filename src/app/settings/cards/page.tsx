@@ -1,5 +1,6 @@
 'use client';
 
+import { cachedLookup } from '@/lib/queries';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -37,14 +38,14 @@ export default function CardTemplatesPage() {
   const load = useCallback(async () => {
     const [t, c, s, cl] = await Promise.all([
       supabase.from('card_templates').select('*').order('created_at', { ascending: false }),
-      supabase.from('churches').select('*').order('sort_order').order('name'),
-      supabase.from('services').select('*').order('sort_order').order('name'),
-      supabase.from('classes').select('*').order('sort_order').order('name'),
+      cachedLookup<Church>(supabase, 'churches'),
+      cachedLookup<Service>(supabase, 'services'),
+      cachedLookup<ClassRoom>(supabase, 'classes'),
     ]);
     setTemplates((t.data as CardTemplate[]) ?? []);
-    setChurches(c.data ?? []);
-    setServices(s.data ?? []);
-    setClasses(cl.data ?? []);
+    setChurches(c);
+    setServices(s);
+    setClasses(cl);
     setLoading(false);
   }, [supabase]);
 

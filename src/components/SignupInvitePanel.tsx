@@ -8,6 +8,7 @@
 // تُعرض تلقائياً، وكل دعوة في القائمة يمكن عرضها (QR + رابط) وتعديلها
 // (الصلاحية · الاستخدامات · الملاحظة · إعادة التفعيل) وإلغاؤها وحذفها.
 
+import { cachedLookup } from '@/lib/queries';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import {
@@ -81,9 +82,9 @@ export default function SignupInvitePanel({ kind, hideScope = false }: Props) {
 
   useEffect(() => {
     if (hideScope) return;
-    supabase.from('churches').select('*').order('sort_order').order('name').then(({ data }) => setChurches(data ?? []));
-    supabase.from('services').select('*').order('sort_order').order('name').then(({ data }) => setServices(data ?? []));
-    supabase.from('classes').select('*').order('sort_order').order('name').then(({ data }) => setClasses(data ?? []));
+    cachedLookup<Church>(supabase, 'churches').then(setChurches);
+    cachedLookup<Service>(supabase, 'services').then(setServices);
+    cachedLookup<ClassRoom>(supabase, 'classes').then(setClasses);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hideScope]);
 

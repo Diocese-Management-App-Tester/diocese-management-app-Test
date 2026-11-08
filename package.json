@@ -11,7 +11,9 @@
     "cf:preview": "npm run cf:build && opennextjs-cloudflare preview",
     "cf:deploy": "npm run cf:build && opennextjs-cloudflare deploy",
     "cf:upload": "npm run cf:build && opennextjs-cloudflare upload",
-    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "test": "node --test --experimental-strip-types \"src/lib/cache/__tests__/*.test.ts\"",
+    "typecheck": "NODE_OPTIONS=--max-old-space-size=1400 tsc --noEmit -p ."
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

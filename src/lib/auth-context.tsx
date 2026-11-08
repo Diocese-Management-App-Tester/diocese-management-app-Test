@@ -17,6 +17,7 @@ import { servantSessionStale, clearServantRememberFlags } from '@/lib/session';
 import { configureRealtimeBus, onBusTable } from '@/lib/realtime';
 import { logActivity } from '@/lib/activity';
 import { fetchBootstrap, publishBootstrapConfig, clearBootstrapConfig } from '@/lib/bootstrap';
+import { setQueryIdentity, suspendQueryCache, queryCacheBelongsTo, cachedRow } from '@/lib/cached-query';
 
 interface AuthState {
   user: User | null;
@@ -79,6 +80,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (uid: string) => {
       const seq = ++loadSeq.current;
 
+      // Query cache (Phase 1): the cache must belong to THIS uid before
+      // anything below can read or write it. A different user (account
+      // switch, re-login in the same tab) → disabled right now, synchronously,
+      // and re-enabled with the new identity once the profile is known.
+      if (!queryCacheBelongsTo(uid)) suspendQueryCache();
+
       // 20261015120000: ONE request — app_bootstrap() returns the profile,
       // scopes, person, church, service, active place AND the config blocks
       // of the three other providers (module_access · permission_profiles ·
@@ -125,6 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             prof.person_id
               ? supabase.from('persons').select('*').eq('id', prof.person_id).maybeSingle()
               : Promise.resolve({ data: null }),
+            // (plain reads on purpose: this runs BEFORE the cache identity of
+            // this load is set, so it must not read a cache of the previous one)
             prof.church_id
               ? supabase.from('churches').select('*').eq('id', prof.church_id).maybeSingle()
               : Promise.resolve({ data: null }),
@@ -144,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!prof) {
+        setQueryIdentity(null);
         setProfile(null); setScopes([]); setAllScopes([]); setActivePlace(null); setPerson(null); setChurch(null); setService(null);
         configureRealtimeBus(supabase, { uid, role: 'pending', churchIds: [] });
         return;
@@ -155,6 +165,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : null;
       // the SESSION works on one place when one is chosen — the RLS does the same
       const all = activeMatch ? [activeMatch] : every;
+
+      // Query cache identity = everything RLS keys this session's reads on
+      // (uid · role · status · active place · scope set). Only an APPROVED
+      // servant gets a cache; pending / rejected ones read nothing worth
+      // caching. A different value empties the cache (see QueryCache.setIdentity).
+      setQueryIdentity(
+        prof.status === 'approved'
+          ? { uid, role: prof.role, status: prof.status, scopes: all, activePlace: activeMatch }
+          : null
+      );
       setProfile(activeMatch ? { ...prof, church_id: activeMatch.church_id, service_id: activeMatch.service_id ?? null, class_id: activeMatch.class_id ?? null } : prof);
       setAllScopes(every);
       setActivePlace(activeMatch);
@@ -163,12 +183,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (activeMatch && (activeMatch.church_id !== prof.church_id || (activeMatch.service_id ?? null) !== (prof.service_id ?? null))) {
         // the church / service objects follow the ACTIVE place
         const [c2, s2] = await Promise.all([
-          supabase.from('churches').select('*').eq('id', activeMatch.church_id).maybeSingle(),
-          activeMatch.service_id ? supabase.from('services').select('*').eq('id', activeMatch.service_id).maybeSingle() : Promise.resolve({ data: null }),
+          cachedRow<Church>(supabase, 'churches', activeMatch.church_id),
+          activeMatch.service_id ? cachedRow<Service>(supabase, 'services', activeMatch.service_id) : Promise.resolve(null),
         ]);
         if (seq !== loadSeq.current) return;
-        setChurch(((c2 as { data: Church | null }).data ?? null));
-        setService(((s2 as { data: Service | null }).data ?? null));
+        setChurch(c2 ?? null);
+        setService(s2 ?? null);
       } else {
         setChurch(churchRow);
         setService(serviceRow);
@@ -188,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const clearAll = useCallback(() => {
+    suspendQueryCache(); // sign-out / no session → no cached data of the previous user survives
     clearBootstrapConfig();
     setProfile(null);
     setPerson(null);
@@ -228,6 +249,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       const u = session?.user ?? null;
+      // a different user (or none) → the previous user's cache is gone BEFORE
+      // anything re-renders with the new session (loadProfile re-enables it)
+      if (!u || !queryCacheBelongsTo(u.id)) suspendQueryCache();
       setUser(u);
       // TOKEN_REFRESHED fires every ~55 min on EVERY device; the profile did
       // not change — reloading it there was 5 queries × all users at once.
@@ -259,6 +283,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, loadProfile]);
 
   const signOut = useCallback(async () => {
+    suspendQueryCache(); // first thing: nothing cached may outlive the click
     clearServantRememberFlags();
     configureRealtimeBus(supabase, null);
     // 0047: leave a trace before the session is gone (never blocks sign-out)

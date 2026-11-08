@@ -20,7 +20,7 @@ import { usePermissions } from '@/lib/permissions-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { uploadPhoto } from '@/lib/upload';
-import { ALL } from '@/lib/queries';
+import { ALL, cachedLookup } from '@/lib/queries';
 import ResetPasswordSection from '@/components/ResetPasswordSection';
 import { EditCodeModal } from '@/components/PersonDataModals';
 import ScopePicker, { scopeLabel, clampScope } from '@/components/ScopePicker';
@@ -84,11 +84,11 @@ export default function ServantsPanel() {
   const canManage = (p: Servant) => canManageServant(profile, p, myScopes);
 
   const load = useCallback(async () => {
-    const [{ data: pr }, { data: ch }, { data: sv }, { data: cl }, { data: xs }] = await Promise.all([
+    const [{ data: pr }, ch, sv, cl, { data: xs }] = await Promise.all([
       supabase.from(SERVANTS_TABLE).select('*, person:persons!servant_enrollments_person_id_fkey(*)').in('status', ['approved', 'suspended']).order('full_name'),
-      supabase.from('churches').select('*').order('sort_order').order('name'),
-      supabase.from('services').select('*').order('sort_order').order('name'),
-      supabase.from('classes').select('*').order('sort_order').order('name'),
+      cachedLookup<Church>(supabase, 'churches'),
+      cachedLookup<Service>(supabase, 'services'),
+      cachedLookup<ClassRoom>(supabase, 'classes'),
       supabase.from(SERVANT_SCOPES_TABLE).select('*'),
     ]);
     // 0045: attach the extra places

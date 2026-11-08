@@ -6,6 +6,7 @@
 // (month's children). Query ?tab=print&year&month&church&service&class
 // comes from the month view's «طباعة الكروت».
 
+import { cachedRow } from '@/lib/cached-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -53,13 +54,11 @@ export default function BirthdayCardDesignerPage() {
     setTemplate(tpl);
     setDesign(normalizeDesign(tpl.design));
     setPrint(normalizePrint(tpl.print_settings));
-    const [{ data: church }, svc, cls] = await Promise.all([
-      supabase.from('churches').select('name, logo_url').eq('id', tpl.church_id).single(),
-      tpl.service_id ? supabase.from('services').select('name, photo_url').eq('id', tpl.service_id).single() : Promise.resolve({ data: null }),
-      tpl.class_id ? supabase.from('classes').select('name, photo_url').eq('id', tpl.class_id).single() : Promise.resolve({ data: null }),
+    const [church, svcRow, clsRow] = await Promise.all([
+      cachedRow<{ name: string; logo_url: string | null }>(supabase, 'churches', tpl.church_id, 'name, logo_url'),
+      tpl.service_id ? cachedRow<{ name: string; photo_url: string | null }>(supabase, 'services', tpl.service_id, 'name, photo_url') : Promise.resolve(null),
+      tpl.class_id ? cachedRow<{ name: string; photo_url: string | null }>(supabase, 'classes', tpl.class_id, 'name, photo_url') : Promise.resolve(null),
     ]);
-    const svcRow = svc.data as { name: string; photo_url: string | null } | null;
-    const clsRow = cls.data as { name: string; photo_url: string | null } | null;
     setConstants({
       church_name: church?.name ?? '',
       service_name: svcRow?.name ?? 'مدارس الأحد',

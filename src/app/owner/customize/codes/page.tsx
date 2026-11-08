@@ -11,6 +11,7 @@
 //      contributes when a template contains a church / service / class part.
 // Saving writes app_settings.codes (migration 0040, realtime → all devices).
 
+import { cachedLookup } from '@/lib/queries';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Hash, ChevronDown, ChevronUp, Church, Layers, School, Search, Sparkles, Settings2, History, Wand2, RotateCcw,
@@ -103,12 +104,12 @@ export default function CustomizeCodesPage() {
   useEffect(() => {
     if (profile?.status !== 'approved') return;
     (async () => {
-      const [{ data: ch }, { data: sv }, { data: cl }] = await Promise.all([
-        supabase.from('churches').select('*').order('sort_order').order('name'),
-        supabase.from('services').select('*').order('sort_order').order('name'),
-        supabase.from('classes').select('*').order('sort_order').order('name'),
+      const [ch, sv, cl] = await Promise.all([
+        cachedLookup<ChurchRow>(supabase, 'churches'),
+        cachedLookup<Service>(supabase, 'services'),
+        cachedLookup<ClassRoom>(supabase, 'classes'),
       ]);
-      setChurches(ch ?? []); setServices(sv ?? []); setClasses(cl ?? []);
+      setChurches(ch); setServices(sv); setClasses(cl);
     })();
   }, [profile?.status, supabase]);
 
