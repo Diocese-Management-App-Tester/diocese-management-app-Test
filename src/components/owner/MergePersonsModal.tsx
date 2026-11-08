@@ -76,7 +76,7 @@ export default function MergePersonsModal({ first, second, lookups, onDone, onCl
     setSearching(true);
     const t = setTimeout(async () => {
       try {
-        const r = await fetchOwnerPersons(supabase, { search: s, scopeMode: 'all', kind: 'all' }, 0, 20);
+        const r = await fetchOwnerPersons(supabase, { search: s, scopeMode: 'all', kind: 'all' }, 0, 20, { bypass: true }); // candidates for a merge: always live
         setResults(r.rows.filter((x) => x.id !== first.id));
       } catch { setResults([]); }
       setSearching(false);

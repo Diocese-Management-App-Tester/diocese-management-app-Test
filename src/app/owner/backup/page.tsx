@@ -19,6 +19,7 @@ import { useAuth } from '@/lib/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { useDebouncedRealtime } from '@/lib/realtime';
 import { invalidateLookup } from '@/lib/queries';
+import { invalidateReads } from '@/lib/cached-reads';
 import BackupModal from '@/components/backup/BackupModal';
 import RestoreModal from '@/components/backup/RestoreModal';
 import ScheduleFormModal from '@/components/backup/ScheduleFormModal';
@@ -280,6 +281,7 @@ export default function BackupPage() {
             // Restore disables the realtime bus triggers, so no bus message will
             // tell the cache the lookup tables changed: drop them explicitly.
             invalidateLookup();
+            invalidateReads(); // a restore runs with the bus triggers off → drop every Phase 2 read too
             loadLists(); loadCatalogue();
           }}
         />

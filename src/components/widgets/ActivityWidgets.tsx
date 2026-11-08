@@ -21,6 +21,7 @@ import type { AppEvent } from '@/lib/types';
 import { cairoToday, currentOccurrence, previousOccurrenceDate, WEEKDAY_SHORT } from '@/lib/time';
 import { cachedLookup } from '@/lib/queries';
 import { fetchAttendanceTimeline, fetchLeaderboard, shiftDay, type LeaderRow } from '@/lib/stats';
+import { reads } from '@/lib/cached-reads';
 import { WidgetCard, WidgetEmpty, WidgetSkeleton, Avatar, fmtNum, fmtYmdLong } from './WidgetBits';
 import type { WidgetProps } from './CoreWidgets';
 
@@ -51,7 +52,8 @@ async function loadDaily(supabase: ReturnType<typeof createClient>, today: strin
   const days = Array.from({ length: DAILY_N }, (_, i) => shiftDay(today, i - (DAILY_N - 1)));
   dailyInflight = (async () => {
     try {
-      const rows = await fetchAttendanceTimeline(supabase, { from: days[0], to: today, bucket: 'day' }, {});
+      // Phase 2: the mount load may reuse the cache; the realtime reload (force) never does
+      const rows = await fetchAttendanceTimeline(supabase, { from: days[0], to: today, bucket: 'day' }, {}, { force });
       const map = new Map<string, number>();
       rows.forEach((r) => map.set(r.bucket, (map.get(r.bucket) ?? 0) + r.attendance));
       dailyState = { today, vals: days.map((d) => map.get(d) ?? 0) };
@@ -172,13 +174,14 @@ export function LeaderboardWidget({ title, size }: WidgetProps) {
   const [rows, setRows] = useState<LeaderRow[] | null>(null);
   const limit = size === 'half' ? 5 : 6;
 
-  const load = useCallback(async () => {
-    try { setRows(await fetchLeaderboard(supabase, 'points', limit, {})); } catch { setRows([]); }
+  // Phase 2: mount / limit change may reuse the cache; the realtime reload forces
+  const load = useCallback(async (force: boolean) => {
+    try { setRows(await fetchLeaderboard(supabase, 'points', limit, {}, { force })); } catch { setRows([]); }
   }, [supabase, limit]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(false); }, [load]);
   // 20261014120000: every scan bumps an enrollment's points → the top-6 RPC
   // re-ran once per scan on every device. At most once per minute now.
-  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments' }], load, { enabled: !!profile, delayMs: 2500, minIntervalMs: 60_000 });
+  useDebouncedRealtime(supabase, 'w-leader', [{ table: 'enrollments' }], () => load(true), { enabled: !!profile, delayMs: 2500, minIntervalMs: 60_000 });
 
   return (
     <WidgetCard id="w-leaderboard" icon={Trophy} title={title} tone="amber" href="/stats" flush>
@@ -219,7 +222,9 @@ export function FollowUpWidget({ title, size }: WidgetProps) {
   const [state, setState] = useState<FollowState>(null);
   const shown = size === 'half' ? 3 : 5;
 
-  const load = useCallback(async () => {
+  // Phase 2: the first load (mount) may reuse the cache; every realtime / bus /
+  // visibility reload passes force=true and always asks the database.
+  const load = useCallback(async (force: boolean) => {
     const at = now();
     const events = await cachedLookup<AppEvent>(supabase, 'events', { column: 'event_date', ascending: false, nullsFirst: false });
     // the most recent FINISHED occurrence; the default event wins ties
@@ -233,40 +238,38 @@ export function FollowUpWidget({ title, size }: WidgetProps) {
       if (!best || rank > best.rank) best = { ev, date, rank };
     }
     if (!best) { setState('none'); return; }
-    let q = supabase.from('enrollments').select('id, person:persons(name, phone, image_url)').eq('church_id', best.ev.church_id).limit(1000);
-    if (best.ev.service_id) q = q.eq('service_id', best.ev.service_id);
-    if (best.ev.class_id) q = q.eq('class_id', best.ev.class_id);
-    const [{ data: enr }, { data: att }, { data: calls }] = await Promise.all([
-      q,
-      supabase.from('attendance_log').select('enrollment_id').eq('event_id', best.ev.id).eq('attended_on', best.date).limit(2000),
-      supabase.from('contact_log').select('enrollment_id').eq('event_id', best.ev.id).eq('occurrence_on', best.date).limit(2000),
+    // same three queries as before (roster · attended · contacted), each cached
+    // under its own key + dependency tables (lib/cache/reads.ts); errors → [] as before
+    const [enr, att, calls] = await Promise.all([
+      reads.followUpRoster(supabase, { church: best.ev.church_id, service: best.ev.service_id, class: best.ev.class_id }, { force }),
+      reads.followUpAttendedIds(supabase, best.ev.id, best.date, { force }),
+      reads.followUpContactedIds(supabase, best.ev.id, best.date, { force }),
     ]);
-    const attended = new Set(((att ?? []) as { enrollment_id: string }[]).map((r) => r.enrollment_id));
-    const contacted = new Set(((calls ?? []) as { enrollment_id: string }[]).map((r) => r.enrollment_id));
-    type Row = { id: string; person: { name: string; phone: string | null; image_url: string | null } | null };
-    const absent = ((enr ?? []) as unknown as Row[])
+    const attended = new Set(att);
+    const contacted = new Set(calls);
+    const absent = enr
       .filter((e) => e.person && !attended.has(e.id))
       .map((e) => ({ enrollment_id: e.id, name: e.person!.name, phone: e.person!.phone, image_url: e.person!.image_url }));
     setState({ ev: best.ev, date: best.date, absent, contacted });
   }, [supabase, now]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(false); }, [load]);
   // attendance / enrollment changes: full reload (3 queries), but on a scan
   // day at most once per minute per device (20261014120000). Enrollment
   // UPDATEs (a scan bumping counters) do not change who is absent → ignored.
-  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }], load, { delayMs: 2500, minIntervalMs: 60_000 });
-  useBusIds('enrollments', (ids, op) => { if (op !== 'UPDATE') void load(); }, { delayMs: 2500 });
+  useDebouncedRealtime(supabase, 'w-followup', [{ table: 'attendance_log' }], () => load(true), { delayMs: 2500, minIntervalMs: 60_000 });
+  useBusIds('enrollments', (ids, op) => { if (op !== 'UPDATE') void load(true); }, { delayMs: 2500 });
   // 20261013120000: a call / feedback by any servant → mark those enrollments
   // as contacted IN MEMORY. Zero requests. (This widget used to re-run its
   // 3 queries on every device for every single phone call in the church.)
   useBusIds('contact_log', (ids, op) => {
-    if (!ids.length || op === 'DELETE') { void load(); return; }
+    if (!ids.length || op === 'DELETE') { void load(true); return; }
     setState((prev) => {
       if (!prev || prev === 'none') return prev;
       const contacted = new Set(prev.contacted);
       ids.forEach((id) => contacted.add(id));
       return { ...prev, contacted };
     });
-  }, { delayMs: 1500, onVisible: () => { void load(); } });
+  }, { delayMs: 1500, onVisible: () => { void load(true); } });
 
   const s = state && state !== 'none' ? state : null;
   const notCalled = s ? s.absent.filter((e) => !s.contacted.has(e.enrollment_id)) : [];
@@ -313,15 +316,16 @@ export function PendingApprovalsWidget({ title, size }: WidgetProps) {
   const [supabase] = useState(() => createClient());
   const [n, setN] = useState<{ servants: number; requests: number } | null>(null);
 
-  const load = useCallback(async () => {
-    const [{ count }, { data }] = await Promise.all([
-      supabase.from('servant_enrollments').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.rpc('pending_data_requests_count'),
+  // Phase 2: mount may reuse the cache; the realtime reload forces. Errors → 0 as before.
+  const load = useCallback(async (force: boolean) => {
+    const [servants, data] = await Promise.all([
+      reads.pendingServantsCount(supabase, { force }),
+      reads.rpcSoft<number>(supabase, 'pending_data_requests_count', {}, { force }),
     ]);
-    setN({ servants: count ?? 0, requests: typeof data === 'number' ? data : 0 });
+    setN({ servants, requests: typeof data === 'number' ? data : 0 });
   }, [supabase]);
-  useEffect(() => { if (profile) load(); }, [load, profile]);
-  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'servant_enrollments' }, { table: 'data_change_requests' }], load, { delayMs: 1500, minIntervalMs: 30_000 });
+  useEffect(() => { if (profile) void load(false); }, [load, profile]);
+  useDebouncedRealtime(supabase, 'w-approvals', [{ table: 'servant_enrollments' }, { table: 'data_change_requests' }], () => load(true), { delayMs: 1500, minIntervalMs: 30_000 });
 
   const total = (n?.servants ?? 0) + (n?.requests ?? 0);
   return (

@@ -12,6 +12,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ALL, type ScopeSelection } from '@/lib/queries';
 import { cairoToday } from '@/lib/time';
+import { reads, type ReadOpts } from '@/lib/cached-reads';
 
 // ---------- Row shapes returned by the RPCs ----------
 
@@ -254,15 +255,10 @@ function scopeArgs(scope: ScopeSelection) {
   };
 }
 
-function throwIf(error: { message: string } | null, fn: string) {
-  if (error) throw new Error(`${fn}: ${error.message}`);
-}
-
 export async function fetchScopeSummary(
-  supabase: SupabaseClient, scope: ScopeSelection
+  supabase: SupabaseClient, scope: ScopeSelection, opts: ReadOpts = {}
 ): Promise<ScopeSummary> {
-  const { data, error } = await supabase.rpc('stats_scope_summary', scopeArgs(scope));
-  throwIf(error, 'stats_scope_summary');
+  const data = await reads.rpc(supabase, 'stats_scope_summary', scopeArgs(scope), { ...opts, prefixErrors: true });
   const r = (data as Record<string, unknown>[] | null)?.[0] ?? {};
   return {
     enrollments: nz(r.enrollments),
@@ -283,10 +279,8 @@ export async function fetchScopeSummary(
 }
 
 export async function fetchDaySummary(
-  supabase: SupabaseClient, day: string, scope: ScopeSelection
-): Promise<DaySummary> {
-  const { data, error } = await supabase.rpc('stats_day_summary', { p_day: day, ...scopeArgs(scope) });
-  throwIf(error, 'stats_day_summary');
+  supabase: SupabaseClient, day: string, scope: ScopeSelection, opts: ReadOpts = {}): Promise<DaySummary> {
+  const data = await reads.rpc(supabase, 'stats_day_summary', { p_day: day, ...scopeArgs(scope) }, { ...opts, prefixErrors: true });
   const r = (data as Record<string, unknown>[] | null)?.[0] ?? {};
   return {
     attendance: nz(r.attendance),
@@ -302,10 +296,8 @@ export async function fetchDaySummary(
 }
 
 export async function fetchAttendanceByEvent(
-  supabase: SupabaseClient, day: string, scope: ScopeSelection
-): Promise<EventDayRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_by_event', { p_day: day, ...scopeArgs(scope) });
-  throwIf(error, 'stats_attendance_by_event');
+  supabase: SupabaseClient, day: string, scope: ScopeSelection, opts: ReadOpts = {}): Promise<EventDayRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_by_event', { p_day: day, ...scopeArgs(scope) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     event_id: (r.event_id as string | null) ?? null,
     event_name: String(r.event_name ?? ''),
@@ -321,10 +313,8 @@ export async function fetchAttendanceByEvent(
 }
 
 export async function fetchPointsByCause(
-  supabase: SupabaseClient, day: string, scope: ScopeSelection
-): Promise<CauseDayRow[]> {
-  const { data, error } = await supabase.rpc('stats_points_by_cause', { p_day: day, ...scopeArgs(scope) });
-  throwIf(error, 'stats_points_by_cause');
+  supabase: SupabaseClient, day: string, scope: ScopeSelection, opts: ReadOpts = {}): Promise<CauseDayRow[]> {
+  const data = await reads.rpc(supabase, 'stats_points_by_cause', { p_day: day, ...scopeArgs(scope) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     cause_id: (r.cause_id as string | null) ?? null,
     cause_name: String(r.cause_name ?? ''),
@@ -341,12 +331,10 @@ export async function fetchPointsByCause(
 }
 
 export async function fetchAttendanceTimeline(
-  supabase: SupabaseClient, period: Period, scope: ScopeSelection
-): Promise<AttendanceTimelineRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_timeline', {
+  supabase: SupabaseClient, period: Period, scope: ScopeSelection, opts: ReadOpts = {}): Promise<AttendanceTimelineRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_timeline', {
     p_from: period.from, p_to: period.to, p_bucket: period.bucket, ...scopeArgs(scope),
-  });
-  throwIf(error, 'stats_attendance_timeline');
+  }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     bucket: String(r.bucket),
     event_id: (r.event_id as string | null) ?? null,
@@ -359,12 +347,10 @@ export async function fetchAttendanceTimeline(
 }
 
 export async function fetchPointsTimeline(
-  supabase: SupabaseClient, period: Period, scope: ScopeSelection
-): Promise<PointsTimelineRow[]> {
-  const { data, error } = await supabase.rpc('stats_points_timeline', {
+  supabase: SupabaseClient, period: Period, scope: ScopeSelection, opts: ReadOpts = {}): Promise<PointsTimelineRow[]> {
+  const data = await reads.rpc(supabase, 'stats_points_timeline', {
     p_from: period.from, p_to: period.to, p_bucket: period.bucket, ...scopeArgs(scope),
-  });
-  throwIf(error, 'stats_points_timeline');
+  }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     bucket: String(r.bucket),
     cause_id: (r.cause_id as string | null) ?? null,
@@ -378,10 +364,8 @@ export async function fetchPointsTimeline(
 }
 
 export async function fetchAttendanceByClass(
-  supabase: SupabaseClient, day: string, scope: ScopeSelection
-): Promise<ClassDayRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_by_class', { p_day: day, ...scopeArgs(scope) });
-  throwIf(error, 'stats_attendance_by_class');
+  supabase: SupabaseClient, day: string, scope: ScopeSelection, opts: ReadOpts = {}): Promise<ClassDayRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_by_class', { p_day: day, ...scopeArgs(scope) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     class_id: String(r.class_id),
     class_name: String(r.class_name ?? ''),
@@ -395,12 +379,10 @@ export async function fetchAttendanceByClass(
 }
 
 export async function fetchLeaderboard(
-  supabase: SupabaseClient, by: 'points' | 'attendance', limit: number, scope: ScopeSelection
-): Promise<LeaderRow[]> {
-  const { data, error } = await supabase.rpc('stats_leaderboard_scoped', {
+  supabase: SupabaseClient, by: 'points' | 'attendance', limit: number, scope: ScopeSelection, opts: ReadOpts = {}): Promise<LeaderRow[]> {
+  const data = await reads.rpc(supabase, 'stats_leaderboard_scoped', {
     p_by: by, p_limit: limit, ...scopeArgs(scope),
-  });
-  throwIf(error, 'stats_leaderboard_scoped');
+  }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     enrollment_id: String(r.enrollment_id),
     person_id: String(r.person_id),
@@ -413,12 +395,10 @@ export async function fetchLeaderboard(
 }
 
 export async function fetchWeekdayProfile(
-  supabase: SupabaseClient, period: Period, scope: ScopeSelection
-): Promise<WeekdayRow[]> {
-  const { data, error } = await supabase.rpc('stats_weekday_profile', {
+  supabase: SupabaseClient, period: Period, scope: ScopeSelection, opts: ReadOpts = {}): Promise<WeekdayRow[]> {
+  const data = await reads.rpc(supabase, 'stats_weekday_profile', {
     p_from: period.from, p_to: period.to, ...scopeArgs(scope),
-  });
-  throwIf(error, 'stats_weekday_profile');
+  }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     weekday: nz(r.weekday),
     attendance: nz(r.attendance),

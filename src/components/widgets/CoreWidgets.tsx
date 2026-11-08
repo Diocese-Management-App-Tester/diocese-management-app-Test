@@ -26,6 +26,7 @@ import { copticOf, formatCoptic } from '@/lib/coptic';
 import { verseOfDay } from '@/lib/verses';
 import { cachedLookup, invalidateLookup } from '@/lib/queries';
 import { fetchDaySummary, shiftDay } from '@/lib/stats';
+import { reads } from '@/lib/cached-reads';
 import { DEST_BY_KEY } from '@/lib/navigation';
 import { WidgetCard, WidgetEmpty, WidgetSkeleton, fmtNum, fmtDur, fmtYmdLong } from './WidgetBits';
 
@@ -94,17 +95,18 @@ export function TodayPulseWidget({ title, size }: WidgetProps) {
   const today = cairoToday(now());
   const [d, setD] = useState<{ attendees: number; persons: number; points: number } | null>(null);
 
-  const load = useCallback(async () => {
+  // Phase 2: mount may reuse the cache; the realtime reload forces
+  const load = useCallback(async (force: boolean) => {
     try {
-      const s = await fetchDaySummary(supabase, today, {});
+      const s = await fetchDaySummary(supabase, today, {}, { force });
       setD({ attendees: s.attendees, persons: s.scope_persons, points: s.attendance_points + s.cause_points_added - s.cause_points_removed });
     } catch { setD({ attendees: 0, persons: 0, points: 0 }); }
   }, [supabase, today]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(false); }, [load]);
   // 20261014120000: an aggregate RPC per message on every device was one
   // request per scan per phone. Rate-limited to one reload per 30 s during
   // a burst (trailing run keeps the ring exact once the burst ends).
-  useDebouncedRealtime(supabase, 'w-pulse', [{ table: 'attendance_log' }, { table: 'points_log' }, { table: 'enrollments' }], load, { enabled: !!profile, delayMs: 1500, minIntervalMs: 30_000 });
+  useDebouncedRealtime(supabase, 'w-pulse', [{ table: 'attendance_log' }, { table: 'points_log' }, { table: 'enrollments' }], () => load(true), { enabled: !!profile, delayMs: 1500, minIntervalMs: 30_000 });
 
   const pct = d && d.persons > 0 ? Math.min(100, Math.round((d.attendees / d.persons) * 100)) : 0;
   const r = 40, c = 2 * Math.PI * r;
@@ -157,20 +159,22 @@ export function CountersWidget() {
   const [counts, setCounts] = useState<Counts | null>(null);
   const isManager = profile && ['owner', 'church_manager', 'service_manager'].includes(profile.role);
 
-  const load = useCallback(async () => {
-    const { data } = await supabase.rpc('dashboard_counts', { p_today_start: cairoDayStartISO(now()) });
-    const r = ((data as Record<string, number>[] | null)?.[0]) ?? {};
+  // Phase 2: mount may reuse the cache; bus / realtime reloads force. The RPC
+  // error is ignored as before (counters stay 0). p_today_start is part of the key.
+  const load = useCallback(async (force: boolean) => {
+    const data = await reads.rpcSoft<Record<string, number>[]>(supabase, 'dashboard_counts', { p_today_start: cairoDayStartISO(now()) }, { force });
+    const r = (data?.[0]) ?? {};
     const n = (k: string) => Number(r[k] ?? 0);
     setCounts({ persons: n('persons'), enrollments: n('enrollments'), todayAttendance: n('today_attendance'), pendingServants: n('pending_servants'), churches: n('churches'), services: n('services'), classes: n('classes') });
   }, [supabase, now]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(false); }, [load]);
   // 20261014120000: the bus message says «n attendance rows in this church»
   // but not which class / event, and dashboard_counts is RLS-scoped — so the
   // count cannot be patched in memory for a class servant. Instead: an
   // enrollment UPDATE (a scan bumping counters) changes nothing here →
   // ignored; the rest reloads the RPC at most once per 30 s during a burst.
-  useBusIds('enrollments', (ids, op) => { if (op !== 'UPDATE') void load(); }, { delayMs: 2000 });
-  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'attendance_log' }, { table: 'servant_enrollments' }], load, { delayMs: 2000, minIntervalMs: 30_000 });
+  useBusIds('enrollments', (ids, op) => { if (op !== 'UPDATE') void load(true); }, { delayMs: 2000 });
+  useDebouncedRealtime(supabase, 'w-counters', [{ table: 'attendance_log' }, { table: 'servant_enrollments' }], () => load(true), { delayMs: 2000, minIntervalMs: 30_000 });
 
   const c = counts;
   return (
@@ -303,16 +307,16 @@ export function NextEventWidget({ title, size }: WidgetProps) {
     return scored[0]?.p ?? null;
   }, [events, now, tick]);
 
-  const loadAttended = useCallback(async () => {
+  // Phase 2: mount / event change may reuse the cache; the realtime reload forces
+  const loadAttended = useCallback(async (force: boolean) => {
     if (!pick) { setAttended(null); return; }
-    const { count } = await supabase.from('attendance_log').select('id', { count: 'exact', head: true }).eq('event_id', pick.ev.id).eq('attended_on', pick.occ.date);
-    setAttended(count ?? 0);
+    setAttended(await reads.eventAttendanceCount(supabase, pick.ev.id, pick.occ.date, { force }));
   }, [supabase, pick]);
-  useEffect(() => { loadAttended(); }, [loadAttended]);
+  useEffect(() => { void loadAttended(false); }, [loadAttended]);
   // 20261014120000: the message does not say which event the scan was for,
   // so the count is re-read (a tiny HEAD count) at most once per 20 s during
   // a burst instead of once per scan on every device.
-  useDebouncedRealtime(supabase, 'w-event-att', [{ table: 'attendance_log' }], loadAttended, { delayMs: 1500, minIntervalMs: 20_000, enabled: !!pick });
+  useDebouncedRealtime(supabase, 'w-event-att', [{ table: 'attendance_log' }], () => loadAttended(true), { delayMs: 1500, minIntervalMs: 20_000, enabled: !!pick });
 
   const at = now();
   let state: ReactNode = null;
