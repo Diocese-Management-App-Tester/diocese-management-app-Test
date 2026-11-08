@@ -64,6 +64,9 @@ export function setQueryIdentity(parts: NamespaceParts | null): boolean { return
 /** switching account / place, signing out: disable the cache right now, until the new identity is known */
 export function suspendQueryCache(): void { service.suspend(); }
 
+/** true while an identity is set (approved + signed in) — i.e. while a cache fill can be reused */
+export function queryCacheEnabled(): boolean { return service.cache.namespace !== null; }
+
 /** true when the cache currently belongs to this uid */
 export function queryCacheBelongsTo(uid: string): boolean { return service.belongsTo(uid); }
 

@@ -27,7 +27,8 @@ import { useAppDate } from '@/lib/app-date-context';
 import NumPadModal from '@/components/NumPadModal';
 import { ViewPersonModal, ModalFrame } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
-import { fetchEnrollmentsPage, cachedLookup, ALL } from '@/lib/queries';
+import { fetchEnrollmentsPage, ALL } from '@/lib/queries';
+import { loadScannerLookups } from '@/lib/scanner-data';
 import { pickScopedDefault, effectiveScope } from '@/lib/defaults';
 import { onBusTable, useBusIds } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
@@ -160,14 +161,9 @@ export default function ScannerPage() {
 
   // ---------- Load lookups (cached 60s) ----------
   const loadLookups = useCallback(async (force = false) => {
-    const [chs, svs, cls, evs, cas, fbs] = await Promise.all([
-      cachedLookup<Church>(supabase, 'churches', { column: 'name' }, force),
-      cachedLookup<Service>(supabase, 'services', { column: 'name' }, force),
-      cachedLookup<ClassRoom>(supabase, 'classes', { column: 'name' }, force),
-      cachedLookup<AppEvent>(supabase, 'events', { column: 'event_date', ascending: false, nullsFirst: false }, force),
-      cachedLookup<Cause>(supabase, 'causes', { column: 'name' }, force),
-      cachedLookup<CallFeedback>(supabase, 'call_feedbacks', { column: 'sort_order' }, force),
-    ]);
+    // one shared definition (also used by the navigation-intent prefetch → same cache keys)
+    const { churches: chs, services: svs, classes: cls, events: evs, causes: cas, feedbacks: fbs } =
+      await loadScannerLookups<Church, Service, ClassRoom, AppEvent, Cause, CallFeedback>(supabase, force);
     setChurches(chs);
     setServices(svs);
     setClasses(cls);
