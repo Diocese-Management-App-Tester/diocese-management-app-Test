@@ -14,13 +14,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ALL, type ScopeSelection } from '@/lib/queries';
 import { shiftDay, formatDay, type Bucket, type Period } from '@/lib/stats';
+import { reads, type ReadOpts } from '@/lib/cached-reads';
 
 const nz = (v: unknown) => Number(v ?? 0);
 const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
-
-function throwIf(error: { message: string } | null, fn: string) {
-  if (error) throw new Error(`${fn}: ${error.message}`);
-}
 
 /** Scope + optional event + kind — the common argument set of the period RPCs. */
 export interface StatsFilter extends ScopeSelection {
@@ -178,9 +175,8 @@ export interface CallsPersonRow {
   last_call_at: string | null; last_caller: string | null; last_feedback: string | null; last_feedback_color: string | null;
 }
 
-export async function fetchCallsSummary(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<CallsSummary> {
-  const { data, error } = await supabase.rpc('stats_calls_summary', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_calls_summary');
+export async function fetchCallsSummary(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<CallsSummary> {
+  const data = await reads.rpc(supabase, 'stats_calls_summary', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   const r = (data as Record<string, unknown>[] | null)?.[0] ?? {};
   return {
     calls: nz(r.calls), dials: nz(r.dials), feedbacks: nz(r.feedbacks), other_feedbacks: nz(r.other_feedbacks),
@@ -192,9 +188,8 @@ export async function fetchCallsSummary(supabase: SupabaseClient, p: Period, f: 
   };
 }
 
-export async function fetchCallsByServant(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<CallsByServantRow[]> {
-  const { data, error } = await supabase.rpc('stats_calls_by_servant', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_calls_by_servant');
+export async function fetchCallsByServant(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<CallsByServantRow[]> {
+  const data = await reads.rpc(supabase, 'stats_calls_by_servant', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     servant_id: str(r.servant_id), servant_name: String(r.servant_name ?? ''), photo_url: str(r.photo_url),
     role: str(r.role), class_name: str(r.class_name),
@@ -204,9 +199,8 @@ export async function fetchCallsByServant(supabase: SupabaseClient, p: Period, f
   }));
 }
 
-export async function fetchCallsByClass(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<CallsByClassRow[]> {
-  const { data, error } = await supabase.rpc('stats_calls_by_class', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_calls_by_class');
+export async function fetchCallsByClass(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<CallsByClassRow[]> {
+  const data = await reads.rpc(supabase, 'stats_calls_by_class', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     class_id: String(r.class_id), class_name: String(r.class_name ?? ''), service_name: String(r.service_name ?? ''), church_name: String(r.church_name ?? ''),
     enrolled: nz(r.enrolled), absentees: nz(r.absentees), calls: nz(r.calls), persons_called: nz(r.persons_called),
@@ -215,9 +209,8 @@ export async function fetchCallsByClass(supabase: SupabaseClient, p: Period, f: 
   }));
 }
 
-export async function fetchCallsByFeedback(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<CallsByFeedbackRow[]> {
-  const { data, error } = await supabase.rpc('stats_calls_by_feedback', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_calls_by_feedback');
+export async function fetchCallsByFeedback(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<CallsByFeedbackRow[]> {
+  const data = await reads.rpc(supabase, 'stats_calls_by_feedback', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     feedback_id: str(r.feedback_id), feedback_kind: (r.feedback_kind as CallsByFeedbackRow['feedback_kind']) ?? 'none',
     feedback_name: String(r.feedback_name ?? ''), color: String(r.color ?? '#94a3b8'), icon: String(r.icon ?? 'phone'),
@@ -225,19 +218,16 @@ export async function fetchCallsByFeedback(supabase: SupabaseClient, p: Period, 
   }));
 }
 
-export async function fetchCallsTimeline(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<CallsTimelineRow[]> {
-  const { data, error } = await supabase.rpc('stats_calls_timeline', { p_from: p.from, p_to: p.to, p_bucket: p.bucket, ...filterArgs(f) });
-  throwIf(error, 'stats_calls_timeline');
+export async function fetchCallsTimeline(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<CallsTimelineRow[]> {
+  const data = await reads.rpc(supabase, 'stats_calls_timeline', { p_from: p.from, p_to: p.to, p_bucket: p.bucket, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     bucket: String(r.bucket), calls: nz(r.calls), persons: nz(r.persons), feedbacks: nz(r.feedbacks), messages: nz(r.messages), servants: nz(r.servants),
   }));
 }
 
 export async function fetchCallsPersons(
-  supabase: SupabaseClient, p: Period, f: StatsFilter, only: CallsPersonsFilter, limit = 300
-): Promise<CallsPersonRow[]> {
-  const { data, error } = await supabase.rpc('stats_calls_persons', { p_from: p.from, p_to: p.to, ...filterArgs(f), p_only: only, p_limit: limit });
-  throwIf(error, 'stats_calls_persons');
+  supabase: SupabaseClient, p: Period, f: StatsFilter, only: CallsPersonsFilter, limit = 300, opts: ReadOpts = {}): Promise<CallsPersonRow[]> {
+  const data = await reads.rpc(supabase, 'stats_calls_persons', { p_from: p.from, p_to: p.to, ...filterArgs(f), p_only: only, p_limit: limit }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     enrollment_id: String(r.enrollment_id), person_id: String(r.person_id), name: String(r.name ?? ''),
     phone: str(r.phone), image_url: str(r.image_url), class_name: str(r.class_name),
@@ -271,9 +261,8 @@ export interface AttendancePersonRow {
   total_attendance: number; points: number;
 }
 
-export async function fetchAttendancePeriodSummary(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<AttendancePeriodSummary> {
-  const { data, error } = await supabase.rpc('stats_attendance_period_summary', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_attendance_period_summary');
+export async function fetchAttendancePeriodSummary(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<AttendancePeriodSummary> {
+  const data = await reads.rpc(supabase, 'stats_attendance_period_summary', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   const r = (data as Record<string, unknown>[] | null)?.[0] ?? {};
   return {
     attendance: nz(r.attendance), attendees: nz(r.attendees), scope_persons: nz(r.scope_persons), never_attended: nz(r.never_attended),
@@ -285,21 +274,18 @@ export async function fetchAttendancePeriodSummary(supabase: SupabaseClient, p: 
   };
 }
 
-export async function fetchAttendanceDistribution(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<DistributionRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_distribution', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_attendance_distribution');
+export async function fetchAttendanceDistribution(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<DistributionRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_distribution', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({ times: nz(r.times), persons: nz(r.persons) }));
 }
 
-export async function fetchAttendanceHourProfile(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<HourRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_hour_profile', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_attendance_hour_profile');
+export async function fetchAttendanceHourProfile(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<HourRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_hour_profile', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({ hour: nz(r.hour), attendance: nz(r.attendance), days: nz(r.days) }));
 }
 
-export async function fetchAttendanceByClassPeriod(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<ClassPeriodRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_by_class_period', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_attendance_by_class_period');
+export async function fetchAttendanceByClassPeriod(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<ClassPeriodRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_by_class_period', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     class_id: String(r.class_id), class_name: String(r.class_name ?? ''), service_name: String(r.service_name ?? ''), church_name: String(r.church_name ?? ''),
     enrolled: nz(r.enrolled), attendees: nz(r.attendees), attendance: nz(r.attendance), days: nz(r.days), points: nz(r.points),
@@ -308,10 +294,8 @@ export async function fetchAttendanceByClassPeriod(supabase: SupabaseClient, p: 
 }
 
 export async function fetchAttendancePersons(
-  supabase: SupabaseClient, p: Period, f: StatsFilter, order: 'most' | 'least', limit = 10
-): Promise<AttendancePersonRow[]> {
-  const { data, error } = await supabase.rpc('stats_attendance_persons', { p_from: p.from, p_to: p.to, ...filterArgs(f), p_order: order, p_limit: limit });
-  throwIf(error, 'stats_attendance_persons');
+  supabase: SupabaseClient, p: Period, f: StatsFilter, order: 'most' | 'least', limit = 10, opts: ReadOpts = {}): Promise<AttendancePersonRow[]> {
+  const data = await reads.rpc(supabase, 'stats_attendance_persons', { p_from: p.from, p_to: p.to, ...filterArgs(f), p_order: order, p_limit: limit }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     enrollment_id: String(r.enrollment_id), person_id: String(r.person_id), name: String(r.name ?? ''),
     image_url: str(r.image_url), class_name: str(r.class_name),
@@ -351,9 +335,8 @@ export interface PointsPersonRow {
   balance: number; attendance_count: number;
 }
 
-export async function fetchPointsPeriodSummary(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<PointsPeriodSummary> {
-  const { data, error } = await supabase.rpc('stats_points_period_summary', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_points_period_summary');
+export async function fetchPointsPeriodSummary(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<PointsPeriodSummary> {
+  const data = await reads.rpc(supabase, 'stats_points_period_summary', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   const r = (data as Record<string, unknown>[] | null)?.[0] ?? {};
   return {
     attendance_points: nz(r.attendance_points), cause_added: nz(r.cause_added), cause_removed: nz(r.cause_removed), net: nz(r.net),
@@ -364,15 +347,13 @@ export async function fetchPointsPeriodSummary(supabase: SupabaseClient, p: Peri
   };
 }
 
-export async function fetchPointsDistribution(supabase: SupabaseClient, step: number, f: StatsFilter): Promise<PointsBucketRow[]> {
-  const { data, error } = await supabase.rpc('stats_points_distribution', { p_step: step, ...filterArgs(f) });
-  throwIf(error, 'stats_points_distribution');
+export async function fetchPointsDistribution(supabase: SupabaseClient, step: number, f: StatsFilter, opts: ReadOpts = {}): Promise<PointsBucketRow[]> {
+  const data = await reads.rpc(supabase, 'stats_points_distribution', { p_step: step, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({ bucket_from: nz(r.bucket_from), bucket_to: nz(r.bucket_to), persons: nz(r.persons) }));
 }
 
-export async function fetchPointsByClassPeriod(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<PointsClassPeriodRow[]> {
-  const { data, error } = await supabase.rpc('stats_points_by_class_period', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_points_by_class_period');
+export async function fetchPointsByClassPeriod(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<PointsClassPeriodRow[]> {
+  const data = await reads.rpc(supabase, 'stats_points_by_class_period', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     class_id: String(r.class_id), class_name: String(r.class_name ?? ''), service_name: String(r.service_name ?? ''), church_name: String(r.church_name ?? ''),
     enrolled: nz(r.enrolled), attendance_points: nz(r.attendance_points), cause_added: nz(r.cause_added), cause_removed: nz(r.cause_removed),
@@ -380,9 +361,8 @@ export async function fetchPointsByClassPeriod(supabase: SupabaseClient, p: Peri
   }));
 }
 
-export async function fetchPointsByServant(supabase: SupabaseClient, p: Period, f: StatsFilter): Promise<PointsByServantRow[]> {
-  const { data, error } = await supabase.rpc('stats_points_by_servant', { p_from: p.from, p_to: p.to, ...filterArgs(f) });
-  throwIf(error, 'stats_points_by_servant');
+export async function fetchPointsByServant(supabase: SupabaseClient, p: Period, f: StatsFilter, opts: ReadOpts = {}): Promise<PointsByServantRow[]> {
+  const data = await reads.rpc(supabase, 'stats_points_by_servant', { p_from: p.from, p_to: p.to, ...filterArgs(f) }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     servant_id: str(r.servant_id), servant_name: String(r.servant_name ?? ''), photo_url: str(r.photo_url), role: str(r.role),
     entries: nz(r.entries), added: nz(r.added), removed: nz(r.removed), net: nz(r.net), recipients: nz(r.recipients),
@@ -391,10 +371,8 @@ export async function fetchPointsByServant(supabase: SupabaseClient, p: Period, 
 }
 
 export async function fetchPointsPersons(
-  supabase: SupabaseClient, p: Period, f: StatsFilter, order: 'period' | 'balance' | 'removed', limit = 10
-): Promise<PointsPersonRow[]> {
-  const { data, error } = await supabase.rpc('stats_points_persons', { p_from: p.from, p_to: p.to, ...filterArgs(f), p_order: order, p_limit: limit });
-  throwIf(error, 'stats_points_persons');
+  supabase: SupabaseClient, p: Period, f: StatsFilter, order: 'period' | 'balance' | 'removed', limit = 10, opts: ReadOpts = {}): Promise<PointsPersonRow[]> {
+  const data = await reads.rpc(supabase, 'stats_points_persons', { p_from: p.from, p_to: p.to, ...filterArgs(f), p_order: order, p_limit: limit }, { ...opts, prefixErrors: true });
   return ((data as Record<string, unknown>[] | null) ?? []).map((r) => ({
     enrollment_id: String(r.enrollment_id), person_id: String(r.person_id), name: String(r.name ?? ''),
     image_url: str(r.image_url), class_name: str(r.class_name),

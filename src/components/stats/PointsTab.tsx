@@ -64,27 +64,28 @@ const PointsTab = forwardRef<TabHandle, Props>(function PointsTab({ supabase, pe
     return mx > 1000 ? 100 : mx > 300 ? 50 : mx > 100 ? 20 : mx > 40 ? 10 : 5;
   }, [summary?.balance_max]);
 
-  const loadMain = useCallback(async () => {
+  // Phase 2: effect-driven loads may reuse the cache; the imperative reload (realtime + «تحديث») forces.
+  const loadMain = useCallback(async (force: boolean) => {
     const [s, tl, c, sv] = await Promise.all([
-      fetchPointsPeriodSummary(supabase, period, filter),
-      fetchPointsTimeline(supabase, period, filter),
-      fetchPointsByClassPeriod(supabase, period, filter),
-      fetchPointsByServant(supabase, period, filter),
+      fetchPointsPeriodSummary(supabase, period, filter, { force }),
+      fetchPointsTimeline(supabase, period, filter, { force }),
+      fetchPointsByClassPeriod(supabase, period, filter, { force }),
+      fetchPointsByServant(supabase, period, filter, { force }),
     ]);
     setSummary(s); setTimeline(tl); setByClass(c); setByServant(sv);
     const mx = s.balance_max;
     const st = mx > 1000 ? 100 : mx > 300 ? 50 : mx > 100 ? 20 : mx > 40 ? 10 : 5;
-    setDist(await fetchPointsDistribution(supabase, st, filter));
+    setDist(await fetchPointsDistribution(supabase, st, filter, { force }));
   }, [supabase, period, filter]);
 
-  const loadPersons = useCallback(async () => {
-    setPersons(await fetchPointsPersons(supabase, period, filter, order, 10));
+  const loadPersons = useCallback(async (force: boolean) => {
+    setPersons(await fetchPointsPersons(supabase, period, filter, order, 10, { force }));
   }, [supabase, period, filter, order]);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (force: boolean) => {
     onError(null);
     try {
-      await Promise.all([loadMain(), loadPersons()]);
+      await Promise.all([loadMain(force), loadPersons(force)]);
       onLoaded();
     } catch (e) {
       onError(e instanceof Error ? e.message : 'تعذر تحميل إحصائيات النقاط');
@@ -93,7 +94,7 @@ const PointsTab = forwardRef<TabHandle, Props>(function PointsTab({ supabase, pe
     }
   }, [loadMain, loadPersons, onError, onLoaded]);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(false); }, [reload]);
 
   const keys = useMemo(() => bucketKeys(period), [period]);
   const labels = useMemo(() => keys.map((k) => bucketLabel(k, period.bucket)), [keys, period.bucket]);
@@ -120,7 +121,7 @@ const PointsTab = forwardRef<TabHandle, Props>(function PointsTab({ supabase, pe
   const s = summary;
 
   useImperativeHandle(ref, () => ({
-    reload,
+    reload: () => reload(true),
     exportSheets: () => [
       { name: 'النقاط — ملخص', rows: s ? [
         { البند: 'صافي نقاط الفترة', القيمة: s.net },

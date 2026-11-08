@@ -23,6 +23,7 @@ export default function OwnerHubPage() {
   const { profiles: permissionProfiles } = usePermissions();
   const [supabase] = useState(() => createClient());
   const [personsCounts, setPersonsCounts] = useState<OwnerPersonsCounts | null>(null);
+  // Phase 2: the hub counters may reuse the cache (2 min / dropped by any persons·enrollments·servants bus message)
   useEffect(() => { fetchOwnerPersonsCounts(supabase).then(setPersonsCounts); }, [supabase]);
   // priests (20260927120000): count + pending signup requests
   const [priestStats, setPriestStats] = useState<{ total: number; pending: number } | null>(null);

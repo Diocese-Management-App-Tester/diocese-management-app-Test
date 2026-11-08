@@ -65,34 +65,36 @@ const OverviewTab = forwardRef<TabHandle, Props>(function OverviewTab({ supabase
   const [loading, setLoading] = useState(true);
 
   // Day-bound + scope-bound data (one round trip each, in parallel)
-  const loadDay = useCallback(async () => {
+  // Phase 2: mount / scope / day / period changes may reuse the cache; the
+  // imperative reload (realtime + «تحديث») passes force → always fresh.
+  const loadDay = useCallback(async (force: boolean) => {
     const [sum, ds, ev, ca, cl] = await Promise.all([
-      fetchScopeSummary(supabase, scope),
-      fetchDaySummary(supabase, day, scope),
-      fetchAttendanceByEvent(supabase, day, scope),
-      fetchPointsByCause(supabase, day, scope),
-      fetchAttendanceByClass(supabase, day, scope),
+      fetchScopeSummary(supabase, scope, { force }),
+      fetchDaySummary(supabase, day, scope, { force }),
+      fetchAttendanceByEvent(supabase, day, scope, { force }),
+      fetchPointsByCause(supabase, day, scope, { force }),
+      fetchAttendanceByClass(supabase, day, scope, { force }),
     ]);
     setSummary(sum); setDaySum(ds); setByEvent(ev); setByCause(ca); setByClass(cl);
   }, [supabase, scope, day]);
 
-  const loadPeriod = useCallback(async () => {
+  const loadPeriod = useCallback(async (force: boolean) => {
     const [a, p, w] = await Promise.all([
-      fetchAttendanceTimeline(supabase, period, scope),
-      fetchPointsTimeline(supabase, period, scope),
-      fetchWeekdayProfile(supabase, period, scope),
+      fetchAttendanceTimeline(supabase, period, scope, { force }),
+      fetchPointsTimeline(supabase, period, scope, { force }),
+      fetchWeekdayProfile(supabase, period, scope, { force }),
     ]);
     setAttTimeline(a); setPtsTimeline(p); setWeekdays(w);
   }, [supabase, period, scope]);
 
-  const loadLeaders = useCallback(async () => {
-    setLeaders(await fetchLeaderboard(supabase, leaderBy, 10, scope));
+  const loadLeaders = useCallback(async (force: boolean) => {
+    setLeaders(await fetchLeaderboard(supabase, leaderBy, 10, scope, { force }));
   }, [supabase, leaderBy, scope]);
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (force: boolean) => {
     onError(null);
     try {
-      await Promise.all([loadDay(), loadPeriod(), loadLeaders()]);
+      await Promise.all([loadDay(force), loadPeriod(force), loadLeaders(force)]);
       onLoaded();
     } catch (e) {
       onError(e instanceof Error ? e.message : 'تعذر تحميل الإحصائيات');
@@ -101,7 +103,7 @@ const OverviewTab = forwardRef<TabHandle, Props>(function OverviewTab({ supabase
     }
   }, [loadDay, loadPeriod, loadLeaders, onError, onLoaded]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { loadAll(false); }, [loadAll]);
 
   // ---------- Derived: chart series ----------
   const keys = useMemo(() => bucketKeys(period), [period]);
@@ -197,7 +199,7 @@ const OverviewTab = forwardRef<TabHandle, Props>(function OverviewTab({ supabase
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [scopeText, day, summary, daySum, byEvent, byCause, byClass, keys, attSeries, ptsSeries, weekdays, leaders]);
 
-  useImperativeHandle(ref, () => ({ reload: loadAll, exportSheets }), [loadAll, exportSheets]);
+  useImperativeHandle(ref, () => ({ reload: () => loadAll(true), exportSheets }), [loadAll, exportSheets]);
 
   // =====================================================================
   // Render

@@ -14,6 +14,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppRole, ApprovalStatus, EnrollmentStatus, Gender, Person, ScopeRef } from '@/lib/types';
+import { reads, type ReadOpts } from '@/lib/cached-reads';
 
 /** One enrollment as embedded by owner_persons_page. */
 export interface OwnerEnrollment {
@@ -93,13 +94,22 @@ export interface OwnerPersonsFilter {
 
 export const OWNER_PAGE_SIZE = 100;
 
+/**
+ * Phase 2: cached under the rpc name + the COMPLETE argument object below
+ * (search, scope mode/church/service/class, gender, kind, limit, offset), so
+ * another page / page size / search / filter is always another entry.
+ * `opts.force` = realtime / manual refresh / after an owner write;
+ * `opts.bypass` = select-all before a bulk delete, merge-candidate search.
+ */
 export async function fetchOwnerPersons(
   supabase: SupabaseClient,
   f: OwnerPersonsFilter,
   page = 0,
   pageSize = OWNER_PAGE_SIZE,
+  opts: ReadOpts = {},
 ): Promise<{ rows: OwnerPersonRow[]; total: number }> {
-  const { data, error } = await supabase.rpc('owner_persons_page', {
+  // the error is thrown raw (as before) — the page maps it with ownerPersonsError()
+  const data = await reads.rpc<OwnerPersonRow[] | null>(supabase, 'owner_persons_page', {
     p_search: f.search?.trim() || null,
     p_scope_mode: f.scopeMode,
     p_church: f.scopeMode === 'scope' ? f.church || null : null,
@@ -109,8 +119,7 @@ export async function fetchOwnerPersons(
     p_kind: f.kind,
     p_limit: pageSize,
     p_offset: page * pageSize,
-  });
-  if (error) throw error;
+  }, opts);
   const rows = ((data ?? []) as OwnerPersonRow[]).map((r) => ({
     ...r,
     enrollments: (r.enrollments ?? []) as OwnerEnrollment[],
@@ -129,10 +138,9 @@ export interface OwnerPersonsCounts {
   priests?: number;
 }
 
-export async function fetchOwnerPersonsCounts(supabase: SupabaseClient): Promise<OwnerPersonsCounts | null> {
-  const { data, error } = await supabase.rpc('owner_persons_counts');
-  if (error || !data) return null;
-  return data as OwnerPersonsCounts;
+/** error / empty answer → null (as before; never cached) */
+export async function fetchOwnerPersonsCounts(supabase: SupabaseClient, opts: ReadOpts = {}): Promise<OwnerPersonsCounts | null> {
+  return reads.rpcSoft<OwnerPersonsCounts>(supabase, 'owner_persons_counts', {}, opts);
 }
 
 export interface BulkEnrollResult { added: number; skipped: number; persons: number; scopes: number }

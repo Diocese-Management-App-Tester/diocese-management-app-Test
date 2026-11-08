@@ -71,27 +71,28 @@ const CallsTab = forwardRef<TabHandle, Props>(function CallsTab({ supabase, peri
   const [loading, setLoading] = useState(true);
   const [personsLoading, setPersonsLoading] = useState(false);
 
-  const loadMain = useCallback(async () => {
+  // Phase 2: effect-driven loads may reuse the cache; the imperative reload (realtime + «تحديث») forces.
+  const loadMain = useCallback(async (force: boolean) => {
     const [s, sv, cl, fb, tl] = await Promise.all([
-      fetchCallsSummary(supabase, period, filter),
-      fetchCallsByServant(supabase, period, filter),
-      fetchCallsByClass(supabase, period, filter),
-      fetchCallsByFeedback(supabase, period, filter),
-      fetchCallsTimeline(supabase, period, filter),
+      fetchCallsSummary(supabase, period, filter, { force }),
+      fetchCallsByServant(supabase, period, filter, { force }),
+      fetchCallsByClass(supabase, period, filter, { force }),
+      fetchCallsByFeedback(supabase, period, filter, { force }),
+      fetchCallsTimeline(supabase, period, filter, { force }),
     ]);
     setSummary(s); setByServant(sv); setByClass(cl); setByFeedback(fb); setTimeline(tl);
   }, [supabase, period, filter]);
 
-  const loadPersons = useCallback(async () => {
+  const loadPersons = useCallback(async (force: boolean) => {
     setPersonsLoading(true);
-    try { setPersons(await fetchCallsPersons(supabase, period, filter, personsFilter, 400)); }
+    try { setPersons(await fetchCallsPersons(supabase, period, filter, personsFilter, 400, { force })); }
     finally { setPersonsLoading(false); }
   }, [supabase, period, filter, personsFilter]);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (force: boolean) => {
     onError(null);
     try {
-      await Promise.all([loadMain(), loadPersons()]);
+      await Promise.all([loadMain(force), loadPersons(force)]);
       onLoaded();
     } catch (e) {
       onError(e instanceof Error ? e.message : 'تعذر تحميل إحصائيات الافتقاد');
@@ -100,7 +101,7 @@ const CallsTab = forwardRef<TabHandle, Props>(function CallsTab({ supabase, peri
     }
   }, [loadMain, loadPersons, onError, onLoaded]);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(false); }, [reload]);
 
   // ---------- derived ----------
   const keys = useMemo(() => bucketKeys(period), [period]);
@@ -128,7 +129,7 @@ const CallsTab = forwardRef<TabHandle, Props>(function CallsTab({ supabase, peri
   const feedbackRate = summary ? pct(summary.persons_feedback, summary.persons_called) : 0;
 
   useImperativeHandle(ref, () => ({
-    reload,
+    reload: () => reload(true),
     exportSheets: () => [
       { name: 'الافتقاد — ملخص', rows: summary ? [
         { البند: 'المكالمات', القيمة: summary.calls },

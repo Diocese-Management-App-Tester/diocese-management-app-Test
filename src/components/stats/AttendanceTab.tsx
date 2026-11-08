@@ -54,19 +54,20 @@ const AttendanceTab = forwardRef<TabHandle, Props>(function AttendanceTab({ supa
   const [chartMode, setChartMode] = useState<'stacked' | 'grouped'>('stacked');
   const [loading, setLoading] = useState(true);
 
-  const reload = useCallback(async () => {
+  // Phase 2: effect-driven loads may reuse the cache; the imperative reload (realtime + «تحديث») forces.
+  const reload = useCallback(async (force: boolean) => {
     onError(null);
     try {
       // the 0020 timeline RPC has no p_event → filter rows client-side
       const [s, tl, d, h, w, c, m, l] = await Promise.all([
-        fetchAttendancePeriodSummary(supabase, period, filter),
-        fetchAttendanceTimeline(supabase, period, filter),
-        fetchAttendanceDistribution(supabase, period, filter),
-        fetchAttendanceHourProfile(supabase, period, filter),
-        fetchWeekdayProfile(supabase, period, filter),
-        fetchAttendanceByClassPeriod(supabase, period, filter),
-        fetchAttendancePersons(supabase, period, filter, 'most', 10),
-        fetchAttendancePersons(supabase, period, filter, 'least', 10),
+        fetchAttendancePeriodSummary(supabase, period, filter, { force }),
+        fetchAttendanceTimeline(supabase, period, filter, { force }),
+        fetchAttendanceDistribution(supabase, period, filter, { force }),
+        fetchAttendanceHourProfile(supabase, period, filter, { force }),
+        fetchWeekdayProfile(supabase, period, filter, { force }),
+        fetchAttendanceByClassPeriod(supabase, period, filter, { force }),
+        fetchAttendancePersons(supabase, period, filter, 'most', 10, { force }),
+        fetchAttendancePersons(supabase, period, filter, 'least', 10, { force }),
       ]);
       setSummary(s);
       setTimeline(filter.event && filter.event !== 'all' ? tl.filter((r) => r.event_id === filter.event) : tl);
@@ -79,7 +80,7 @@ const AttendanceTab = forwardRef<TabHandle, Props>(function AttendanceTab({ supa
     }
   }, [supabase, period, filter, onError, onLoaded]);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(false); }, [reload]);
 
   const keys = useMemo(() => bucketKeys(period), [period]);
   const labels = useMemo(() => keys.map((k) => bucketLabel(k, period.bucket)), [keys, period.bucket]);
@@ -105,7 +106,7 @@ const AttendanceTab = forwardRef<TabHandle, Props>(function AttendanceTab({ supa
   const seatRate = seats > 0 && s ? Math.min(100, Math.round((s.attendance / seats) * 100)) : 0;
 
   useImperativeHandle(ref, () => ({
-    reload,
+    reload: () => reload(true),
     exportSheets: () => [
       { name: 'الحضور — ملخص', rows: s ? [
         { البند: 'مرات الحضور', القيمة: s.attendance },

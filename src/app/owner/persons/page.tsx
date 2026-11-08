@@ -112,11 +112,14 @@ export default function OwnerPersonsPage() {
     kind,
   }), [searchQ, scopeMode, church, service, cls, gender, kind]);
 
-  const load = useCallback(async () => {
+  // Phase 2: a page / filter / search change (the effect below) may reuse the
+  // cache — every parameter is part of the key. Realtime, the «تحديث» button
+  // and the reload after the owner's own writes pass force=true.
+  const load = useCallback(async (force: boolean) => {
     try {
       const [r, c] = await Promise.all([
-        fetchOwnerPersons(supabase, filter, page),
-        fetchOwnerPersonsCounts(supabase),
+        fetchOwnerPersons(supabase, filter, page, OWNER_PAGE_SIZE, { force }),
+        fetchOwnerPersonsCounts(supabase, { force }),
       ]);
       setRows(r.rows);
       setTotal(r.total);
@@ -142,12 +145,12 @@ export default function OwnerPersonsPage() {
   useEffect(() => {
     if (!isOwner) return;
     setLoading(true);
-    load();
+    void load(false);
   }, [isOwner, load]);
   useDebouncedRealtime(
     supabase, 'owner-persons',
     [{ table: 'persons' }, { table: 'enrollments' }, { table: SERVANTS_TABLE }, { table: 'priests' }],
-    load,
+    () => load(true),
     { enabled: isOwner }
   );
 
@@ -169,7 +172,8 @@ export default function OwnerPersonsPage() {
       let p = 0;
       // bounded: at most 5000 persons
       while (p * 500 < Math.min(total, 5000)) {
-        const r = await fetchOwnerPersons(supabase, filter, p, 500);
+        // select-all feeds a bulk delete / unenroll → always the database, never the cache
+        const r = await fetchOwnerPersons(supabase, filter, p, 500, { bypass: true });
         r.rows.forEach((x) => n.set(x.id, x));
         if (r.rows.length < 500) break;
         p++;
@@ -216,7 +220,7 @@ export default function OwnerPersonsPage() {
             إدارة الأفراد
             {counts && <span className="badge bg-gold-100 text-gold-700 tabular-nums">{counts.total}</span>}
           </h2>
-          <button type="button" onClick={() => { setLoading(true); loadLookups(true); load(); }} aria-label="تحديث" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
+          <button type="button" onClick={() => { setLoading(true); loadLookups(true); void load(true); }} aria-label="تحديث" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </section>
@@ -381,35 +385,35 @@ export default function OwnerPersonsPage() {
         {/* ---------- modals ---------- */}
         {bulk === 'enroll' && (
           <BulkEnrollModal rows={selectedRows} lookups={lookups} onClose={() => setBulk(null)}
-            onDone={(m) => { flash('ok', m); load(); }} />
+            onDone={(m) => { flash('ok', m); void load(true); }} />
         )}
         {bulk === 'unenroll' && (
           <BulkUnenrollModal rows={selectedRows} lookups={lookups} onClose={() => setBulk(null)}
-            onDone={(m) => { flash('ok', m); load(); }} />
+            onDone={(m) => { flash('ok', m); void load(true); }} />
         )}
         {bulk === 'delete' && (
           <BulkDeleteModal rows={selectedRows} onClose={() => setBulk(null)}
-            onDone={(m) => { flash('ok', m); clearSelection(); load(); }} />
+            onDone={(m) => { flash('ok', m); clearSelection(); void load(true); }} />
         )}
         {bulk === 'merge' && selectedRows.length === 2 && (
           <MergePersonsModal first={selectedRows[0]} second={selectedRows[1]} lookups={lookups} onClose={() => setBulk(null)}
-            onDone={(m) => { flash('ok', m); clearSelection(); load(); }} />
+            onDone={(m) => { flash('ok', m); clearSelection(); void load(true); }} />
         )}
 
         {editRow && (
-          <EditPersonModal enrollment={asEnrollment(editRow)} onSaved={load} onClose={() => setEditRow(null)} />
+          <EditPersonModal enrollment={asEnrollment(editRow)} onSaved={() => { void load(true); }} onClose={() => setEditRow(null)} />
         )}
         {enrollRow && (
           <AddEnrollmentModal row={enrollRow} lookups={lookups} onClose={() => setEnrollRow(null)}
-            onDone={(m) => { flash('ok', m); load(); }} />
+            onDone={(m) => { flash('ok', m); void load(true); }} />
         )}
         {mergeRow && (
           <MergePersonsModal first={mergeRow} lookups={lookups} onClose={() => setMergeRow(null)}
-            onDone={(m) => { flash('ok', m); setSelected((s) => { const n = new Map(s); n.delete(mergeRow.id); return n; }); load(); }} />
+            onDone={(m) => { flash('ok', m); setSelected((s) => { const n = new Map(s); n.delete(mergeRow.id); return n; }); void load(true); }} />
         )}
         {deleteRow && (
           <BulkDeleteModal rows={[deleteRow]} onClose={() => setDeleteRow(null)}
-            onDone={(m) => { flash('ok', m); setSelected((s) => { const n = new Map(s); n.delete(deleteRow.id); return n; }); load(); }} />
+            onDone={(m) => { flash('ok', m); setSelected((s) => { const n = new Map(s); n.delete(deleteRow.id); return n; }); void load(true); }} />
         )}
       </OwnerGate>
     </AppShell>
