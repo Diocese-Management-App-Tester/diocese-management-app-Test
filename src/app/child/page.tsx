@@ -21,6 +21,7 @@ import {
 } from '@/lib/child-portal';
 import { GENDER_LABELS } from '@/lib/types';
 import BirthdayBanner from '@/components/child/BirthdayBanner';
+import DateVerseCard from '@/components/child/DateVerseCard';
 import { fetchChildBirthday, type ChildBirthday } from '@/lib/child-portal';
 
 export default function ChildHomePage() {
@@ -91,6 +92,9 @@ function HomeContent() {
           </div>
         </div>
       </section>
+
+      {/* Date (Gregorian + Coptic) and verse of the day — same as the servant home's welcome widget */}
+      <DateVerseCard />
 
       <BirthdayBanner data={birthday} person={person} />
 
