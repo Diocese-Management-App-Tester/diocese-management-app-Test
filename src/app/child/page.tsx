@@ -38,7 +38,7 @@ function HomeContent() {
   const { exams, openCount, pendingCount } = useChildExams();
   const { conversations, unread } = useChildMessages();
   const { classes: onlineList, liveCount, upcomingCount } = useChildOnline();
-  const { hasAny: hasAchievements, earnedCount, inProgress, data: achData } = useChildAchievements();
+  const { hasAny: hasAchievements, earnedCount, inProgress, availableCount, data: achData } = useChildAchievements();
   const { list: occList, upcoming: occUpcoming, open: occOpen, withTicket } = useChildOccasions();
   const { hasAny: hasConfession, mine: myPriest, pending: confPending, upcoming: confUpcoming } = useChildConfession();
   const { data: famData, hasFamily, hasPriests: hasFamilyPriests, pending: famPending, upcoming: famUpcoming } = useChildFamily();
@@ -260,7 +260,9 @@ function HomeContent() {
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-extrabold">الإنجازات</span>
               <span className="block truncate text-xs text-slate-500">
-                {earnedCount > 0
+                {availableCount > 0
+                  ? `حققت ${achData?.catalog?.filter((c) => c.awards_count > 0).length ?? 0} من ${availableCount} إنجاز${inProgress > 0 ? ` · ${inProgress} في الطريق` : ''}`
+                  : earnedCount > 0
                   ? `حصلت على ${earnedCount} ${earnedCount === 1 ? 'إنجاز' : earnedCount === 2 ? 'إنجازين' : earnedCount <= 10 ? 'إنجازات' : 'إنجازاً'}${inProgress > 0 ? ` · ${inProgress} في الطريق` : ''}`
                   : achData?.progress[0]
                     ? `${achData.progress[0].name}: ${Math.min(achData.progress[0].current, achData.progress[0].target)} / ${achData.progress[0].target}`

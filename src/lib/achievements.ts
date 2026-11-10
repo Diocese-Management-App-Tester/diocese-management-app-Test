@@ -314,14 +314,40 @@ export interface ChildAchievementProgress {
   event_name: string | null;
 }
 
+/** One ACTIVE achievement that applies to one of the child's enrollments (migration 20261020120000). */
+export interface ChildCatalogItem {
+  achievement_id: string;
+  enrollment_id: string;
+  class_name: string;
+  name: string;
+  description: string | null;
+  image_url: string | null;
+  points: number;
+  kind: AchievementKind;
+  award_mode: AwardMode;
+  max_awards: number | null;
+  min_interval_days: number | null;
+  rule: AttendanceRule | null;
+  /** attendance achievements only (null for normal ones) */
+  target: number | null;
+  current: number | null;
+  /** how many times HE got it (0 = not achieved yet) */
+  awards_count: number;
+  last_awarded_at: string | null;
+  block: ProgressBlock | null;
+  event_name: string | null;
+}
+
 export interface ChildAchievements {
   earned: ChildEarnedAchievement[];
   progress: ChildAchievementProgress[];
+  /** every available achievement of his scope — absent until migration 20261020120000 is applied */
+  catalog?: ChildCatalogItem[];
 }
 
 export async function fetchChildAchievements(supabase: SupabaseClient, token: string): Promise<ChildAchievements> {
   const { data, error } = await supabase.rpc('child_portal_achievements', { p_national_id: token });
   if (error) throw error;
   const d = (data ?? {}) as Partial<ChildAchievements>;
-  return { earned: d.earned ?? [], progress: d.progress ?? [] };
+  return { earned: d.earned ?? [], progress: d.progress ?? [], ...(Array.isArray(d.catalog) ? { catalog: d.catalog } : {}) };
 }

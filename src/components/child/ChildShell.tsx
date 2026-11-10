@@ -92,11 +92,13 @@ export function useChildOnline(): { classes: ChildOnlineClass[] | null; liveCoun
  * shared ChildProvider. `null` while loading; empty lists when the module
  * isn't granted (menu entry + home card stay hidden).
  */
-export function useChildAchievements(): { data: ChildAchievements | null; earnedCount: number; inProgress: number; hasAny: boolean } {
+export function useChildAchievements(): { data: ChildAchievements | null; earnedCount: number; inProgress: number; availableCount: number; hasAny: boolean } {
   const { achievements } = useChild();
   const earned = achievements?.earned.length ?? 0;
   const prog = achievements?.progress.length ?? 0;
-  return { data: achievements, earnedCount: earned, inProgress: prog, hasAny: earned + prog > 0 };
+  // 20261020120000: `catalog` = every active achievement of his scope (achieved or not)
+  const available = achievements?.catalog?.length ?? 0;
+  return { data: achievements, earnedCount: earned, inProgress: prog, availableCount: available, hasAny: earned + prog + available > 0 };
 }
 
 /**
