@@ -29,6 +29,8 @@ import { ViewPersonModal, ModalFrame } from '@/components/PersonDataModals';
 import { AttendanceLogModal, PointsLogModal } from '@/components/LogModals';
 import { fetchEnrollmentsPage, ALL } from '@/lib/queries';
 import { loadScannerLookups } from '@/lib/scanner-data';
+import { scannerRoster } from '@/lib/scanner-roster';
+import { identifyScan } from '@/lib/cache/roster';
 import { pickScopedDefault, effectiveScope } from '@/lib/defaults';
 import { onBusTable, useBusIds } from '@/lib/realtime';
 import { useNavLabel } from '@/lib/customization-context';
@@ -175,6 +177,16 @@ export default function ScannerPage() {
   useEffect(() => {
     if (profile?.status === 'approved') loadLookups();
   }, [profile?.status, loadLookups]);
+
+  // ---------- Roster of the selected scope (Phase 4) ----------
+  // Loaded in memory so a scan can be identified without a round trip. It only IDENTIFIES the scanned
+  // person: duplicate checks, stopped / event-scope rules and every write stay server-validated (doJob).
+  // Any doubt (stale, other scope / account, bus down, person touched…) → the server RPC, as before.
+  useEffect(() => {
+    if (profile?.status !== 'approved') return;
+    void scannerRoster.load(supabase, { church: churchFilter, service: serviceFilter, class: classFilter });
+  }, [profile?.status, supabase, churchFilter, serviceFilter, classFilter]);
+  useEffect(() => () => scannerRoster.release(), []);
 
   // ---------- Cascading selector options ----------
   const visibleServices = useMemo(
@@ -630,14 +642,23 @@ export default function ScannerPage() {
         }
       }
 
-      const { data, error } = await supabase.rpc('lookup_enrollments_by_national_id', {
-        p_national_id: nationalId,
-      });
-      if (error) {
+      // Local roster first (no request) when every guard allows it; otherwise the existing server RPC.
+      const identified = await identifyScan(
+        scannerRoster,
+        supabase,
+        nationalId,
+        { church: churchFilter, service: serviceFilter, class: classFilter },
+        inScope,
+        (nid) =>
+          supabase.rpc('lookup_enrollments_by_national_id', {
+            p_national_id: nid,
+          }) as unknown as PromiseLike<{ data: EnrollmentWithPerson[] | null; error: unknown }>
+      );
+      if (identified.source === 'server' && identified.error) {
         setResult({ type: 'err', message: 'تعذر البحث عن الرقم القومي — تأكد من تشغيل تحديث قاعدة البيانات (0019)' });
         return;
       }
-      const all = ((data ?? []) as EnrollmentWithPerson[]).filter((e) => e.person);
+      const all = identified.rows;
       if (all.length === 0) {
         setResult({ type: 'err', message: 'رقم قومي غير معروف أو الشخص غير مسجل في نطاق صلاحيتك' });
         return;
@@ -659,7 +680,7 @@ export default function ScannerPage() {
       setResult(null);
       setPicker({ person: mine[0].person, options: mine });
     },
-    [supabase, inScope, scopeLabel, doJob, familyModule, familyMode, now]
+    [supabase, inScope, scopeLabel, doJob, familyModule, familyMode, now, churchFilter, serviceFilter, classFilter]
   );
 
   // A member / enrollment was chosen in the family picker → run the job on

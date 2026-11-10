@@ -64,6 +64,18 @@ export function setQueryIdentity(parts: NamespaceParts | null): boolean { return
 /** switching account / place, signing out: disable the cache right now, until the new identity is known */
 export function suspendQueryCache(): void { service.suspend(); }
 
+/** the current identity namespace (null = signed out / suspended); Phase 4 roster ties its data to it */
+export function queryCacheNamespace(): string | null { return service.cache.namespace; }
+
+/** realtime bus connected and past the settle window — only then can a bus message be relied on to keep data fresh */
+export function queryBusTrusted(): boolean { return service.busTrusted(); }
+
+/** fires when that trust is gained / lost (bus drop, reconnect, end of the post-identity-change settle window) */
+export function onQueryBusTrust(fn: (ok: boolean) => void): () => void { return service.onBusTrust(fn); }
+
+/** fires whenever the identity namespace changes (another account / place, sign-out) */
+export function onQueryIdentity(fn: (ns: string | null) => void): () => void { return service.onIdentityChange(fn); }
+
 /** true while an identity is set (approved + signed in) — i.e. while a cache fill can be reused */
 export function queryCacheEnabled(): boolean { return service.cache.namespace !== null; }
 
