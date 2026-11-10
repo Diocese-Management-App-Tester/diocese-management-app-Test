@@ -296,13 +296,39 @@ do $$ declare j jsonb; n int; begin
   if not exists (select 1 from public.child_portal_points('29901010000002') where source = 'achievement' and reason like 'إنجاز%المواظب%') then raise exception 'achievement reason label wrong'; end if;
 end $$;
 reset role;
+-- 20261020120000: `catalog` = every ACTIVE achievement of his scope, achieved or not
+select pg_temp.as_anon();
+do $$ declare j jsonb; c jsonb; begin
+  j := public.child_portal_achievements('29901010000002');   -- مريم (class A): church-wide x2 + class A x2 active; the inactive one is hidden
+  if jsonb_array_length(j->'catalog') <> 4 then raise exception 'catalog should list 4 active achievements, got %', j->'catalog'; end if;
+  if exists (select 1 from jsonb_array_elements(j->'catalog') x where x->>'name' = 'معطل') then raise exception 'inactive achievement leaked into the catalog'; end if;
+  -- achieved vs not: she holds 2 awards (ثلاث حضورات + حضور ممتاز / المواظب per the seed) → awards_count > 0 for exactly the earned ones
+  if (select count(*) from jsonb_array_elements(j->'catalog') x where (x->>'awards_count')::int > 0)
+     <> (select count(distinct x->>'achievement_id') from jsonb_array_elements(j->'earned') x) then
+    raise exception 'catalog awards_count disagrees with earned: % vs %', j->'catalog', j->'earned';
+  end if;
+  -- normal ones carry no attendance numbers; attendance ones do
+  for c in select x from jsonb_array_elements(j->'catalog') x loop
+    if c->>'kind' = 'normal' and (c->'target') <> 'null'::jsonb then raise exception 'normal achievement has a target: %', c; end if;
+    if c->>'kind' = 'attendance' and (c->'target') = 'null'::jsonb then raise exception 'attendance achievement has no target: %', c; end if;
+  end loop;
+  -- earned / progress are unchanged by the new key
+  if jsonb_array_length(j->'earned') <> 2 or jsonb_array_length(j->'progress') <> 1 then raise exception 'earned/progress changed: %', j; end if;
+end $$;
+select pg_temp.as_anon();
+do $$ declare j jsonb; begin
+  -- class B child: the class-A achievements never apply → only the 2 church-wide ones
+  j := public.child_portal_achievements('29901010000003');
+  if jsonb_array_length(j->'catalog') <> 2 then raise exception 'class B catalog should be 2 church-wide, got %', j->'catalog'; end if;
+end $$;
+reset role;
 delete from public.module_access where module_key = 'achievements';
 insert into public.module_access (module_key, church_id, service_id, class_id) values
   ('achievements', '10000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002');  -- class B only
 select pg_temp.as_anon();
 do $$ declare j jsonb; begin
   j := public.child_portal_achievements('29901010000002');
-  if jsonb_array_length(j->'earned') <> 0 or jsonb_array_length(j->'progress') <> 0 then raise exception 'module gate ignored in child portal: %', j; end if;
+  if jsonb_array_length(j->'earned') <> 0 or jsonb_array_length(j->'progress') <> 0 or jsonb_array_length(j->'catalog') <> 0 then raise exception 'module gate ignored in child portal: %', j; end if;
 end $$;
 reset role;
 -- the trigger does nothing where the module isn't granted
