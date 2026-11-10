@@ -80,7 +80,14 @@ export function createQueryService(env: ServiceEnv = {}) {
   // ---- bus liveness (with the settle window) ----
   let settling = false;
   let settleHandle: unknown = null;
-  const applyLive = () => cache.setBusLive(!!bus && bus.connected() && !settling);
+  // listeners of «can a bus message be relied on right now?» (Phase 4 roster). Fired only on a change.
+  const trustListeners = new Set<(ok: boolean) => void>();
+  let lastTrust = false;
+  const applyLive = () => {
+    const t = !!bus && bus.connected() && !settling;
+    cache.setBusLive(t);
+    if (t !== lastTrust) { lastTrust = t; Array.from(trustListeners).forEach((fn) => { try { fn(t); } catch { /* ignore */ } }); }
+  };
   if (bus) {
     bus.onConnection(() => applyLive());
     bus.onResume(() => cache.markUnverified());
@@ -95,6 +102,9 @@ export function createQueryService(env: ServiceEnv = {}) {
     securityOffs = SECURITY_TABLES.map((t) => bus.onTable(t, () => cache.invalidateAll()));
   };
 
+  const identityListeners = new Set<(ns: string | null) => void>();
+  const fireIdentity = (ns: string | null) => { Array.from(identityListeners).forEach((fn) => { try { fn(ns); } catch { /* ignore */ } }); };
+
   function setIdentity(parts: NamespaceParts | null): boolean {
     const ns = parts ? buildNamespace(parts) : null;
     const changed = cache.setIdentity(ns);
@@ -103,6 +113,7 @@ export function createQueryService(env: ServiceEnv = {}) {
       if (settleHandle !== null) { cancel(settleHandle); settleHandle = null; }
       settling = false;
       applyLive();
+      if (changed) fireIdentity(ns);
       return changed;
     }
     watchSecurity();
@@ -111,6 +122,7 @@ export function createQueryService(env: ServiceEnv = {}) {
       applyLive();
       if (settleHandle !== null) cancel(settleHandle);
       settleHandle = schedule(() => { settleHandle = null; settling = false; applyLive(); }, BUS_SETTLE_MS);
+      fireIdentity(ns);
     }
     return changed;
   }
@@ -193,6 +205,11 @@ export function createQueryService(env: ServiceEnv = {}) {
     setIdentity,
     suspend,
     belongsTo: (uid: string) => cache.belongsTo(uid),
+    /** the bus is connected AND past the post-identity-change settle window (same rule as the cache's `live` flag) */
+    busTrusted: (): boolean => !!bus && bus.connected() && !settling,
+    /** fires (after the cache has been emptied) whenever the identity namespace actually changes, including → null */
+    onIdentityChange: (fn: (ns: string | null) => void): (() => void) => { identityListeners.add(fn); return () => { identityListeners.delete(fn); }; },
+    onBusTrust: (fn: (ok: boolean) => void): (() => void) => { trustListeners.add(fn); return () => { trustListeners.delete(fn); }; },
     query: <T>(key: string, fetcher: () => Promise<T>, opts?: CachedQueryOptions<T>) => cache.query(key, fetcher, opts),
     peek: <T>(key: string, opts?: CachedQueryOptions<T>): { state: QueryState; data?: T } => cache.peek<T>(key, opts),
     invalidateKey: (key: string) => cache.invalidateKey(key),
