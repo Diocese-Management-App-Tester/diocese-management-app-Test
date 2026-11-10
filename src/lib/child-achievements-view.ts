@@ -2,7 +2,7 @@
 // Pure derivation over `child_portal_achievements().catalog` (migration 20261020120000).
 // No alias imports on purpose: unit-tested with node:test (src/lib/cache/__tests__).
 
-import type { ChildCatalogItem } from './achievements';
+import type { ChildCatalogItem, ChildEarnedAchievement } from './achievements';
 
 export type AchievementFilter = 'all' | 'achieved' | 'missing';
 
@@ -22,8 +22,33 @@ export const isAchieved = (c: Pick<ChildCatalogItem, 'awards_count'>): boolean =
  * then the manual ones; achieved ones keep the most recent first. The server order (sort_order, name)
  * is the tie-breaker, so the result is deterministic.
  */
-export function buildChildAchievementView(catalog: ChildCatalogItem[] | null | undefined): ChildAchievementView {
+export function buildChildAchievementView(
+  catalog: ChildCatalogItem[] | null | undefined,
+  earned?: ChildEarnedAchievement[] | null,
+): ChildAchievementView {
   const list = Array.isArray(catalog) ? catalog.filter((c) => c && c.achievement_id) : [];
+  // The catalog lists ACTIVE achievements only. Something he already earned that was deactivated (or no
+  // longer applies) must not vanish from «حققتها» → add it from `earned`, once per achievement × enrollment.
+  const have = new Set(list.map((c) => `${c.achievement_id}|${c.enrollment_id}`));
+  const extra = new Map<string, ChildCatalogItem>();
+  for (const e of Array.isArray(earned) ? earned : []) {
+    if (!e || !e.achievement_id) continue;
+    const key = `${e.achievement_id}|${e.enrollment_id}`;
+    if (have.has(key)) continue;
+    const prev = extra.get(key);
+    if (prev) {
+      prev.awards_count += 1;
+      if ((e.awarded_at ?? '') > (prev.last_awarded_at ?? '')) prev.last_awarded_at = e.awarded_at;
+    } else {
+      extra.set(key, {
+        achievement_id: e.achievement_id, enrollment_id: e.enrollment_id, class_name: e.class_name, name: e.name,
+        description: e.description, image_url: e.image_url, points: e.points, kind: e.kind, award_mode: 'once',
+        max_awards: null, min_interval_days: null, rule: null, target: null, current: null,
+        awards_count: 1, last_awarded_at: e.awarded_at, block: 'inactive', event_name: e.event_name,
+      });
+    }
+  }
+  list.push(...Array.from(extra.values()));
   const idx = new Map(list.map((c, i) => [c, i] as const));
   const ratio = (c: ChildCatalogItem) => (c.kind === 'attendance' && c.target ? Math.min(c.current ?? 0, c.target) / c.target : -1);
 

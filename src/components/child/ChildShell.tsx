@@ -20,6 +20,7 @@ import type { ChildExam, ChildOnlineClass } from '@/lib/child-portal';
 import { formatCairoDate, formatCairoTime } from '@/lib/time';
 import type { ChildChatOverview } from '@/lib/chat';
 import type { ChildAchievements } from '@/lib/achievements';
+import { buildChildAchievementView } from '@/lib/child-achievements-view';
 import { childOccasionHighlights, type ChildOccasion } from '@/lib/occasions';
 import type { InboxItem } from '@/lib/notifications';
 import { syncPushRegistration, kickDispatcher } from '@/lib/push';
@@ -92,13 +93,14 @@ export function useChildOnline(): { classes: ChildOnlineClass[] | null; liveCoun
  * shared ChildProvider. `null` while loading; empty lists when the module
  * isn't granted (menu entry + home card stay hidden).
  */
-export function useChildAchievements(): { data: ChildAchievements | null; earnedCount: number; inProgress: number; availableCount: number; hasAny: boolean } {
+export function useChildAchievements(): { data: ChildAchievements | null; earnedCount: number; inProgress: number; availableCount: number; achievedCount: number; hasAny: boolean } {
   const { achievements } = useChild();
   const earned = achievements?.earned.length ?? 0;
   const prog = achievements?.progress.length ?? 0;
   // 20261020120000: `catalog` = every active achievement of his scope (achieved or not)
-  const available = achievements?.catalog?.length ?? 0;
-  return { data: achievements, earnedCount: earned, inProgress: prog, availableCount: available, hasAny: earned + prog + available > 0 };
+  const view = achievements?.catalog ? buildChildAchievementView(achievements.catalog, achievements.earned) : null;
+  const available = view?.counts.available ?? 0;
+  return { data: achievements, earnedCount: earned, inProgress: prog, availableCount: available, achievedCount: view?.counts.achieved ?? 0, hasAny: earned + prog + available > 0 };
 }
 
 /**

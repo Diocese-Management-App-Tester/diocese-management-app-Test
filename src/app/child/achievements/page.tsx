@@ -13,7 +13,7 @@ import { Trophy, Star, Loader2, Flag, Zap, Hand, CheckCircle2, Lock, CalendarDay
 import ChildShell, { useChildAchievements } from '@/components/child/ChildShell';
 import { EarnedCard, ProgressBar, AchievementThumb, fmtDate } from '@/components/achievements/AchievementBits';
 import { useChild } from '@/lib/child-context';
-import { ruleLabel, awardModeLabel, type ChildCatalogItem } from '@/lib/achievements';
+import { ruleLabel, awardModeLabel, type ChildCatalogItem, type ChildEarnedAchievement } from '@/lib/achievements';
 import { buildChildAchievementView, pickAchievements, howToEarn, isAchieved, type AchievementFilter } from '@/lib/child-achievements-view';
 
 export default function ChildAchievementsPage() {
@@ -27,7 +27,7 @@ export default function ChildAchievementsPage() {
 function Content() {
   const { data } = useChildAchievements();
   if (!data) return <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-amber-500" /></div>;
-  return data.catalog ? <CatalogContent catalog={data.catalog} /> : <LegacyContent />;
+  return data.catalog ? <CatalogContent catalog={data.catalog} earned={data.earned} /> : <LegacyContent />;
 }
 
 // =====================================================================
@@ -39,10 +39,10 @@ const FILTERS: { key: AchievementFilter; label: string }[] = [
   { key: 'missing', label: 'لم أحققها' },
 ];
 
-function CatalogContent({ catalog }: { catalog: ChildCatalogItem[] }) {
+function CatalogContent({ catalog, earned }: { catalog: ChildCatalogItem[]; earned: ChildEarnedAchievement[] }) {
   const { profile } = useChild();
   const multi = (profile?.enrollments.length ?? 0) > 1;
-  const view = useMemo(() => buildChildAchievementView(catalog), [catalog]);
+  const view = useMemo(() => buildChildAchievementView(catalog, earned), [catalog, earned]);
   const [filter, setFilter] = useState<AchievementFilter>('all');
   const shown = pickAchievements(view, filter);
   const { available, achieved, missing } = view.counts;

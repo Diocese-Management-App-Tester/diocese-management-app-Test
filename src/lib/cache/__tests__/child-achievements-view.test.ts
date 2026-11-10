@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildChildAchievementView, pickAchievements, howToEarn, isAchieved } from '../../child-achievements-view.ts';
-import type { ChildCatalogItem } from '../../achievements.ts';
+import type { ChildCatalogItem, ChildEarnedAchievement } from '../../achievements.ts';
 
 type Item = ChildCatalogItem;
 const item = (id: string, o: Partial<Item> = {}): Item => ({
@@ -70,6 +70,21 @@ test('howToEarn explains the condition', () => {
   assert.equal(howToEarn({ kind: 'attendance', rule: 'count', target: 5, event_name: null }), 'احضر 5 مرات');
   assert.equal(howToEarn({ kind: 'attendance', rule: 'streak', target: 4, event_name: 'القداس' }), 'احضر 4 مرات متتالية في «القداس»');
   assert.equal(howToEarn({ kind: 'attendance', rule: 'count', target: 2, event_name: null }), 'احضر 2 مرتين');
+});
+
+test('something he earned that is no longer in the active catalog still shows as achieved (once per achievement × enrollment)', () => {
+  const earned = (id: string, at: string, ach = 'gone'): ChildEarnedAchievement => ({
+    id, achievement_id: ach, enrollment_id: 'e1', name: 'قديم', description: null, image_url: null, kind: 'normal', points: 5,
+    awarded_at: at, source: 'manual', event_name: null, class_name: 'فصل أ', service_name: 's', church_name: 'c',
+  });
+  const v = buildChildAchievementView([item('a'), item('b', { awards_count: 1, last_awarded_at: '2026-01-01T00:00:00Z' })],
+    [earned('u1', '2026-01-01T00:00:00Z', 'b'), earned('u2', '2026-02-01T00:00:00Z'), earned('u3', '2026-03-01T00:00:00Z')]);
+  assert.deepEqual(v.counts, { available: 3, achieved: 2, missing: 1 });          // 'b' not duplicated, 'gone' added once
+  const gone = v.achieved.find((c) => c.achievement_id === 'gone')!;
+  assert.equal(gone.awards_count, 2);
+  assert.equal(gone.last_awarded_at, '2026-03-01T00:00:00Z');
+  assert.equal(gone.target, null);                                                // no progress bar for it
+  assert.deepEqual(v.achieved.map((c) => c.achievement_id), ['gone', 'b']);       // most recent first
 });
 
 // ---------- static guards ----------
